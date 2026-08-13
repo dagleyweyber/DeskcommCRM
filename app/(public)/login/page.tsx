@@ -34,6 +34,17 @@ export default async function LoginPage({
           cadastro.
         </div>
       )}
+      {error === "convite_invalido" && (
+        <div
+          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          Sua conta foi confirmada, mas o convite não vale mais — ele expirou ou
+          foi emitido para outro e-mail. Peça um novo a quem te convidou. Não
+          criamos uma empresa nova para você, porque não era isso que você
+          estava fazendo.
+        </div>
+      )}
       {error === "provisionamento" && (
         <div
           className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"

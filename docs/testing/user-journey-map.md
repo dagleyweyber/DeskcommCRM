@@ -42,6 +42,12 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J1.13 | Reabrir `/onboarding` depois de concluído | redirect pro app (wizard não reabre) |
 | J1.14 | Stepper com Nuvemshop desabilitado | numeração/etapas não quebram visualmente |
 | J1.15 | Setup IA: erro de banco ao listar os números (a publicação não pode ser decidida) | UI **não mente**: agente criado como rascunho, causa técnica na tela e saída pro próximo passo; clicar de novo NÃO cria um 2º agente · **PASS** (`tests/unit/onboarding-agente-nao-publicado.test.ts`, `tests/unit/onboarding-setup-ai-aviso.test.tsx`) |
+| J1.22 | Convidado que **ainda não tem conta** | a tela de aceite oferece "Ainda não tenho conta", o signup recebe o convite, não pede nome de empresa e trava o e-mail; ao confirmar, a pessoa vai para o aceite em vez de ganhar uma organização própria — antes ela virava **admin de uma empresa fantasma**, com wizard alheio e MFA de administrador · **PASS** (`lib/auth/convite-no-signup.test.ts`, `tests/e2e/invite-lifecycle.spec.ts` casos 10–12) |
+| J1.23 | Convite expirado ou emitido para outro e-mail, no signup | falha FECHADA: não provisiona organização nenhuma e explica no login. Cair no provisionamento aqui devolveria o defeito de J1.22 para quem demorasse entre criar a conta e confirmar o e-mail · **PASS** (`lib/auth/convite-no-signup.test.ts`) |
+
+> **Cobertura em camadas (J1.22/J1.23):** a decisão de *não provisionar* é provada por unitário, porque é uma função pura e roda no gate obrigatório. O caso de tela cobre o caminho visível (CTA → signup com o token → campos certos). O que **não** está coberto ponta a ponta é a volta do link de confirmação de e-mail: exigiria caixa de e-mail no e2e, e a spec que faria isso é a de instalação fresca, que está fora do CI.
+
+> **Nota (fork dagleyweyber):** este item foi trazido via cherry-pick isolado (commit `40b7ddc4`) sobre a base `v1.3.0`, sem o restante do histórico de `main` (que inclui outras features não relacionadas, como a numeração J1.16–J1.21 removida deste trecho por não fazerem parte deste branch).
 
 ## J2 — Conectar WhatsApp e Central de Conexões `[P0]`
 

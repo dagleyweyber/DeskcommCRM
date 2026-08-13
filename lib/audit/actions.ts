@@ -210,6 +210,10 @@ export type AuditAction =
   | "auth.signup_failed"
   | "auth.signup_confirmed"
   | "auth.signup_provision_failed"
+  // Havia convite no signup e ele não valia (expirado, ou emitido para outro
+  // e-mail). Não é falha de sistema: é a recusa deliberada de abrir organização
+  // nova para quem estava tentando entrar numa existente.
+  | "auth.signup_provision_recusado"
   | "auth.email_link_rejected"
   | "auth.password_reset_requested"
   | "auth.password_reset_request_failed"

@@ -3,6 +3,7 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { ensureTenantForUser } from "@/lib/auth/provision";
+import { decidirConviteDoSignup } from "@/lib/auth/convite-no-signup";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 
@@ -65,6 +66,32 @@ export async function GET(request: NextRequest) {
 
   if (type === "recovery") {
     return redirectTo("/login/reset");
+  }
+
+  // Foi convidado? Então NÃO ganha organização própria. Sem esta bifurcação,
+  // quem clica no link do convite sem ter conta cria uma, cai aqui sem vínculo
+  // nenhum, e `ensureTenantForUser` faz o que faria com qualquer visitante:
+  // abre uma empresa e o torna admin dela. A pessoa fica com uma organização
+  // fantasma, um wizard que não é dela e o gate de MFA de administrador.
+  const decisao = decidirConviteDoSignup(data.user);
+
+  if (decisao.tipo === "recusar") {
+    // Falha FECHADA: havia convite e ele não vale (expirado ou de outra pessoa).
+    // Provisionar aqui seria devolver o defeito com um conserto por cima.
+    await audit({
+      action: "auth.signup_provision_recusado",
+      actorUserId: data.user.id,
+      metadata: { motivo: decisao.motivo },
+      requestId,
+    });
+    return redirectTo("/login?error=convite_invalido");
+  }
+
+  if (decisao.tipo === "convite") {
+    // A sessão já está firmada, então a tela de aceite reconhece o usuário e o
+    // clique cai no `acceptInviteAction` que já existe — auditado e idempotente.
+    // Nenhuma lógica de membership nova mora aqui.
+    return redirectTo(`/team/accept-invite/${decisao.token}`);
   }
 
   try {
