@@ -34,15 +34,27 @@ const pool = new pg.Pool({
 const ORG = "0be7a70a-2580-4000-8000-000000000001";
 const CONTATO = "0be7a70a-2580-4000-8000-000000000002";
 
+/**
+ * `runAfter` é EXPRESSÃO SQL, interpolada no texto — não parâmetro. Passá-la em
+ * `$n` faz o Postgres tentar converter a string "now() + interval '8 seconds'"
+ * para timestamptz e estourar. Seguro aqui porque os valores são literais deste
+ * arquivo, nunca entrada externa; org e contato seguem parametrizados.
+ */
 async function enfileirar(opts: {
   status?: string;
   runAfter?: string;
   contato?: string | null;
 }): Promise<void> {
+  const contato = opts.contato === undefined ? CONTATO : opts.contato;
+  // `job_queue_turn_needs_contact` amarra kind ⇔ contato: os turnos exigem lead,
+  // e `watchdog` é o kind sem contato. O relógio não olha kind nenhum — ele só
+  // pergunta por `status='pending'` —, então usar os dois aqui é o que permite
+  // montar os casos de lane livre e lane ocupada sem brigar com a constraint.
+  const kind = contato === null ? "watchdog" : "inbound_turn";
   await pool.query(
     `insert into job_queue (organization_id, contact_id, kind, payload, status, run_after)
-     values ($1, $2, 'inbound_turn', '{}'::jsonb, $3, $4)`,
-    [ORG, opts.contato === undefined ? CONTATO : opts.contato, opts.status ?? "pending", opts.runAfter ?? "now()"],
+     values ($1, $2, $3, '{}'::jsonb, $4, ${opts.runAfter ?? "now()"})`,
+    [ORG, contato, kind, opts.status ?? "pending"],
   );
 }
 
@@ -131,7 +143,7 @@ describe("faltaParaOProximoJob", () => {
     // numa tabela que nada no produto poda, e ninguém percebe.
     await pool.query(
       `insert into job_queue (organization_id, contact_id, kind, payload, status, run_after)
-       select $1, null, 'inbound_turn', '{}'::jsonb, 'done', now()
+       select $1, null, 'watchdog', '{}'::jsonb, 'done', now()
          from generate_series(1, 5000)`,
       [ORG],
     );
