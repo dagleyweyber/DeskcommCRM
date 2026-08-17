@@ -33,12 +33,30 @@ const envSchema = z.object({
   AGENT_DEFAULT_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
   // Teto de conexões por pool do pg. Sem valor = pg decide (default 10).
   DB_POOL_MAX: z.coerce.number().int().positive().optional(),
-  // Knobs da fila — defaults conservadores, documentados no .env.example.
+  // Knobs da fila. (Esta linha já afirmou "documentados no .env.example" quando
+  // NENHUMA chave QUEUE_ estava lá — o autor da issue #258 teve de ler o
+  // código-fonte para achar o intervalo que estava lhe custando a cota. O que
+  // cada knob FAZ é dito aqui, que é semântica e não envelhece; onde mexer e o
+  // que medir está em docs/runbooks/custo-e-cota-do-supabase.md.)
   QUEUE_MAX_CONCURRENCY: z.coerce.number().int().positive().default(8),
   QUEUE_VISIBILITY_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   // Porta do /healthz (bind 0.0.0.0 no container; 0 = porta efêmera em teste).
   HEALTH_PORT: z.coerce.number().int().min(0).max(65_535).default(8787),
-  QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(250),
+  // TETO de espera do laço da fila: com a fila vazia é quanto ele dorme entre uma
+  // consulta ao relógio e a próxima; com job agendado, ele acorda no vencimento e
+  // este valor só limita a soneca. Era 250 e a fila era consultada abrindo uma
+  // transação de claim inteira — 5 statements, ~17/s para sempre numa instalação
+  // que não atende ninguém (issue #258: 8,09 GB/mês de egress medidos contra uma
+  // cota de 5 GB do plano free do Supabase). O 2000 mantém o SIGNIFICADO da chave
+  // para quem já a configurou, cabe 4× dentro do INBOUND_DEBOUNCE_MS (8000) e fica
+  // abaixo do idleTimeoutMillis do pool (10s), acima do qual cada rodada reconecta.
+  QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
+  // Ritmo do "havia trabalho e eu não peguei" — cap QUEUE_MAX_CONCURRENCY cheio ou
+  // lane do contato ocupada. Aqui há job vencido esperando vaga, então recolher o
+  // ritmo custaria throughput no pico sem economizar nada no ocioso: é o único
+  // estado que segue nos 250 ms de sempre. Separar os dois é o que impede o valor
+  // que o operador escolheu para economizar de governar também o caminho ocupado.
+  QUEUE_CLAIM_RETRY_INTERVAL_MS: z.coerce.number().int().positive().default(250),
   QUEUE_REAPER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().positive().default(30_000),
   // Watchdog de sessão (Fase 4A-2) — o ÚNICO ponto do engine que fala com o

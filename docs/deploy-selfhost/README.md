@@ -11,7 +11,7 @@
 |---|---|
 | VPS Linux (2 vCPU / 4 GB+) com Docker | qualquer provedor |
 | Um domínio apontando para a VPS (registro A) | seu DNS |
-| Projeto **Supabase** (o plano free serve) | supabase.com — é o Postgres+Auth+Storage do CRM |
+| Projeto **Supabase** (o plano free serve; acompanhe a cota em Settings → Usage — ver [runbook de custo](../runbooks/custo-e-cota-do-supabase.md)) | supabase.com — é o Postgres+Auth+Storage do CRM |
 | Chave **Anthropic** (ou cadastre BYOK depois na tela) | console.anthropic.com |
 | Um número de WhatsApp para o agente | qualquer chip/celular |
 
