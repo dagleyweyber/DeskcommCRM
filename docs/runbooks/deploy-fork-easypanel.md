@@ -139,11 +139,30 @@ pg_restore --clean --no-owner -d "$SUPABASE_DB_URL" arquivo.dump
    cross-site do clique no e-mail — ver comentário em
    `app/auth/confirm/route.ts`). O conserto documentado
    (`hostgator-setup-kit/marca-emails.sh`) exige **SMTP customizado** — não
-   funciona no plano free do Supabase com o mailer padrão. Enquanto isso não for
-   resolvido, todo novo usuário via signup self-service vai precisar de
-   provisionamento manual (ver seção seguinte).
+   funciona no plano free do Supabase com o mailer padrão.
+   **✅ Resolvido em 18/08/2026** — SMTP próprio configurado via Resend
+   (domínio `mail.adsprocompany.com`, verificado com DKIM/SPF/MX). Ver seção
+   "SMTP próprio (Resend)" abaixo. Se algum dia o domínio/chave mudar, os
+   e-mails voltam a cair no template padrão (PKCE quebrado) até reconfigurar.
 
-## Provisionar usuário manualmente (enquanto o e-mail de confirmação não fecha)
+## SMTP próprio (Resend)
+
+- Domínio de envio: `mail.adsprocompany.com` (verificado no Resend com DKIM,
+  MX/SPF; DMARC opcional — ver `docs/runbooks/` se precisar reconfigurar).
+- Credenciais SMTP usadas no Supabase Auth (`PATCH /v1/projects/{ref}/config/auth`):
+  `smtp_host=smtp.resend.com`, `smtp_port=465`, `smtp_user=resend`,
+  `smtp_pass=<API key do Resend>`, `smtp_admin_email=noreply@mail.adsprocompany.com`,
+  `smtp_sender_name=DeskcommCRM`.
+- Depois de configurar o SMTP, rodar (ou re-rodar) o
+  `hostgator-setup-kit/marca-emails.sh` — só funciona com SMTP já configurado,
+  falha em plano free do Supabase sem isso.
+- Mesma chave do Resend também vai em `RESEND_API_KEY`/`RESEND_FROM_EMAIL` no
+  `.env` do app, pra e-mail transacional próprio (convites de time, etc.).
+- Rotacionar a chave do Resend se algum dia vazar: gerar nova em
+  resend.com/api-keys, atualizar `smtp_pass` via PATCH acima e `RESEND_API_KEY`
+  no `.env`, redeploy.
+
+## Provisionar usuário manualmente (só se o SMTP cair/for reconfigurado errado)
 
 ```sql
 -- 1. Confirmar e-mail (se ainda não estiver)
@@ -161,8 +180,6 @@ values ('<user_id>', '<organization_id>', 'admin', now());
 
 ## Pendências conhecidas
 
-- SMTP customizado (Resend) — resolve o problema de confirmação de e-mail de vez,
-  precisa de domínio próprio verificado.
 - Chave de IA (Anthropic/OpenRouter) — agente não responde sem isso
   (`/app/ai/credentials`).
 - Domínio próprio — hoje usa subdomínio temporário do EasyPanel
