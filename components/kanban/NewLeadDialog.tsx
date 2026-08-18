@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCreateLead } from "@/hooks/kanban/useCreateLead";
+import { useCreateContact } from "@/hooks/contacts/useCreateContact";
+import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import type { Stage } from "@/lib/kanban/types";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
 import { parseReaisToCents } from "@/lib/money";
@@ -34,6 +36,11 @@ interface FormShape {
   valueReais: string;
   tagsRaw: string;
   expected_close_date: string;
+  phone: string;
+  email: string;
+  owner_user_id: string;
+  produtoInteresse: string;
+  source: string;
 }
 
 interface Props {
@@ -45,13 +52,47 @@ interface Props {
   contactId?: string | null;
 }
 
+/** Origens ofertadas no seletor manual — "manual" cobre quem só quer registrar sem apontar canal. */
+const LEAD_SOURCES = [
+  { value: "manual", label: "Manual (sem canal específico)" },
+  { value: "meta_ads", label: "Meta Ads" },
+  { value: "instagram", label: "Instagram" },
+  { value: "google_ads", label: "Google Ads" },
+  { value: "indicacao", label: "Indicação" },
+  { value: "parceria", label: "Parceria" },
+] as const;
+
+const NO_OWNER = "__sem_atendente__";
+
 function defaultStageId(stages: Stage[]): string {
   const open = stages.find((s) => !s.is_won && !s.is_lost && !s.is_archived);
   return open?.id ?? stages[0]?.id ?? "";
 }
 
+/**
+ * Normaliza telefone BR pra E.164. Espelha `normalizePhoneBR` de
+ * lib/webhooks/inbound.ts (não importado aqui de propósito: aquele arquivo
+ * carrega dependências de servidor que não devem ir pro bundle do client).
+ */
+function normalizePhoneBR(raw: string): string | null {
+  if (!raw.trim()) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (raw.trim().startsWith("+")) {
+    return /^\d{8,15}$/.test(digits) ? `+${digits}` : null;
+  }
+  if (digits.length === 12 || digits.length === 13) {
+    return digits.startsWith("55") ? `+${digits}` : null;
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    return `+55${digits}`;
+  }
+  return null;
+}
+
 export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactId }: Props) {
   const create = useCreateLead(pipelineId);
+  const createContact = useCreateContact();
+  const { data: members } = useAssignableMembers(open);
   const initialStage = useMemo(() => defaultStageId(stages), [stages]);
 
   const form = useForm<FormShape>({
@@ -62,6 +103,11 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
       valueReais: "",
       tagsRaw: "",
       expected_close_date: "",
+      phone: "",
+      email: "",
+      owner_user_id: NO_OWNER,
+      produtoInteresse: "",
+      source: "manual",
     },
   });
 
@@ -88,18 +134,49 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
       }
     }
 
+    let phoneE164: string | null = null;
+    if (values.phone.trim()) {
+      phoneE164 = normalizePhoneBR(values.phone);
+      if (!phoneE164) {
+        form.setError("phone", { message: "Telefone inválido" });
+        return;
+      }
+    }
+
+    // Cria (ou reaproveita, via contactId de prop) o contato ANTES do lead —
+    // o lead referencia contact_id, não guarda telefone/e-mail direto.
+    let resolvedContactId = contactId ?? null;
+    if (!resolvedContactId && (phoneE164 || values.email.trim())) {
+      try {
+        const res = await createContact.mutateAsync({
+          name: values.title.trim() || undefined,
+          email: values.email.trim() || undefined,
+          phone_number: phoneE164 ?? undefined,
+          source: values.source,
+        });
+        resolvedContactId = res.data.id;
+      } catch {
+        // erro já mostrado pelo toast do hook; aborta sem criar lead órfão de intenção
+        return;
+      }
+    }
+
     const payload: Record<string, unknown> = {
       pipeline_id: pipelineId,
       stage_id: values.stage_id,
       title: values.title.trim(),
       currency: "BRL",
-      source: "manual",
+      source: values.source,
       tags,
     };
-    if (contactId) payload.contact_id = contactId;
+    if (resolvedContactId) payload.contact_id = resolvedContactId;
     if (values.description.trim()) payload.description = values.description.trim();
     if (valueCents !== null) payload.value_cents = valueCents;
     if (values.expected_close_date) payload.expected_close_date = values.expected_close_date;
+    if (values.owner_user_id !== NO_OWNER) payload.owner_user_id = values.owner_user_id;
+    if (values.produtoInteresse.trim()) {
+      payload.custom_fields = { produto_interesse: values.produtoInteresse.trim() };
+    }
 
     const parsed = createLeadSchema.safeParse(payload);
     if (!parsed.success) {
@@ -118,6 +195,11 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
         valueReais: "",
         tagsRaw: "",
         expected_close_date: "",
+        phone: "",
+        email: "",
+        owner_user_id: NO_OWNER,
+        produtoInteresse: "",
+        source: "manual",
       });
       onOpenChange(false);
     } catch {
@@ -126,6 +208,9 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   }
 
   const stageId = form.watch("stage_id");
+  const ownerUserId = form.watch("owner_user_id");
+  const source = form.watch("source");
+  const busy = create.isPending || createContact.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -146,6 +231,30 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
             />
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="phone">Telefone</Label>
+              <Input
+                id="phone"
+                inputMode="tel"
+                placeholder="(11) 98765-4321"
+                {...form.register("phone")}
+              />
+              {form.formState.errors.phone && (
+                <p className="text-xs text-error-fg">{form.formState.errors.phone.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">E-mail</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="cliente@exemplo.com"
+                {...form.register("email")}
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="description">Descrição</Label>
             <Textarea
@@ -156,25 +265,72 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
             />
           </div>
 
-          <div className="space-y-2">
-            <Label>Etapa</Label>
-            <Select
-              value={stageId}
-              onValueChange={(v) => form.setValue("stage_id", v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione a etapa" />
-              </SelectTrigger>
-              <SelectContent>
-                {stages
-                  .filter((s) => !s.is_archived)
-                  .map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Etapa</Label>
+              <Select
+                value={stageId}
+                onValueChange={(v) => form.setValue("stage_id", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a etapa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {stages
+                    .filter((s) => !s.is_archived)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Atendente</Label>
+              <Select
+                value={ownerUserId}
+                onValueChange={(v) => form.setValue("owner_user_id", v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Sem atendente" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_OWNER}>Sem atendente</SelectItem>
+                  {(members ?? []).map((m) => (
+                    <SelectItem key={m.user_id} value={m.user_id}>
+                      {m.full_name ?? "Sem nome"}
                     </SelectItem>
                   ))}
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="produtoInteresse">Produto de interesse</Label>
+              <Input
+                id="produtoInteresse"
+                placeholder="Ex: Combo Presente"
+                {...form.register("produtoInteresse")}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Origem do lead</Label>
+              <Select value={source} onValueChange={(v) => form.setValue("source", v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a origem" />
+                </SelectTrigger>
+                <SelectContent>
+                  {LEAD_SOURCES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -217,12 +373,12 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
               type="button"
               variant="ghost"
               onClick={() => onOpenChange(false)}
-              disabled={create.isPending}
+              disabled={busy}
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={create.isPending || !stageId}>
-              {create.isPending ? "Criando…" : "Criar lead"}
+            <Button type="submit" disabled={busy || !stageId}>
+              {busy ? "Criando…" : "Criar lead"}
             </Button>
           </DialogFooter>
         </form>
