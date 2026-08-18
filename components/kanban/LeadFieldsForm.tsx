@@ -15,12 +15,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useEditLead } from "@/hooks/kanban/useUpdateLead";
+import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useContact } from "@/hooks/contacts/useContact";
 import { useCreateContact } from "@/hooks/contacts/useCreateContact";
 import { useUpdateContact } from "@/hooks/contacts/useUpdateContact";
 import type { Lead } from "@/lib/types/leads";
 import { updateLeadSchema, type UpdateLeadInput } from "@/lib/schemas/leads";
-import { LEAD_SOURCES, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
+import { LEAD_SOURCES, NO_OWNER, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
 import { parseReaisToCents } from "@/lib/money";
 import { EcoDoValor } from "./EcoDoValor";
 
@@ -34,6 +35,7 @@ interface FormShape {
   produtoInteresse: string;
   phone: string;
   email: string;
+  owner_user_id: string;
 }
 
 interface Props {
@@ -69,12 +71,20 @@ function produtoInteresseDe(customFields: Record<string, unknown> | null | undef
  * mutação separada (`useUpdateContact`/`useCreateContact`), não pelo PATCH do
  * lead. Lead sem contato ainda (`contact_id null`) cria um na hora, espelhando
  * o mesmo caminho do `NewLeadDialog`.
+ *
+ * Atendente só entra no `patch` quando o valor do <Select> DIFERE do dono
+ * atual do lead — nunca "sempre que o form é enviado". `owner_user_id`
+ * explícito sempre resolve para dono HUMANO (lib/leads/owner-patch.ts), então
+ * mandar o mesmo valor à toa num lead hoje dono de um AGENTE de IA tomaria a
+ * posse dele sem ninguém ter pedido — o mesmo cuidado que o menu "Responsável"
+ * do card já tem, só que aqui por comparação em vez de ação direta no clique.
  */
 export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   const edit = useEditLead(pipelineId);
   const createContact = useCreateContact();
   const updateContact = useUpdateContact(lead.contact_id ?? "");
   const contact = useContact(lead.contact_id ?? "");
+  const { data: members } = useAssignableMembers(true);
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -87,6 +97,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
       phone: "",
       email: "",
+      owner_user_id: lead.owner_user_id ?? NO_OWNER,
     },
   });
 
@@ -101,6 +112,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
       phone: "",
       email: "",
+      owner_user_id: lead.owner_user_id ?? NO_OWNER,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
@@ -155,6 +167,13 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       custom_fields: { ...lead.custom_fields, produto_interesse: values.produtoInteresse.trim() },
     };
 
+    // Só entra no patch se a pessoa MEXEU no seletor — ver o porquê no
+    // comentário da função acima (não pisar em dono-agente por omissão).
+    const ownerAtual = lead.owner_user_id ?? NO_OWNER;
+    if (values.owner_user_id !== ownerAtual) {
+      patch.owner_user_id = values.owner_user_id === NO_OWNER ? null : values.owner_user_id;
+    }
+
     // Contato é recurso à parte (DIRC: referenciar). Lead com contato existente
     // tem o e-mail/telefone corrigidos nele; lead ainda sem contato ganha um
     // agora, do mesmo jeito que o NewLeadDialog cria na criação.
@@ -206,6 +225,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   }
 
   const source = form.watch("source");
+  const ownerUserId = form.watch("owner_user_id");
   const busy = edit.isPending || createContact.isPending || updateContact.isPending;
 
   return (
@@ -239,30 +259,47 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label htmlFor="produtoInteresse">Produto de interesse</Label>
-            <Input id="produtoInteresse" placeholder="Ex: Combo Presente" {...form.register("produtoInteresse")} />
-          </div>
-          <div className="space-y-2">
-            <Label>Origem do lead</Label>
-            <Select value={source} onValueChange={(v) => form.setValue("source", v)}>
+            <Label>Atendente</Label>
+            <Select value={ownerUserId} onValueChange={(v) => form.setValue("owner_user_id", v)}>
               <SelectTrigger>
-                <SelectValue placeholder="Selecione a origem" />
+                <SelectValue placeholder="Sem atendente" />
               </SelectTrigger>
               <SelectContent>
-                {LEAD_SOURCES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
+                <SelectItem value={NO_OWNER}>Sem atendente</SelectItem>
+                {(members ?? []).map((m) => (
+                  <SelectItem key={m.user_id} value={m.user_id}>
+                    {m.full_name ?? "Sem nome"}
                   </SelectItem>
                 ))}
-                {/* Lead antigo pode ter origem fora da lista atual (fonte de webhook,
-                    valor legado). Mostrar como opção extra em vez de trocar em
-                    silêncio no primeiro salvamento. */}
-                {!LEAD_SOURCES.some((s) => s.value === source) && source && (
-                  <SelectItem value={source}>{source}</SelectItem>
-                )}
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="produtoInteresse">Produto de interesse</Label>
+            <Input id="produtoInteresse" placeholder="Ex: Combo Presente" {...form.register("produtoInteresse")} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Origem do lead</Label>
+          <Select value={source} onValueChange={(v) => form.setValue("source", v)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione a origem" />
+            </SelectTrigger>
+            <SelectContent>
+              {LEAD_SOURCES.map((s) => (
+                <SelectItem key={s.value} value={s.value}>
+                  {s.label}
+                </SelectItem>
+              ))}
+              {/* Lead antigo pode ter origem fora da lista atual (fonte de webhook,
+                  valor legado). Mostrar como opção extra em vez de trocar em
+                  silêncio no primeiro salvamento. */}
+              {!LEAD_SOURCES.some((s) => s.value === source) && source && (
+                <SelectItem value={source}>{source}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

@@ -26,7 +26,7 @@ import { useCreateContact } from "@/hooks/contacts/useCreateContact";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import type { Stage } from "@/lib/kanban/types";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
-import { LEAD_SOURCES, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
+import { LEAD_SOURCES, NO_OWNER, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
 import { parseReaisToCents } from "@/lib/money";
 import { EcoDoValor } from "./EcoDoValor";
 
@@ -52,8 +52,6 @@ interface Props {
   /** Vincula o lead criado a este contato de origem (ex.: painel do Inbox). */
   contactId?: string | null;
 }
-
-const NO_OWNER = "__sem_atendente__";
 
 function defaultStageId(stages: Stage[]): string {
   const open = stages.find((s) => !s.is_won && !s.is_lost && !s.is_archived);

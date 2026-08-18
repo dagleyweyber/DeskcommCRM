@@ -4,6 +4,9 @@
  * (sem import de lib/webhooks/inbound.ts, que carrega dependências de servidor).
  */
 
+/** Sentinela do <Select>: shadcn não aceita value="" num SelectItem. */
+export const NO_OWNER = "__sem_atendente__";
+
 /** Origens ofertadas nos seletores manuais — "manual" cobre quem só quer registrar sem apontar canal. */
 export const LEAD_SOURCES = [
   { value: "manual", label: "Manual (sem canal específico)" },
