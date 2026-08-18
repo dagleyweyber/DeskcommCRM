@@ -77,20 +77,48 @@ quebrar coisa.
 
 ## Fluxo pra mudar CÓDIGO de verdade (não só config)
 
-Ponto crítico: hoje o compose puxa **imagens prontas do autor original**
+Ponto crítico: o compose por padrão puxa **imagens prontas do autor original**
 (`ghcr.io/melgarafael/...`). Mudar código no nosso fork **não afeta essas imagens**
-— elas continuam sendo as dele. Pra rodar código nosso, duas opções:
+— elas continuam sendo as dele. Pra rodar código nosso, usamos **build na própria
+VPS** (opção adotada — mais simples pra uma instância só, sem precisar de registry
+próprio; a alternativa de publicar em `ghcr.io/dagleyweyber/...` via Actions fica
+pra se/quando o ritmo de mudança justificar o esforço de CI).
 
-- **Build na própria VPS** (mais simples pra uma instância só): apontar `build:`
-  do compose pro checkout do nosso fork (`/root/DeskcommCRM` ou equivalente) e usar
-  `docker-compose.build.yml`. Mais lento a cada deploy, mas sem precisar de
-  registry próprio.
-- **Publicar imagem própria**: configurar Actions no nosso fork pra buildar e
-  publicar em `ghcr.io/dagleyweyber/...`, e apontar `APP_IMAGE`/etc. pra lá. Vale a
-  pena se o ritmo de mudança justificar o esforço de CI.
+**Passo a passo (validado em 18/08/2026 — correção `fix/convite-org-fantasma`):**
 
-Nenhuma das duas está configurada ainda — decidir quando a primeira mudança de
-código de verdade for necessária.
+1. Criar branch a partir da **tag da versão em produção** (não de `main` direto —
+   `main` acumula outras mudanças não relacionadas e não testadas em prod ainda):
+   ```bash
+   git checkout -b fix/nome-da-correcao v1.3.0   # ou a tag que estiver rodando
+   git cherry-pick <hash-do-commit-em-main>       # só o que interessa, não tudo
+   git push origin fix/nome-da-correcao
+   ```
+2. Na VPS, buscar a branch do nosso fork (não do upstream) e trazer as dependências:
+   ```bash
+   cd /root/DeskcommCRM
+   git remote add fork https://github.com/dagleyweyber/DeskcommCRM.git   # 1x só
+   git fetch fork fix/nome-da-correcao
+   git checkout -B fix/nome-da-correcao fork/fix/nome-da-correcao
+   docker run --rm -v "$(pwd)":/app -w /app node:22 sh -c \
+     "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile"
+   ```
+3. Testar (ver seção seguinte) — **não pular esta etapa**.
+4. Buildar as 3 imagens localmente, com tag própria (nunca reusar `:stable`/`:1.x.x`,
+   que são do autor original — usar algo como `:fix-nome-da-correcao`):
+   ```bash
+   export APP_IMAGE="deskcomm-app:fix-nome-da-correcao"
+   export WORKER_IMAGE="deskcomm-worker:fix-nome-da-correcao"
+   export SCHEDULER_IMAGE="deskcomm-scheduler:fix-nome-da-correcao"
+   export APP_VERSION="1.3.0-fix-nome-da-correcao"
+   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml build
+   ```
+   Leva 3-4 min (cache quente) a ~15-25 min (do zero). Precisa de ~4GB RAM livre —
+   conferir com `free -h` antes num VPS compartilhado com outros serviços.
+5. Apontar `APP_IMAGE`/`WORKER_IMAGE`/`SCHEDULER_IMAGE` no `.env` pras tags novas,
+   **e trocar `*_PULL_POLICY` de `missing`/`always` pra `never`** — sem isso, o
+   próximo `up -d` vai ao registry procurar essa tag (que só existe localmente) e
+   quebra o deploy.
+6. Redeploy normal (seção "Fluxo padrão" acima) e validar `docker ps` + `curl -I`.
 
 ## Antes de qualquer deploy de código
 
@@ -178,10 +206,17 @@ insert into user_organizations (user_id, organization_id, role, accepted_at)
 values ('<user_id>', '<organization_id>', 'admin', now());
 ```
 
+## Correções já aplicadas (fora do que vem na v1.3.0)
+
+| Data | O quê | Como |
+|---|---|---|
+| 18/08/2026 | Convidado sem conta virava admin de organização fantasma em vez de entrar na organização certa | Cherry-pick do commit `40b7ddc4` (presente em `main`, ausente em todas as tags publicadas até `v1.3.0`) sobre `v1.3.0`, build própria (`deskcomm-app:fix-convite` etc.) — ver "Fluxo pra mudar CÓDIGO de verdade" acima |
+
 ## Pendências conhecidas
 
 - Chave de IA (Anthropic/OpenRouter) — agente não responde sem isso
   (`/app/ai/credentials`).
 - Domínio próprio — hoje usa subdomínio temporário do EasyPanel
   (`*.vjlauk.easypanel.host`).
-- CI/registry próprio, se/quando começarmos a customizar código de verdade.
+- CI/registry próprio — build local na VPS funciona bem pro ritmo atual; revisar
+  se o volume de mudanças crescer muito (build de ~4 min por deploy de código).
