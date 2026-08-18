@@ -26,6 +26,7 @@ import { useCreateContact } from "@/hooks/contacts/useCreateContact";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import type { Stage } from "@/lib/kanban/types";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
+import { LEAD_SOURCES, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
 import { parseReaisToCents } from "@/lib/money";
 import { EcoDoValor } from "./EcoDoValor";
 
@@ -52,41 +53,11 @@ interface Props {
   contactId?: string | null;
 }
 
-/** Origens ofertadas no seletor manual — "manual" cobre quem só quer registrar sem apontar canal. */
-const LEAD_SOURCES = [
-  { value: "manual", label: "Manual (sem canal específico)" },
-  { value: "meta_ads", label: "Meta Ads" },
-  { value: "instagram", label: "Instagram" },
-  { value: "google_ads", label: "Google Ads" },
-  { value: "indicacao", label: "Indicação" },
-  { value: "parceria", label: "Parceria" },
-] as const;
-
 const NO_OWNER = "__sem_atendente__";
 
 function defaultStageId(stages: Stage[]): string {
   const open = stages.find((s) => !s.is_won && !s.is_lost && !s.is_archived);
   return open?.id ?? stages[0]?.id ?? "";
-}
-
-/**
- * Normaliza telefone BR pra E.164. Espelha `normalizePhoneBR` de
- * lib/webhooks/inbound.ts (não importado aqui de propósito: aquele arquivo
- * carrega dependências de servidor que não devem ir pro bundle do client).
- */
-function normalizePhoneBR(raw: string): string | null {
-  if (!raw.trim()) return null;
-  const digits = raw.replace(/\D/g, "");
-  if (raw.trim().startsWith("+")) {
-    return /^\d{8,15}$/.test(digits) ? `+${digits}` : null;
-  }
-  if (digits.length === 12 || digits.length === 13) {
-    return digits.startsWith("55") ? `+${digits}` : null;
-  }
-  if (digits.length === 10 || digits.length === 11) {
-    return `+55${digits}`;
-  }
-  return null;
 }
 
 export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactId }: Props) {

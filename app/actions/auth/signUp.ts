@@ -94,8 +94,11 @@ export async function signUp(
       // a tela: o campo de e-mail do formulário é adulterável no cliente, e a
       // decisão que importa acontece com o e-mail JÁ confirmado pelo provedor.
       data: convite
-        ? { invite_token: convite }
-        : { org_name: (parsed.data as SignupInput).org_name },
+        ? { invite_token: convite, full_name: parsed.data.full_name }
+        : {
+            org_name: (parsed.data as SignupInput).org_name,
+            full_name: parsed.data.full_name,
+          },
     },
   });
 

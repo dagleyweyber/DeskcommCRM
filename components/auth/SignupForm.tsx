@@ -44,6 +44,7 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
       ? zodResolver(signupComConviteSchema)
       : zodResolver(signupSchema)) as Resolver<SignupInput>,
     defaultValues: {
+      full_name: "",
       org_name: "",
       email: convite?.email ?? "",
       password: "",
@@ -57,7 +58,12 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
       // No modo convite o e-mail do formulário é readonly, e readonly no
       // cliente não vale nada: quem confere de novo é o servidor.
       const entrada: SignupInput | SignupComConviteInput = convite
-        ? { email: convite.email, password: values.password, password_confirm: values.password_confirm }
+        ? {
+            full_name: values.full_name,
+            email: convite.email,
+            password: values.password,
+            password_confirm: values.password_confirm,
+          }
         : values;
       const res = await signUp(entrada, convite?.token);
       if (res.ok) {
@@ -91,6 +97,20 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+      <div className="space-y-1.5">
+        <Label htmlFor="full_name">Nome completo</Label>
+        <Input
+          id="full_name"
+          type="text"
+          autoComplete="name"
+          autoFocus
+          aria-invalid={errors.full_name ? true : undefined}
+          {...register("full_name")}
+        />
+        {errors.full_name && (
+          <p className="text-xs text-destructive">{errors.full_name.message}</p>
+        )}
+      </div>
       {!convite && (
       <div className="space-y-1.5">
         <Label htmlFor="org_name">Nome da empresa</Label>
@@ -98,7 +118,6 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
           id="org_name"
           type="text"
           autoComplete="organization"
-          autoFocus
           aria-invalid={errors.org_name ? true : undefined}
           {...register("org_name")}
         />

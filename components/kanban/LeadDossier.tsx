@@ -104,7 +104,14 @@ export function LeadDossier({
 
           <button
             type="button"
-            onClick={() => campos.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            onClick={() => {
+              campos.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+              // Foco sempre visível, mesmo quando o painel já cabe na tela e o
+              // scroll não se move nada — sem isto o clique parecia inerte:
+              // "nada aconteceu" e "a seção já estava visível" têm a mesma
+              // aparência quando o único feedback é o próprio scroll.
+              campos.current?.focus({ preventScroll: true });
+            }}
             className="ml-auto text-text-muted underline-offset-2 hover:text-text hover:underline"
           >
             Editar campos
@@ -137,7 +144,11 @@ export function LeadDossier({
         </section>
 
         {/* ③ campos, por último */}
-        <div ref={campos} className="border-t border-border pt-3">
+        <div
+          ref={campos}
+          tabIndex={-1}
+          className="rounded-md border-t border-border pt-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-text-muted">
             Dados do negócio
           </h3>

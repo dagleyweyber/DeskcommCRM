@@ -108,6 +108,10 @@ export const updateLeadSchema = z.object({
     .nullable()
     .optional(),
   tags: z.array(z.string()).optional(),
+  /** Origem do lead (spec canal manual/meta_ads/etc.) — mesma coluna do create. */
+  source: z.string().min(1).optional(),
+  /** Ver comentário equivalente em createLeadSchema. */
+  custom_fields: z.record(z.string(), z.unknown()).optional(),
 });
 export type UpdateLeadInput = z.infer<typeof updateLeadSchema>;
 

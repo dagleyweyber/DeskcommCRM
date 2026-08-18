@@ -7,9 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useEditLead } from "@/hooks/kanban/useUpdateLead";
+import { useContact } from "@/hooks/contacts/useContact";
+import { useCreateContact } from "@/hooks/contacts/useCreateContact";
+import { useUpdateContact } from "@/hooks/contacts/useUpdateContact";
 import type { Lead } from "@/lib/types/leads";
 import { updateLeadSchema, type UpdateLeadInput } from "@/lib/schemas/leads";
+import { LEAD_SOURCES, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
 import { parseReaisToCents } from "@/lib/money";
 import { EcoDoValor } from "./EcoDoValor";
 
@@ -19,6 +30,10 @@ interface FormShape {
   valueReais: string;
   tagsRaw: string;
   expected_close_date: string;
+  source: string;
+  produtoInteresse: string;
+  phone: string;
+  email: string;
 }
 
 interface Props {
@@ -35,6 +50,11 @@ function centsToReais(cents: number | null | undefined): string {
   return (cents / 100).toFixed(2).replace(".", ",");
 }
 
+function produtoInteresseDe(customFields: Record<string, unknown> | null | undefined): string {
+  const v = customFields?.produto_interesse;
+  return typeof v === "string" ? v : "";
+}
+
 /**
  * Os campos do lead — extraídos do `EditLeadDialog` para o dossiê usar os
  * MESMOS, em vez de uma cópia que diverge no mês.
@@ -43,9 +63,18 @@ function centsToReais(cents: number | null | undefined): string {
  * atividade que acabou de gerar entrar na timeline. Fechar esconderia o
  * registro justamente de quem o produziu — a funcionalidade que prova "sua ação
  * fica registrada" provaria isso para todo mundo menos para o autor.
+ *
+ * E-mail/telefone NÃO são coluna do lead — moram no `contacts` vinculado por
+ * `contact_id` (DIRC: referenciar, não duplicar). Por isso viajam por uma
+ * mutação separada (`useUpdateContact`/`useCreateContact`), não pelo PATCH do
+ * lead. Lead sem contato ainda (`contact_id null`) cria um na hora, espelhando
+ * o mesmo caminho do `NewLeadDialog`.
  */
 export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   const edit = useEditLead(pipelineId);
+  const createContact = useCreateContact();
+  const updateContact = useUpdateContact(lead.contact_id ?? "");
+  const contact = useContact(lead.contact_id ?? "");
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -54,6 +83,10 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       valueReais: centsToReais(lead.value_cents),
       tagsRaw: (lead.tags ?? []).join(", "),
       expected_close_date: lead.expected_close_date ?? "",
+      source: lead.source,
+      produtoInteresse: produtoInteresseDe(lead.custom_fields),
+      phone: "",
+      email: "",
     },
   });
 
@@ -64,9 +97,25 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       valueReais: centsToReais(lead.value_cents),
       tagsRaw: (lead.tags ?? []).join(", "),
       expected_close_date: lead.expected_close_date ?? "",
+      source: lead.source,
+      produtoInteresse: produtoInteresseDe(lead.custom_fields),
+      phone: "",
+      email: "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
+
+  // Telefone/e-mail chegam depois, num fetch à parte (o contato é outra
+  // tabela) — por isso um efeito próprio, que só preenche os DOIS campos dele
+  // e não mexe no resto do form enquanto a pessoa já pode estar editando.
+  useEffect(() => {
+    const c = contact.data?.data;
+    if (c) {
+      form.setValue("email", c.email ?? "");
+      form.setValue("phone", c.phone_number ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lead.id, contact.data]);
 
   async function onSubmit(values: FormShape) {
     const tags = values.tagsRaw
@@ -84,13 +133,58 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       }
     }
 
+    let phoneE164: string | null = null;
+    if (values.phone.trim()) {
+      phoneE164 = normalizePhoneBR(values.phone);
+      if (!phoneE164) {
+        form.setError("phone", { message: "Telefone inválido" });
+        return;
+      }
+    }
+
     const patch: Record<string, unknown> = {
       title: values.title.trim(),
       description: values.description.trim() ? values.description.trim() : null,
       value_cents: valueCents,
       tags,
       expected_close_date: values.expected_close_date || null,
+      source: values.source,
+      // Mescla com o que já existia: `custom_fields` é substituído inteiro no
+      // handler, não mesclado no servidor — mandar só produto_interesse
+      // apagaria silenciosamente qualquer outro campo dinâmico do pipeline.
+      custom_fields: { ...lead.custom_fields, produto_interesse: values.produtoInteresse.trim() },
     };
+
+    // Contato é recurso à parte (DIRC: referenciar). Lead com contato existente
+    // tem o e-mail/telefone corrigidos nele; lead ainda sem contato ganha um
+    // agora, do mesmo jeito que o NewLeadDialog cria na criação.
+    if (lead.contact_id) {
+      const current = contact.data?.data;
+      const emailChanged = values.email.trim() !== (current?.email ?? "");
+      const phoneChanged = phoneE164 !== (current?.phone_number ?? null);
+      if (emailChanged || phoneChanged) {
+        try {
+          await updateContact.mutateAsync({
+            email: values.email.trim() || undefined,
+            phone_number: phoneE164 ?? undefined,
+          });
+        } catch {
+          // erro já mostrado pelo toast do hook; não bloqueia o resto do salvamento
+        }
+      }
+    } else if (values.email.trim() || phoneE164) {
+      try {
+        const res = await createContact.mutateAsync({
+          name: values.title.trim() || undefined,
+          email: values.email.trim() || undefined,
+          phone_number: phoneE164 ?? undefined,
+          source: values.source,
+        });
+        patch.contact_id = res.data.id;
+      } catch {
+        // erro já mostrado pelo toast do hook; segue sem vincular contato
+      }
+    }
 
     const parsed = updateLeadSchema.safeParse(patch);
     if (!parsed.success) {
@@ -111,6 +205,8 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
     }
   }
 
+  const source = form.watch("source");
+  const busy = edit.isPending || createContact.isPending || updateContact.isPending;
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -122,9 +218,51 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           />
         </div>
 
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="phone">Telefone</Label>
+            <Input id="phone" inputMode="tel" placeholder="(11) 98765-4321" {...form.register("phone")} />
+            {form.formState.errors.phone && (
+              <p className="text-xs text-error-fg">{form.formState.errors.phone.message}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email">E-mail</Label>
+            <Input id="email" type="email" placeholder="cliente@exemplo.com" {...form.register("email")} />
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="description">Descrição</Label>
           <Textarea id="description" rows={3} {...form.register("description")} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="produtoInteresse">Produto de interesse</Label>
+            <Input id="produtoInteresse" placeholder="Ex: Combo Presente" {...form.register("produtoInteresse")} />
+          </div>
+          <div className="space-y-2">
+            <Label>Origem do lead</Label>
+            <Select value={source} onValueChange={(v) => form.setValue("source", v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione a origem" />
+              </SelectTrigger>
+              <SelectContent>
+                {LEAD_SOURCES.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+                {/* Lead antigo pode ter origem fora da lista atual (fonte de webhook,
+                    valor legado). Mostrar como opção extra em vez de trocar em
+                    silêncio no primeiro salvamento. */}
+                {!LEAD_SOURCES.some((s) => s.value === source) && source && (
+                  <SelectItem value={source}>{source}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -160,12 +298,12 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
 
       <div className="flex justify-end gap-2">
         {onCancel && (
-          <Button type="button" variant="ghost" onClick={onCancel} disabled={edit.isPending}>
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
             Cancelar
           </Button>
         )}
-        <Button type="submit" disabled={edit.isPending}>
-          {edit.isPending ? "Salvando…" : "Salvar"}
+        <Button type="submit" disabled={busy}>
+          {busy ? "Salvando…" : "Salvar"}
         </Button>
       </div>
     </form>

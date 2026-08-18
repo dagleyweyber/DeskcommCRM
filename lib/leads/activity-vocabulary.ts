@@ -205,6 +205,7 @@ const NOME_DO_CAMPO: Record<string, string> = {
   owner_agent_id: "o agente responsável",
   expected_close_date: "a data prevista de fechamento",
   tags: "as tags",
+  source: "a origem",
   custom_fields: "os campos personalizados",
   lost_reason: "o motivo da perda",
 };
