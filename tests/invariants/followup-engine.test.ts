@@ -296,6 +296,28 @@ const ACTION_END_GRAPH: FlowGraph = {
   edges: [{ id: "a1-e1", source: "a1", target: "e1", priority: 0, condition: { type: "always" } }],
 };
 
+// action mode 'media' — envio determinístico (áudio/imagem/vídeo pronto),
+// sem LLM. Mesmo grafo do ACTION_GRAPH, só troca o config do nó a1.
+const MEDIA_ACTION_GRAPH: FlowGraph = {
+  nodes: [
+    { id: "t1", type: "trigger", label: "Start", position: { x: 0, y: 0 }, config: {} },
+    {
+      id: "a1",
+      type: "action",
+      label: "Send audio",
+      position: { x: 0, y: 0 },
+      config: {
+        mode: "media",
+        media_type: "audio",
+        storage_path: "org-x/followup-media/aviso.ogg",
+        media_mime: "audio/ogg",
+        caption: "Oi, segue o áudio combinado",
+      },
+    },
+  ],
+  edges: [{ id: "t1-a1", source: "t1", target: "a1", priority: 0, condition: { type: "always" } }],
+};
+
 beforeAll(async () => {
   // flowGraphSchema exige >=2 nós — os grafos fixos acima já satisfazem isso;
   // valida aqui uma vez pra falhar cedo (erro de fixture, não de asserção).
@@ -303,6 +325,7 @@ beforeAll(async () => {
   flowGraphSchema.parse(WAIT_GRAPH);
   flowGraphSchema.parse(ACTION_GRAPH);
   flowGraphSchema.parse(ACTION_END_GRAPH);
+  flowGraphSchema.parse(MEDIA_ACTION_GRAPH);
 });
 
 // ---- 1. tick avança 1 nó por tick ---------------------------------------
@@ -673,5 +696,35 @@ describe("runFollowupTick — action happy path (turno conclui rápido)", () => 
     expect(row.current_node_id).toBe("e1"); // avançou além do action
     expect(row.status).toBe("active");
     expect(jobs).toHaveLength(1); // sem reenvio
+  });
+});
+
+// ---- 10. action mode 'media': purpose='send_media' + os campos do arquivo no job ----
+
+describe("runFollowupTick — action mode 'media'", () => {
+  it("enfileira purpose='send_media' com media_type/storage_path/media_mime/caption do nó", async () => {
+    const org = "aaaaaaa9-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const { pointerId, versionId } = await seedFlow(org, MEDIA_ACTION_GRAPH);
+    // Começa DIRETO no nó de ação — mesmo atalho do teste "action happy path"
+    // acima, que já prova a passagem trigger→action à parte.
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toMatchObject({
+      followup_enrollment_id: enrollmentId,
+      node_id: "a1",
+      purpose: "send_media",
+      media_type: "audio",
+      storage_path: "org-x/followup-media/aviso.ogg",
+      media_mime: "audio/ogg",
+      caption: "Oi, segue o áudio combinado",
+    });
+    // send_message só existe para ai_message/template — media não deve carregar prompt_hint algum.
+    expect(jobs[0]!.payload.prompt_hint).toBeUndefined();
   });
 });

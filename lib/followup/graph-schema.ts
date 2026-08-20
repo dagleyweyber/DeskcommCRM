@@ -139,11 +139,16 @@ export const aiClassifyConfigSchema = z
     }
   );
 
+/** Os três tipos de mídia que um passo de Ação pode mandar prontos — mesmo vocabulário de `messageTypeSchema` (lib/schemas/messaging.ts), sem remapear. */
+export const ACTION_MEDIA_TYPES = ['audio', 'image', 'video'] as const;
+export type ActionMediaType = (typeof ACTION_MEDIA_TYPES)[number];
+
 /**
  * Action node configuration schema.
- * Supports two modes:
+ * Supports three modes:
  * - ai_message: generate a message using AI with a prompt hint
  * - template: send a predefined template message
+ * - media: send a fixed pre-uploaded audio/image/video, no LLM involved
  */
 export const actionConfigSchema = z.discriminatedUnion('mode', [
   z.strictObject({
@@ -154,6 +159,15 @@ export const actionConfigSchema = z.discriminatedUnion('mode', [
   z.strictObject({
     mode: z.literal('template'),
     template_id: z.string().uuid(),
+  }),
+  z.strictObject({
+    mode: z.literal('media'),
+    media_type: z.enum(ACTION_MEDIA_TYPES),
+    /** Caminho no bucket `whatsapp-media` — nunca a URL: assinada e expira. */
+    storage_path: z.string().min(1).max(500),
+    media_mime: z.string().min(1),
+    /** Legenda opcional — vai como `body` no envio. */
+    caption: z.string().max(1024).optional(),
   }),
 ]);
 

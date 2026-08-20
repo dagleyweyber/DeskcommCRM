@@ -73,7 +73,9 @@ export type NodeResult =
   | { kind: "wait"; next_eval_at: Date } // stays on the node
   | {
       kind: "enqueue_turn";
-      purpose: "send_message" | "classify" | "plan_timing";
+      // 'send_media' — mode 'media' do nó Ação: envio determinístico, sem LLM
+      // (o arquivo já está pronto, não há o que o modelo decida).
+      purpose: "send_message" | "send_media" | "classify" | "plan_timing";
       wake_status: "active" | "waiting_reply";
     }
   // action recheck: the send turn is already in flight; stay put WITHOUT re-enqueuing (anti-dup-send).
@@ -380,7 +382,11 @@ export function processNode(input: {
       // `${node}:${steps}` idempotency_key was a FRESH key each tick → a 2nd job → a 2nd
       // real send that the send sink's (job_id,seq) dedup can't catch).
       if (!actionEnqueued) {
-        return { kind: "enqueue_turn", purpose: "send_message", wake_status: "active" };
+        // mode 'media' não passa pela IA — o arquivo já está pronto, não há
+        // texto para escrever. Os outros dois modos (ai_message/template)
+        // continuam no caminho de sempre.
+        const purpose = node.config.mode === "media" ? "send_media" : "send_message";
+        return { kind: "enqueue_turn", purpose, wake_status: "active" };
       }
       // Dead-man: the turn never completed (worker down / turn permanently failing). Never
       // re-enqueue, never wait forever — after MAX_ACTION_RECHECKS idle rechecks give up.

@@ -55,7 +55,7 @@ export interface FollowupJobRequest {
   payload: {
     followup_enrollment_id: string;
     node_id: string;
-    purpose: "send_message" | "classify" | "plan_timing";
+    purpose: "send_message" | "send_media" | "classify" | "plan_timing";
     /** action (mode 'ai_message') — Task 5.1: repassado ao turno pra virar o bloco de orientação. */
     prompt_hint?: string;
     /** ai_classify — Task 5.1: classes possíveis + dica opcional pro classificador. */
@@ -65,6 +65,11 @@ export interface FollowupJobRequest {
      *  intervalo e a orientação de cada uma. O planejador precisa ver a sequência
      *  inteira — decidir bem a 1ª espera e mal a 3ª não é um plano. */
     waits?: EsperaAdaptativa[];
+    /** action (mode 'media') — envio determinístico, sem LLM: o arquivo já está pronto. */
+    media_type?: "audio" | "image" | "video";
+    storage_path?: string;
+    media_mime?: string;
+    caption?: string;
   };
 }
 
@@ -169,6 +174,14 @@ function eventPayload(result: NodeResult): Record<string, unknown> {
 function turnPayloadExtras(node: FlowNode, smartWaits: EsperaAdaptativa[]): Partial<FollowupJobRequest["payload"]> {
   if (node.type === "action" && node.config.mode === "ai_message") {
     return { prompt_hint: node.config.prompt_hint };
+  }
+  if (node.type === "action" && node.config.mode === "media") {
+    return {
+      media_type: node.config.media_type,
+      storage_path: node.config.storage_path,
+      media_mime: node.config.media_mime,
+      ...(node.config.caption !== undefined ? { caption: node.config.caption } : {}),
+    };
   }
   if (node.type === "ai_classify") {
     return { classes: node.config.classes, ...(node.config.hint !== undefined ? { hint: node.config.hint } : {}) };

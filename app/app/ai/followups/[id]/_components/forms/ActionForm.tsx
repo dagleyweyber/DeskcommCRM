@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -11,11 +13,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { actionConfigSchema } from "@/lib/followup/graph-schema";
+import { ACTION_MEDIA_TYPES, actionConfigSchema, type ActionMediaType } from "@/lib/followup/graph-schema";
 import { MODOS_DA_ACAO, opcoes, type ModoDaAcao } from "@/lib/followup/vocabulario";
 import { useMessageTemplates } from "@/hooks/inbox/useMessageTemplates";
+import { useUploadFollowupMedia } from "@/hooks/followup/useUploadFollowupMedia";
 
 import type { ConfigOf } from "./shared";
+
+const ROTULOS_MEDIA_TYPE: Record<ActionMediaType, string> = {
+  audio: "Áudio",
+  image: "Imagem",
+  video: "Vídeo",
+};
+
+const ACCEPT_POR_TIPO: Record<ActionMediaType, string> = {
+  audio: "audio/*",
+  image: "image/*",
+  video: "video/*",
+};
 
 /**
  * O seletor de modelo, no lugar dos dois `<Input>` que pediam um UUID colado à
@@ -69,6 +84,72 @@ function SeletorDeModelo({
   );
 }
 
+/**
+ * Upload do arquivo fixo de um passo `mode: 'media'`. Não manda a URL pro
+ * grafo — só o `storage_path` (o composer do Inbox segue a mesma regra: a URL
+ * assinada expira em ~9 dias, o caminho no bucket não).
+ */
+function UploaderDeMidia({
+  mediaType,
+  storagePath,
+  fileName,
+  onUploaded,
+}: {
+  mediaType: ActionMediaType;
+  storagePath: string;
+  fileName: string | null;
+  onUploaded: (r: { storagePath: string; mime: string; fileName: string }) => void;
+}) {
+  const upload = useUploadFollowupMedia();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [erroTipo, setErroTipo] = useState<string | null>(null);
+
+  const escolherArquivo = () => inputRef.current?.click();
+
+  const aoEscolher = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // permite escolher o MESMO arquivo de novo depois de um erro
+    if (!file) return;
+    setErroTipo(null);
+    try {
+      const res = await upload.mutateAsync({ file });
+      // `kind` vem da validação REAL do arquivo (magic bytes/mime), não do que o
+      // seletor "Tipo" dizia — um PDF renomeado pra .jpg não vira imagem só
+      // porque o usuário escolheu "Imagem" no combo ao lado.
+      if (res.kind !== mediaType) {
+        setErroTipo(
+          `Esse arquivo é ${ROTULOS_MEDIA_TYPE[res.kind as ActionMediaType] ?? res.kind}, não ${ROTULOS_MEDIA_TYPE[mediaType]}. Escolha um arquivo de ${ROTULOS_MEDIA_TYPE[mediaType].toLowerCase()} ou troque o tipo acima.`,
+        );
+        return;
+      }
+      onUploaded({ storagePath: res.storage_path, mime: res.media_mime, fileName: file.name });
+    } catch {
+      // erro já mostrado pelo toast do hook (useUploadFollowupMedia → showApiError)
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT_POR_TIPO[mediaType]}
+        className="hidden"
+        onChange={(e) => void aoEscolher(e)}
+      />
+      <Button type="button" variant="outline" onClick={escolherArquivo} disabled={upload.isPending}>
+        {upload.isPending ? "Enviando…" : storagePath ? "Trocar arquivo" : "Escolher arquivo"}
+      </Button>
+      {storagePath && !upload.isPending && (
+        <p className="text-xs text-text-muted">
+          Arquivo pronto{fileName ? `: ${fileName}` : ""}.
+        </p>
+      )}
+      {erroTipo && <p className="text-xs text-error-fg">{erroTipo}</p>}
+    </div>
+  );
+}
+
 export function ActionForm({
   config,
   onChange,
@@ -82,6 +163,14 @@ export function ActionForm({
     config.mode === "ai_message" ? (config.fallback_template_id ?? "") : "",
   );
   const [templateId, setTemplateId] = useState(config.mode === "template" ? config.template_id : "");
+  const [mediaType, setMediaType] = useState<ActionMediaType>(
+    config.mode === "media" ? config.media_type : "image",
+  );
+  const [storagePath, setStoragePath] = useState(config.mode === "media" ? config.storage_path : "");
+  const [mediaMime, setMediaMime] = useState(config.mode === "media" ? config.media_mime : "");
+  // Só pra exibir "arquivo já escolhido" na tela — não é campo do grafo.
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [caption, setCaption] = useState(config.mode === "media" ? (config.caption ?? "") : "");
   const [error, setError] = useState<string | null>(null);
 
   const commit = (next: {
@@ -89,6 +178,10 @@ export function ActionForm({
     promptHint: string;
     fallbackTemplateId: string;
     templateId: string;
+    mediaType: ActionMediaType;
+    storagePath: string;
+    mediaMime: string;
+    caption: string;
   }) => {
     const candidate =
       next.mode === "ai_message"
@@ -97,7 +190,15 @@ export function ActionForm({
             prompt_hint: next.promptHint,
             ...(next.fallbackTemplateId.trim() ? { fallback_template_id: next.fallbackTemplateId } : {}),
           }
-        : { mode: "template" as const, template_id: next.templateId };
+        : next.mode === "template"
+          ? { mode: "template" as const, template_id: next.templateId }
+          : {
+              mode: "media" as const,
+              media_type: next.mediaType,
+              storage_path: next.storagePath,
+              media_mime: next.mediaMime,
+              ...(next.caption.trim() ? { caption: next.caption.trim() } : {}),
+            };
     const parsed = actionConfigSchema.safeParse(candidate);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Configuração inválida.");
@@ -106,6 +207,8 @@ export function ActionForm({
     setError(null);
     onChange(parsed.data);
   };
+
+  const commitState = { mode, promptHint, fallbackTemplateId, templateId, mediaType, storagePath, mediaMime, caption };
 
   return (
     <div className="space-y-3">
@@ -116,7 +219,7 @@ export function ActionForm({
           onValueChange={(v) => {
             const next = v as ModoDaAcao;
             setMode(next);
-            commit({ mode: next, promptHint, fallbackTemplateId, templateId });
+            commit({ ...commitState, mode: next });
           }}
         >
           <SelectTrigger id="action-mode">
@@ -132,7 +235,7 @@ export function ActionForm({
         </Select>
       </div>
 
-      {mode === "ai_message" ? (
+      {mode === "ai_message" && (
         <>
           <div className="space-y-2">
             <Label htmlFor="action-prompt-hint">Instrução para a IA</Label>
@@ -142,7 +245,7 @@ export function ActionForm({
               value={promptHint}
               onChange={(e) => {
                 setPromptHint(e.target.value);
-                commit({ mode, promptHint: e.target.value, fallbackTemplateId, templateId });
+                commit({ ...commitState, promptHint: e.target.value });
               }}
             />
           </div>
@@ -154,12 +257,14 @@ export function ActionForm({
               permiteVazio
               onChange={(v) => {
                 setFallbackTemplateId(v);
-                commit({ mode, promptHint, fallbackTemplateId: v, templateId });
+                commit({ ...commitState, fallbackTemplateId: v });
               }}
             />
           </div>
         </>
-      ) : (
+      )}
+
+      {mode === "template" && (
         <div className="space-y-2">
           <Label htmlFor="action-template-id">Modelo de mensagem</Label>
           <SeletorDeModelo
@@ -168,10 +273,68 @@ export function ActionForm({
             permiteVazio={false}
             onChange={(v) => {
               setTemplateId(v);
-              commit({ mode, promptHint, fallbackTemplateId, templateId: v });
+              commit({ ...commitState, templateId: v });
             }}
           />
         </div>
+      )}
+
+      {mode === "media" && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="action-media-type">Tipo de arquivo</Label>
+            <Select
+              value={mediaType}
+              onValueChange={(v) => {
+                const next = v as ActionMediaType;
+                setMediaType(next);
+                // Trocar o tipo invalida o arquivo já escolhido — um áudio não
+                // vira imagem só porque o combo mudou.
+                setStoragePath("");
+                setMediaMime("");
+                setFileName(null);
+                commit({ ...commitState, mediaType: next, storagePath: "", mediaMime: "" });
+              }}
+            >
+              <SelectTrigger id="action-media-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ACTION_MEDIA_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {ROTULOS_MEDIA_TYPE[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Arquivo</Label>
+            <UploaderDeMidia
+              mediaType={mediaType}
+              storagePath={storagePath}
+              fileName={fileName}
+              onUploaded={(r) => {
+                setStoragePath(r.storagePath);
+                setMediaMime(r.mime);
+                setFileName(r.fileName);
+                commit({ ...commitState, storagePath: r.storagePath, mediaMime: r.mime });
+              }}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="action-caption">Legenda (opcional)</Label>
+            <Input
+              id="action-caption"
+              maxLength={1024}
+              value={caption}
+              onChange={(e) => {
+                setCaption(e.target.value);
+                commit({ ...commitState, caption: e.target.value });
+              }}
+            />
+          </div>
+        </>
       )}
       {error && <p className="text-xs text-error-fg">{error}</p>}
     </div>

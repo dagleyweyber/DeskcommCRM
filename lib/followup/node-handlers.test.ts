@@ -597,6 +597,25 @@ describe("processNode — ai_classify / action", () => {
     const result = processNode({ node, edges: [], enrollment: enrollment(), lead: lead(), clock });
     expect(result).toEqual({ kind: "enqueue_turn", purpose: "send_message", wake_status: "active" });
   });
+
+  /**
+   * mode 'media' (áudio/imagem/vídeo pronto) NÃO passa pela IA — o arquivo já
+   * está no bucket, não há texto para o modelo escrever. Sem este ramo o
+   * envio de mídia cairia no mesmo purpose='send_message' do texto e o turno
+   * tentaria gerar uma mensagem com o LLM à toa (custo e ponto de falha que
+   * não deveriam existir para um arquivo fixo).
+   */
+  it("action with mode 'media' enqueues send_media instead of send_message", () => {
+    const node: FlowNode = {
+      id: "a1",
+      type: "action",
+      label: "Send audio",
+      position: { x: 0, y: 0 },
+      config: { mode: "media", media_type: "audio", storage_path: "org-1/followup-media/x.ogg", media_mime: "audio/ogg" },
+    };
+    const result = processNode({ node, edges: [], enrollment: enrollment(), lead: lead(), clock });
+    expect(result).toEqual({ kind: "enqueue_turn", purpose: "send_media", wake_status: "active" });
+  });
 });
 
 describe("processNode — end", () => {

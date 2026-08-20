@@ -77,6 +77,12 @@ export interface SendMessageInput {
    * colidirem no ledger e o segundo virar `already_sent` sem ter saído.
    */
   template?: { name: string; language: string; values: Record<string, string> };
+  /**
+   * Presente = envio de MÍDIA pronta (follow-up mode 'media' — onda de nós de
+   * áudio/imagem/vídeo). `body` continua podendo carregar a legenda; `storagePath`
+   * é o caminho no bucket `whatsapp-media`, nunca a URL assinada (expira).
+   */
+  media?: { type: 'audio' | 'image' | 'video'; storagePath: string; mime: string };
 }
 
 /** Fallback do ator ai_agent quando não há agente publicado (cfg.agentActorId). */
@@ -132,8 +138,18 @@ export async function sendTurnMessage(
               template_language: input.template.language,
               template_values: input.template.values,
             }
-          : { type: 'text' as const }),
-        body: input.body,
+          : input.media
+            ? {
+                type: input.media.type,
+                media_storage_path: input.media.storagePath,
+                media_mime: input.media.mime,
+              }
+            : { type: 'text' as const }),
+        // `sendMessageSchema.body` é `min(1)` quando presente — mídia sem legenda
+        // manda `input.body === ''`, e mandar isso adiante estouraria validação
+        // em vez de "sem legenda". Omitido (não `undefined` explícito) é o que o
+        // schema aceita como "não veio".
+        ...(input.body ? { body: input.body } : {}),
         metadata: { idempotency_key: idempotencyKey },
       },
     );

@@ -409,6 +409,7 @@ export const MODOS_DE_ESPERA: Record<ModoDeEspera, string> = {
 export const MODOS_DA_ACAO: Record<ModoDaAcao, string> = {
   ai_message: "Mensagem escrita pela IA",
   template: "Modelo de mensagem pronto",
+  media: "Arquivo pronto (áudio, imagem ou vídeo)",
 };
 
 // ─── nó final ────────────────────────────────────────────────────────────

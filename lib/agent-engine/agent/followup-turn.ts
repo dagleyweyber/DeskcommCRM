@@ -22,7 +22,7 @@ import { withFields } from '../obs/logger';
 import type { JobRow } from '../queue/queue';
 import { getLeadContext, type LeadContext } from '../edge/crm/get-lead-context';
 import { WahaChannelAdapter } from '../edge/channel/waha-adapter';
-import { applySendOutcome } from '../edge/crm/send-message';
+import { applySendOutcome, sendTurnMessage } from '../edge/crm/send-message';
 import { runBeforeSend } from '../guardrails/before-send';
 import { classifyPromise } from '../guardrails/promise/semantic';
 import { scheduleCronJob } from '../cron/scheduler';
@@ -69,10 +69,15 @@ export const followupTurnPayloadSchema = z
     // (schedule_followup / F3-03 / F3-04) intocado — nem lido.
     followup_enrollment_id: z.string().uuid().optional(),
     node_id: z.string().min(1).optional(),
-    purpose: z.enum(['send_message', 'classify', 'plan_timing']).optional(),
+    purpose: z.enum(['send_message', 'send_media', 'classify', 'plan_timing']).optional(),
     prompt_hint: z.string().optional(),
     classes: z.array(z.string()).optional(),
     hint: z.string().optional(),
+    // purpose 'send_media' (nó Ação, mode 'media'): arquivo já pronto, sem LLM.
+    media_type: z.enum(['audio', 'image', 'video']).optional(),
+    storage_path: z.string().optional(),
+    media_mime: z.string().optional(),
+    caption: z.string().optional(),
     // purpose 'plan_timing': as esperas adaptativas do fluxo inteiro, na ordem.
     waits: z
       .array(
@@ -285,6 +290,10 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
         classes: payload.classes,
         hint: payload.hint,
         waits: payload.waits,
+        mediaType: payload.media_type,
+        storagePath: payload.storage_path,
+        mediaMime: payload.media_mime,
+        caption: payload.caption,
       });
       return;
     }
@@ -343,11 +352,15 @@ async function runFlowDrivenTurn(
   input: {
     enrollmentId: string;
     nodeId: string | undefined;
-    purpose: 'send_message' | 'classify' | 'plan_timing' | undefined;
+    purpose: 'send_message' | 'send_media' | 'classify' | 'plan_timing' | undefined;
     promptHint: string | undefined;
     classes: string[] | undefined;
     hint: string | undefined;
     waits: EsperaParaPlanejar[] | undefined;
+    mediaType: 'audio' | 'image' | 'video' | undefined;
+    storagePath: string | undefined;
+    mediaMime: string | undefined;
+    caption: string | undefined;
   },
 ): Promise<void> {
   if (input.nodeId === undefined || input.purpose === undefined) {
@@ -398,6 +411,38 @@ async function runFlowDrivenTurn(
     }
     await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
     return;
+  }
+
+  if (input.purpose === 'send_media') {
+    // Determinístico, SEM LLM: o arquivo já está pronto no bucket — não há
+    // nada para o modelo escrever ou decidir. Mesma cadeia idempotente
+    // (send_ledger) que o resto do produto usa para enviar de verdade — não é
+    // um caminho novo de envio, é o MESMO handler que o composer do Inbox usa.
+    if (input.mediaType === undefined || input.storagePath === undefined || input.mediaMime === undefined) {
+      throw new Error('followup_turn send_media: payload sem media_type/storage_path/media_mime — engine incompleto');
+    }
+    const outcome = await sendTurnMessage(pool, deps.crmCfg, {
+      tenantId: target.tenantId,
+      leadId: target.leadId,
+      jobId: job.id,
+      seq: 1,
+      conversationId: target.conversationId,
+      body: input.caption ?? '',
+      media: { type: input.mediaType, storagePath: input.storagePath, mime: input.mediaMime },
+    });
+    // 'sent'/'already_sent': saiu (ou já tinha saído num replay pós-crash).
+    // 'queued': sessão fora do ar, mas o CRM já tem o arquivo sob custódia e
+    // entrega quando reconectar — mesma disposição que a re-entrada
+    // determinística já dá a este caso (não é falha, é entrega adiada).
+    if (outcome.kind === 'sent' || outcome.kind === 'already_sent' || outcome.kind === 'queued') {
+      await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
+      return;
+    }
+    // 'blocked' (opt-out irrevogável) / 'failed': não avança como se tivesse
+    // enviado. Lança — mesmo caminho de dead-letter + aviso na Central que o
+    // send_message acima já usa, em vez de inventar uma segunda forma de
+    // reportar a mesma coisa.
+    throw new Error(`followup_turn send_media: envio não concluiu (${outcome.kind})`);
   }
 
   if (input.purpose === 'classify') {
