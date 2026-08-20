@@ -363,6 +363,15 @@ async function runFlowDrivenTurn(
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: target.tenantId, lead_id: target.leadId, enrollment_id: enrollmentId });
 
   if (input.purpose === 'send_message') {
+    // `runAgentTurn` devolve `Promise<void>` — não diz se o turno realmente
+    // produziu um envio ou se o modelo terminou sem chamar a tool send_message
+    // (credencial ruim, modelo inexistente, veto do guardrail, etc.). Sem esta
+    // checagem o followup marcava `action_sent` e avançava o fluxo mesmo
+    // quando NENHUMA linha nova entrava em `messages` — medido em produção
+    // (enrollment concluído, zero mensagem enviada). Comparar contra o
+    // instante ANTES do turno, não contra "existe alguma outbound", porque a
+    // conversa pode já ter histórico de envios de outras origens.
+    const before = clock();
     await runAgentTurn(deps, job, pool, ctx, {
       channelSessionId: target.channelSessionId,
       conversationId: target.conversationId,
@@ -373,6 +382,20 @@ async function runFlowDrivenTurn(
         return `${opening}\n\n## Orientação do passo do fluxo\n${input.promptHint}`;
       },
     });
+    const { rows: sentRows } = await pool.query(
+      `select 1 from messages
+        where conversation_id = $1 and direction = 'outbound' and created_at > $2
+        limit 1`,
+      [target.conversationId, before.toISOString()],
+    );
+    if (sentRows.length === 0) {
+      // Nenhuma mensagem nova: o turno "terminou" sem enviar. NÃO marca 'sent' —
+      // lança, e o job_queue existente (retry até max_attempts, depois dead +
+      // aviso em agent_inbox_items via markDead) trata isso com a mesma
+      // confiabilidade que já cobre falha de modelo/credencial (verificado:
+      // job com "model does not exist" já morre e avisa certo por este caminho).
+      throw new Error('followup_turn send_message: turno concluiu sem produzir mensagem outbound');
+    }
     await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
     return;
   }
