@@ -46,6 +46,7 @@ import {
   CONDITION_TRUE_BRANCH_ID,
   FALLBACK_BRANCH_ID,
   NO_REPLY_BRANCH_ID,
+  type ActionMediaType,
   type RESERVED_BRANCH_IDS,
   type actionConfigSchema,
   type aiClassifyConfigSchema,
@@ -410,6 +411,13 @@ export const MODOS_DA_ACAO: Record<ModoDaAcao, string> = {
   ai_message: "Mensagem escrita pela IA",
   template: "Modelo de mensagem pronto",
   media: "Arquivo pronto (áudio, imagem ou vídeo)",
+};
+
+/** Tipo do arquivo dentro do modo 'media' — seletor secundário do ActionForm. */
+export const TIPOS_DE_MIDIA_DA_ACAO: Record<ActionMediaType, string> = {
+  audio: "Áudio",
+  image: "Imagem",
+  video: "Vídeo",
 };
 
 // ─── nó final ────────────────────────────────────────────────────────────

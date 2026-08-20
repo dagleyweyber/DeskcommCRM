@@ -14,17 +14,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ACTION_MEDIA_TYPES, actionConfigSchema, type ActionMediaType } from "@/lib/followup/graph-schema";
-import { MODOS_DA_ACAO, opcoes, type ModoDaAcao } from "@/lib/followup/vocabulario";
+import { MODOS_DA_ACAO, TIPOS_DE_MIDIA_DA_ACAO, opcoes, type ModoDaAcao } from "@/lib/followup/vocabulario";
 import { useMessageTemplates } from "@/hooks/inbox/useMessageTemplates";
 import { useUploadFollowupMedia } from "@/hooks/followup/useUploadFollowupMedia";
 
 import type { ConfigOf } from "./shared";
-
-const ROTULOS_MEDIA_TYPE: Record<ActionMediaType, string> = {
-  audio: "Áudio",
-  image: "Imagem",
-  video: "Vídeo",
-};
 
 const ACCEPT_POR_TIPO: Record<ActionMediaType, string> = {
   audio: "audio/*",
@@ -118,7 +112,7 @@ function UploaderDeMidia({
       // porque o usuário escolheu "Imagem" no combo ao lado.
       if (res.kind !== mediaType) {
         setErroTipo(
-          `Esse arquivo é ${ROTULOS_MEDIA_TYPE[res.kind as ActionMediaType] ?? res.kind}, não ${ROTULOS_MEDIA_TYPE[mediaType]}. Escolha um arquivo de ${ROTULOS_MEDIA_TYPE[mediaType].toLowerCase()} ou troque o tipo acima.`,
+          `Esse arquivo é ${TIPOS_DE_MIDIA_DA_ACAO[res.kind as ActionMediaType] ?? res.kind}, não ${TIPOS_DE_MIDIA_DA_ACAO[mediaType]}. Escolha um arquivo de ${TIPOS_DE_MIDIA_DA_ACAO[mediaType].toLowerCase()} ou troque o tipo acima.`,
         );
         return;
       }
@@ -302,7 +296,7 @@ export function ActionForm({
               <SelectContent>
                 {ACTION_MEDIA_TYPES.map((t) => (
                   <SelectItem key={t} value={t}>
-                    {ROTULOS_MEDIA_TYPE[t]}
+                    {TIPOS_DE_MIDIA_DA_ACAO[t]}
                   </SelectItem>
                 ))}
               </SelectContent>
