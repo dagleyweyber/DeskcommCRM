@@ -5,6 +5,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { randomUUID } from "node:crypto";
+import { env } from "@/lib/env";
+import { signInviteToken, INVITE_TTL_SECONDS } from "@/lib/auth/invite-token";
+import { buildInviteEmail } from "@/lib/email/templates/invite";
+import { sendEmail } from "@/lib/email/resend";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -217,6 +221,42 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Convida o responsável para o tenant recém-criado — mesma peça (token HMAC
+  // assinado + e-mail via Resend) que /api/v1/team/invite já usa para convidar
+  // gente pra uma org EXISTENTE. Antes deste ponto, `owner_email` só entrava
+  // num hash de auditoria: o campo parecia provisionar acesso e não
+  // provisionava nada — o responsável nunca recebia como entrar.
+  const ownerEmail = owner_email.trim().toLowerCase();
+  const inviteId = randomUUID();
+  const exp = Math.floor(Date.now() / 1000) + INVITE_TTL_SECONDS;
+  const inviteToken = signInviteToken({
+    invite_id: inviteId,
+    email: ownerEmail,
+    organization_id: org.id,
+    role: "admin",
+    exp,
+  });
+  const acceptUrl = `${env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/team/accept-invite/${inviteToken}`;
+  const expiresAt = new Date(exp * 1000);
+
+  const { subject, html, text } = buildInviteEmail({
+    inviterName: adminCtx.user.email ?? "Ads Pro Company",
+    orgName: org.display_name,
+    acceptUrl,
+    role: "admin",
+    expiresAt,
+  });
+  const emailResult = await sendEmail({
+    to: ownerEmail,
+    subject,
+    html,
+    text,
+    tags: [
+      { name: "kind", value: "tenant_owner_invite" },
+      { name: "org", value: org.id },
+    ],
+  });
+
   void audit({
     action: "tenant.created_by_platform_admin",
     actorUserId: adminCtx.user.id,
@@ -230,16 +270,29 @@ export async function POST(req: NextRequest) {
       slug: org.slug,
       display_name: org.display_name,
       plan,
-      owner_email_hash: owner_email
-        ? Buffer.from(owner_email.trim().toLowerCase())
-            .toString("hex")
-            .slice(0, 12) + "..."
-        : null,
+      owner_email_hash:
+        Buffer.from(ownerEmail).toString("hex").slice(0, 12) + "...",
+      owner_invite_id: inviteId,
+      owner_invite_email_dispatched: emailResult.ok,
+      owner_invite_email_error: emailResult.ok ? null : (emailResult.error ?? null),
     },
   });
 
   return ok(
-    { id: org.id, slug: org.slug, display_name: org.display_name },
+    {
+      id: org.id,
+      slug: org.slug,
+      display_name: org.display_name,
+      owner_invite: {
+        email_dispatched: emailResult.ok,
+        expires_at: expiresAt.toISOString(),
+        // Sempre devolvido, mesmo com o e-mail dispatado: se o Resend falhar
+        // (chave ausente, domínio não verificado), quem criou o tenant tem
+        // como mandar o link por outro canal em vez de o responsável ficar
+        // sem NENHUM jeito de entrar.
+        accept_url: acceptUrl,
+      },
+    },
     { status: 201, requestId },
   );
 }
