@@ -26,8 +26,10 @@ const ORG = "org-1";
 const LEAD = "lead-1";
 const CONVERSA = "conversa-1";
 const CANAL = "canal-1";
-// followupTurnPayloadSchema exige UUID de verdade em followup_enrollment_id.
-const ENROLLMENT = "00000000-0000-0000-0000-000000000001";
+// followupTurnPayloadSchema exige UUID de verdade (versão/variante válidas) em
+// followup_enrollment_id — "00..01" reprovava por não ser nem versão 1-8 nem
+// o nulo exato "00..00".
+const ENROLLMENT = "11111111-1111-4111-8111-111111111111";
 const NODE = "action-2";
 
 function job(): JobRow {
