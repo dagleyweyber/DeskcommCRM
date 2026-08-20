@@ -1,5 +1,6 @@
 "use client";
 import { useTransition } from "react";
+import Link from "next/link";
 import { useUser, useAuth } from "@/hooks/auth/AuthProvider";
 import {
   DropdownMenu,
@@ -12,7 +13,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { SignOut } from "@/lib/ui/icons";
+import { Buildings, SignOut } from "@/lib/ui/icons";
 
 function initials(name: string | null, email: string): string {
   if (name && name.trim()) {
@@ -45,6 +46,20 @@ export function UserMenu() {
               <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
           </DropdownMenuLabel>
+          {user.is_platform_admin && (
+            <>
+              <DropdownMenuSeparator />
+              {/* Só a metade que faltava: /admin já tem "Voltar pra app" —
+                  esta é a ida, visível só pra quem platform_admins autoriza
+                  (o próprio 403 do painel barra quem não é, isto é atalho). */}
+              <DropdownMenuItem asChild>
+                <Link href="/admin/tenants">
+                  <Buildings size={16} className="mr-2" aria-hidden />
+                  Painel da plataforma
+                </Link>
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled={isPending} onClick={() => startTransition(async () => { await signOut(); })}>
             <SignOut size={16} className="mr-2" aria-hidden />
