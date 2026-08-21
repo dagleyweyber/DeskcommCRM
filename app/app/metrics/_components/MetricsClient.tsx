@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { useAttendantMetrics, type AttendantMetric } from "@/hooks/metrics/useAttendantMetrics";
 import { AtritoPanel } from "./AtritoPanel";
+import { SalesDashboardPanel } from "./SalesDashboardPanel";
 import { useTeamMembers } from "@/hooks/team/useTeamMembers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -78,6 +79,14 @@ export function MetricsClient({ canCompare, currentUserId }: Props) {
           </Select>
         </div>
       ) : null}
+
+      {/* Dashboard de Vendas, Fase 1: KPIs + gráficos com dado que já existe
+          (value_cents, closed_at, created_at, status, source). Não filtra por
+          atendente, igual ao Atrito — visão do negócio inteiro no período. */}
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base font-medium">Vendas</h2>
+        <SalesDashboardPanel />
+      </div>
 
       {/* Acima do funil e da performance de propósito: é o número do sistema
           inteiro, ao qual as métricas de área se subordinam (doutrina §3.6).

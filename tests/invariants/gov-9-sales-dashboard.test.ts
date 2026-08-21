@@ -1,0 +1,196 @@
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { lastLine, sql } from "./gov-helpers";
+
+/**
+ * Dashboard de Vendas, Fase 1 (migration 0155) — `fn_sales_dashboard`. Dataset
+ * SEED CONHECIDO, números EXATOS (não "> 0"), + prova de isolamento entre 2
+ * orgs (doutrina de multi-tenancy do CLAUDE.md: obrigatório antes de merge).
+ *
+ * Namespace 05050505… (exclusivo deste arquivo). Sem PII: e-mails
+ * @invariant.test. Timestamps LITERAIS fixos (não now()) para agregações
+ * determinísticas. Datas escolhidas de propósito para não cair em ponto médio
+ * de arredondamento (ex.: tempo_conversao_medio_dias = 19.0 exato, não 18.75).
+ */
+
+const ORG_A = "05050505-0000-4000-8000-000000000001";
+const ORG_B = "05050505-0000-4000-8000-000000000002";
+const MANAGER_A = "05050505-1111-4000-8000-000000000001";
+const MANAGER_B = "05050505-1111-4000-8000-000000000002";
+const PIPELINE_A = "05050505-5555-4000-8000-000000000001";
+const STAGE_A = "05050505-5555-4000-8000-000000000002";
+const PIPELINE_B = "05050505-5555-4000-8000-000000000003";
+const STAGE_B = "05050505-5555-4000-8000-000000000004";
+
+const FROM = "2026-07-01T00:00:00+00";
+const TO = "2026-07-31T00:00:00+00";
+const D1 = "2026-07-10T12:00:00+00"; // 3 opens + 2 won (whatsapp) + 1 won-old fecha aqui
+const D2 = "2026-07-15T12:00:00+00"; // 1 won (instagram) criado aqui + 1 lost (instagram)
+const D3 = "2026-07-21T12:00:00+00"; // o won criado em D2 fecha aqui (6 dias depois)
+const OLD = "2026-05-01T12:00:00+00"; // criado ANTES da janela — não conta em leads_total
+
+beforeAll(() => {
+  sql(`
+    insert into auth.users (id, email) values
+      ('${MANAGER_A}', 'm9-manager-a@invariant.test'),
+      ('${MANAGER_B}', 'm9-manager-b@invariant.test')
+    on conflict do nothing;
+
+    insert into public.organizations (id, slug, legal_name, display_name) values
+      ('${ORG_A}', 'gov-sales-a', 'Gov Sales Org A', 'Gov Sales A'),
+      ('${ORG_B}', 'gov-sales-b', 'Gov Sales Org B', 'Gov Sales B')
+    on conflict do nothing;
+
+    insert into public.user_organizations (user_id, organization_id, role, accepted_at) values
+      ('${MANAGER_A}', '${ORG_A}', 'manager', now()),
+      ('${MANAGER_B}', '${ORG_B}', 'manager', now())
+    on conflict do nothing;
+
+    insert into public.crm_pipelines (id, organization_id, name, slug) values
+      ('${PIPELINE_A}', '${ORG_A}', 'Gov Sales A', 'gov-sales-a'),
+      ('${PIPELINE_B}', '${ORG_B}', 'Gov Sales B', 'gov-sales-b')
+    on conflict do nothing;
+    insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position) values
+      ('${STAGE_A}', '${ORG_A}', '${PIPELINE_A}', 'Novo', 'novo', 1000),
+      ('${STAGE_B}', '${ORG_B}', '${PIPELINE_B}', 'Novo', 'novo', 1000)
+    on conflict do nothing;
+
+    -- ORG_A: 3 opens (whatsapp, D1) + 2 won (whatsapp, D1→D1, 100000 cada) +
+    -- 1 won (instagram, D2→D3, 50000) + 1 lost (instagram, D2) + 1 won criado
+    -- FORA da janela mas fechado DENTRO (whatsapp, OLD→D1, 999900) — conta em
+    -- vendas/receita, NÃO em leads_total (sem coorte, documentado na migration).
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, created_at)
+      select '${ORG_A}', '${PIPELINE_A}', '${STAGE_A}', 'A open '||g, 'open', 'whatsapp', '${D1}'
+      from generate_series(1,3) g;
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      select '${ORG_A}', '${PIPELINE_A}', '${STAGE_A}', 'A won wa '||g, 'won', 'whatsapp', 100000, '${D1}', '${D1}'
+      from generate_series(1,2) g;
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${ORG_A}', '${PIPELINE_A}', '${STAGE_A}', 'A won ig', 'won', 'instagram', 50000, '${D2}', '${D3}');
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, lost_reason, created_at, closed_at)
+      values ('${ORG_A}', '${PIPELINE_A}', '${STAGE_A}', 'A lost ig', 'lost', 'instagram', 'price', '${D2}', '${D2}');
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${ORG_A}', '${PIPELINE_A}', '${STAGE_A}', 'A won old', 'won', 'whatsapp', 999900, '${OLD}', '${D1}');
+
+    -- ORG_B: 1 won gigante, pra provar que NÃO vaza pra ORG_A.
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${ORG_B}', '${PIPELINE_B}', '${STAGE_B}', 'B won grande', 'won', 'meta_ads', 99999900, '${D1}', '${D1}');
+  `);
+});
+
+function asRole(actorId: string): string {
+  return `set role authenticated;
+    do $c$ begin perform set_config('request.jwt.claims', '{"sub":"${actorId}"}', false); end $c$;`;
+}
+
+interface Kpis {
+  leads_total: number;
+  vendas: number;
+  receita_total_cents: number;
+  valor_medio_cents: number | null;
+  conversao_pct: number | null;
+  tempo_conversao_medio_dias: number | null;
+}
+interface DiaRow {
+  dia: string;
+  criados: number;
+  convertidos: number;
+}
+interface OrigemRow {
+  origem: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
+interface Dashboard {
+  kpis: Kpis;
+  leads_por_dia: DiaRow[];
+  receita_por_origem: OrigemRow[];
+}
+
+function fetchDashboard(actorId: string, org: string): Dashboard {
+  const out = sql(`
+    ${asRole(actorId)}
+    select public.fn_sales_dashboard('${org}', '${FROM}', '${TO}')::text;
+  `);
+  return JSON.parse(lastLine(out)) as Dashboard;
+}
+
+describe("Dashboard de Vendas, Fase 1 — fn_sales_dashboard (números exatos)", () => {
+  const dashboard = () => fetchDashboard(MANAGER_A, ORG_A);
+
+  it("kpis: leads_total=7 (o won criado FORA da janela não entra)", () => {
+    expect(dashboard().kpis.leads_total).toBe(7);
+  });
+
+  it("kpis: vendas=4, receita_total_cents=1249900, valor_medio_cents=312475", () => {
+    const k = dashboard().kpis;
+    expect(k.vendas).toBe(4);
+    expect(k.receita_total_cents).toBe(1_249_900);
+    expect(k.valor_medio_cents).toBe(312_475);
+  });
+
+  it("kpis: conversao_pct=57.1 (4/7*100, arredondado a 1 casa)", () => {
+    expect(dashboard().kpis.conversao_pct).toBe(57.1);
+  });
+
+  it("kpis: tempo_conversao_medio_dias=19 (média de 0,0,6,70 dias)", () => {
+    expect(dashboard().kpis.tempo_conversao_medio_dias).toBe(19);
+  });
+
+  it("leads_por_dia: D1 criados=5 (3 opens+2 won), convertidos=3 (2 won+1 won-old)", () => {
+    const dia = dashboard().leads_por_dia.find((d) => d.dia === "2026-07-10");
+    expect(dia).toEqual({ dia: "2026-07-10", criados: 5, convertidos: 3 });
+  });
+
+  it("leads_por_dia: D2 criados=2 (1 won ig+1 lost ig), convertidos=0", () => {
+    const dia = dashboard().leads_por_dia.find((d) => d.dia === "2026-07-15");
+    expect(dia).toEqual({ dia: "2026-07-15", criados: 2, convertidos: 0 });
+  });
+
+  it("leads_por_dia: D3 criados=0, convertidos=1 (o won ig fecha aqui)", () => {
+    const dia = dashboard().leads_por_dia.find((d) => d.dia === "2026-07-21");
+    expect(dia).toEqual({ dia: "2026-07-21", criados: 0, convertidos: 1 });
+  });
+
+  it("leads_por_dia: dia sem nenhum evento aparece com zeros (série completa, não esparsa)", () => {
+    const dia = dashboard().leads_por_dia.find((d) => d.dia === "2026-07-01");
+    expect(dia).toEqual({ dia: "2026-07-01", criados: 0, convertidos: 0 });
+  });
+
+  it("receita_por_origem: whatsapp leads=5, vendas=3, receita_cents=1199900", () => {
+    const wa = dashboard().receita_por_origem.find((o) => o.origem === "whatsapp");
+    expect(wa).toEqual({ origem: "whatsapp", leads: 5, vendas: 3, receita_cents: 1_199_900 });
+  });
+
+  it("receita_por_origem: instagram leads=2, vendas=1, receita_cents=50000", () => {
+    const ig = dashboard().receita_por_origem.find((o) => o.origem === "instagram");
+    expect(ig).toEqual({ origem: "instagram", leads: 2, vendas: 1, receita_cents: 50_000 });
+  });
+
+  // ---- isolamento entre orgs (obrigatório: CLAUDE.md doutrina de multi-tenancy) ----
+
+  it("⭐ ORG_A NÃO vê o lead gigante de ORG_B (receita_total_cents não muda)", () => {
+    expect(dashboard().kpis.receita_total_cents).toBe(1_249_900);
+    expect(dashboard().receita_por_origem.find((o) => o.origem === "meta_ads")).toBeUndefined();
+  });
+
+  it("⭐ ORG_B vê só o próprio lead (manager de A não vaza pra B nem vice-versa)", () => {
+    const b = fetchDashboard(MANAGER_B, ORG_B);
+    expect(b.kpis).toEqual({
+      leads_total: 1,
+      vendas: 1,
+      receita_total_cents: 99_999_900,
+      valor_medio_cents: 99_999_900,
+      conversao_pct: 100,
+      tempo_conversao_medio_dias: 0,
+    });
+  });
+
+  it("⭐ manager de ORG_B não consegue ler o dashboard de ORG_A (RLS: kpis zerados)", () => {
+    const crossOrg = fetchDashboard(MANAGER_B, ORG_A);
+    expect(crossOrg.kpis.leads_total).toBe(0);
+    expect(crossOrg.kpis.vendas).toBe(0);
+    expect(crossOrg.kpis.receita_total_cents).toBe(0);
+  });
+});
