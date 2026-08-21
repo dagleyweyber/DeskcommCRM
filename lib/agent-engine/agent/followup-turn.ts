@@ -69,7 +69,7 @@ export const followupTurnPayloadSchema = z
     // (schedule_followup / F3-03 / F3-04) intocado — nem lido.
     followup_enrollment_id: z.string().uuid().optional(),
     node_id: z.string().min(1).optional(),
-    purpose: z.enum(['send_message', 'send_media', 'classify', 'plan_timing']).optional(),
+    purpose: z.enum(['send_message', 'send_media', 'send_template', 'classify', 'plan_timing']).optional(),
     prompt_hint: z.string().optional(),
     classes: z.array(z.string()).optional(),
     hint: z.string().optional(),
@@ -78,6 +78,8 @@ export const followupTurnPayloadSchema = z
     storage_path: z.string().optional(),
     media_mime: z.string().optional(),
     caption: z.string().optional(),
+    // purpose 'send_template' (nó Ação, mode 'template'): texto já pronto, sem LLM.
+    template_id: z.string().uuid().optional(),
     // purpose 'plan_timing': as esperas adaptativas do fluxo inteiro, na ordem.
     waits: z
       .array(
@@ -294,6 +296,7 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
         storagePath: payload.storage_path,
         mediaMime: payload.media_mime,
         caption: payload.caption,
+        templateId: payload.template_id,
       });
       return;
     }
@@ -352,7 +355,7 @@ async function runFlowDrivenTurn(
   input: {
     enrollmentId: string;
     nodeId: string | undefined;
-    purpose: 'send_message' | 'send_media' | 'classify' | 'plan_timing' | undefined;
+    purpose: 'send_message' | 'send_media' | 'send_template' | 'classify' | 'plan_timing' | undefined;
     promptHint: string | undefined;
     classes: string[] | undefined;
     hint: string | undefined;
@@ -361,6 +364,7 @@ async function runFlowDrivenTurn(
     storagePath: string | undefined;
     mediaMime: string | undefined;
     caption: string | undefined;
+    templateId: string | undefined;
   },
 ): Promise<void> {
   if (input.nodeId === undefined || input.purpose === undefined) {
@@ -443,6 +447,41 @@ async function runFlowDrivenTurn(
     // send_message acima já usa, em vez de inventar uma segunda forma de
     // reportar a mesma coisa.
     throw new Error(`followup_turn send_media: envio não concluiu (${outcome.kind})`);
+  }
+
+  if (input.purpose === 'send_template') {
+    // Determinístico, SEM LLM: o texto do modelo já está escrito — mandar pro
+    // modelo escrever OUTRA coisa é exatamente o defeito medido em produção
+    // (mode 'template' configurado, mensagem livre da IA saindo no lugar).
+    if (input.templateId === undefined) {
+      throw new Error('followup_turn send_template: payload sem template_id — engine incompleto');
+    }
+    // organization_id filtrado manualmente (client é service-role-equivalent
+    // aqui — pool puro, sem RLS — CLAUDE.md anti-pattern 10).
+    const { rows: templateRows } = await pool.query<{ body: string }>(
+      `select body from message_templates where id = $1 and organization_id = $2`,
+      [input.templateId, target.tenantId],
+    );
+    const templateBody = templateRows[0]?.body;
+    if (templateBody === undefined) {
+      // Modelo apagado depois de escolhido no nó — configuração que não existe
+      // mais, não falha transiente. Some no dead-letter do jeito certo (vira
+      // aviso na Central) em vez de reagendar pra sempre contra um id morto.
+      throw new Error(`followup_turn send_template: modelo ${input.templateId} não encontrado`);
+    }
+    const outcome = await sendTurnMessage(pool, deps.crmCfg, {
+      tenantId: target.tenantId,
+      leadId: target.leadId,
+      jobId: job.id,
+      seq: 1,
+      conversationId: target.conversationId,
+      body: templateBody,
+    });
+    if (outcome.kind === 'sent' || outcome.kind === 'already_sent' || outcome.kind === 'queued') {
+      await complete(pool, { organizationId: target.tenantId, enrollmentId, nodeId, result: { kind: 'sent' } });
+      return;
+    }
+    throw new Error(`followup_turn send_template: envio não concluiu (${outcome.kind})`);
   }
 
   if (input.purpose === 'classify') {

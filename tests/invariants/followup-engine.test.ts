@@ -318,6 +318,24 @@ const MEDIA_ACTION_GRAPH: FlowGraph = {
   edges: [{ id: "t1-a1", source: "t1", target: "a1", priority: 0, condition: { type: "always" } }],
 };
 
+// action mode 'template' — texto pronto por id de `message_templates`, sem
+// LLM. A mentira medida em produção: este modo caía no MESMO purpose de
+// ai_message, e a IA escrevia por conta própria em vez do texto do modelo.
+const TEMPLATE_ID = "22222222-2222-4222-8222-222222222222";
+const TEMPLATE_ACTION_GRAPH: FlowGraph = {
+  nodes: [
+    { id: "t1", type: "trigger", label: "Start", position: { x: 0, y: 0 }, config: {} },
+    {
+      id: "a1",
+      type: "action",
+      label: "Send template",
+      position: { x: 0, y: 0 },
+      config: { mode: "template", template_id: TEMPLATE_ID },
+    },
+  ],
+  edges: [{ id: "t1-a1", source: "t1", target: "a1", priority: 0, condition: { type: "always" } }],
+};
+
 beforeAll(async () => {
   // flowGraphSchema exige >=2 nós — os grafos fixos acima já satisfazem isso;
   // valida aqui uma vez pra falhar cedo (erro de fixture, não de asserção).
@@ -326,6 +344,7 @@ beforeAll(async () => {
   flowGraphSchema.parse(ACTION_GRAPH);
   flowGraphSchema.parse(ACTION_END_GRAPH);
   flowGraphSchema.parse(MEDIA_ACTION_GRAPH);
+  flowGraphSchema.parse(TEMPLATE_ACTION_GRAPH);
 });
 
 // ---- 1. tick avança 1 nó por tick ---------------------------------------
@@ -725,6 +744,30 @@ describe("runFollowupTick — action mode 'media'", () => {
       caption: "Oi, segue o áudio combinado",
     });
     // send_message só existe para ai_message/template — media não deve carregar prompt_hint algum.
+    expect(jobs[0]!.payload.prompt_hint).toBeUndefined();
+  });
+});
+
+// ---- 11. action mode 'template': purpose='send_template' + o template_id do nó ----
+
+describe("runFollowupTick — action mode 'template'", () => {
+  it("⭐ enfileira purpose='send_template' com o template_id do nó — não 'send_message'", async () => {
+    const org = "aaaaaaaa-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const { pointerId, versionId } = await seedFlow(org, TEMPLATE_ACTION_GRAPH);
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toMatchObject({
+      followup_enrollment_id: enrollmentId,
+      node_id: "a1",
+      purpose: "send_template",
+      template_id: TEMPLATE_ID,
+    });
     expect(jobs[0]!.payload.prompt_hint).toBeUndefined();
   });
 });

@@ -616,6 +616,24 @@ describe("processNode — ai_classify / action", () => {
     const result = processNode({ node, edges: [], enrollment: enrollment(), lead: lead(), clock });
     expect(result).toEqual({ kind: "enqueue_turn", purpose: "send_media", wake_status: "active" });
   });
+
+  /**
+   * ⭐ A mentira medida em produção: mode 'template' configurado na tela,
+   * modelo escolhido, e o envio saía por purpose='send_message' — IA escrevia
+   * uma mensagem livre no lugar do texto fixo. Este teste existe pra matar
+   * essa regressão especificamente.
+   */
+  it("⭐ action with mode 'template' enqueues send_template instead of send_message", () => {
+    const node: FlowNode = {
+      id: "a1",
+      type: "action",
+      label: "Send template",
+      position: { x: 0, y: 0 },
+      config: { mode: "template", template_id: "11111111-1111-4111-8111-111111111111" },
+    };
+    const result = processNode({ node, edges: [], enrollment: enrollment(), lead: lead(), clock });
+    expect(result).toEqual({ kind: "enqueue_turn", purpose: "send_template", wake_status: "active" });
+  });
 });
 
 describe("processNode — end", () => {

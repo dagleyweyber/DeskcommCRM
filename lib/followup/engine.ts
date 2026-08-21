@@ -55,7 +55,7 @@ export interface FollowupJobRequest {
   payload: {
     followup_enrollment_id: string;
     node_id: string;
-    purpose: "send_message" | "send_media" | "classify" | "plan_timing";
+    purpose: "send_message" | "send_media" | "send_template" | "classify" | "plan_timing";
     /** action (mode 'ai_message') — Task 5.1: repassado ao turno pra virar o bloco de orientação. */
     prompt_hint?: string;
     /** ai_classify — Task 5.1: classes possíveis + dica opcional pro classificador. */
@@ -70,6 +70,8 @@ export interface FollowupJobRequest {
     storage_path?: string;
     media_mime?: string;
     caption?: string;
+    /** action (mode 'template') — envio determinístico, sem LLM: o texto já está pronto. */
+    template_id?: string;
   };
 }
 
@@ -182,6 +184,9 @@ function turnPayloadExtras(node: FlowNode, smartWaits: EsperaAdaptativa[]): Part
       media_mime: node.config.media_mime,
       ...(node.config.caption !== undefined ? { caption: node.config.caption } : {}),
     };
+  }
+  if (node.type === "action" && node.config.mode === "template") {
+    return { template_id: node.config.template_id };
   }
   if (node.type === "ai_classify") {
     return { classes: node.config.classes, ...(node.config.hint !== undefined ? { hint: node.config.hint } : {}) };
