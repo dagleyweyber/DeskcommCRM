@@ -94,11 +94,11 @@ describe("followup_turn — purpose send_template (determinístico, sem LLM)", (
 
     expect(runAgentTurn).not.toHaveBeenCalled();
     expect(query).toHaveBeenCalledWith(expect.stringMatching(/from message_templates/), [TEMPLATE_ID, ORG]);
-    expect(sendTurnMessage).toHaveBeenCalledWith(
-      pool,
-      expect.anything(),
-      expect.objectContaining({ body: TEMPLATE_BODY }),
-    );
+    // 2º arg é `deps.crmCfg` — não faz parte do que este teste cobre (o fake
+    // `deps` não define crmCfg, então chega `undefined` mesmo; ver o mesmo
+    // padrão em followup-send-media.test.ts, que também não checa esse arg).
+    expect(sendTurnMessage.mock.calls[0]?.[0]).toBe(pool);
+    expect(sendTurnMessage.mock.calls[0]?.[2]).toMatchObject({ body: TEMPLATE_BODY });
     expect(completeFollowupTurn).toHaveBeenCalledWith(
       pool,
       expect.objectContaining({ organizationId: ORG, enrollmentId: ENROLLMENT, nodeId: NODE, result: { kind: "sent" } }),
