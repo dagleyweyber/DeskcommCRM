@@ -156,6 +156,29 @@ function engineDb(): AdminClient {
       const { rows } = await pool.query(`select * from fn_claim_due_followup_enrollments($1, $2)`, [limit, leaseSeconds]);
       return rows.map(mapEnrollmentRow);
     },
+    async loadHandoffGate(orgId, contactId, pointerId) {
+      const { rows: contactRows } = await pool.query<{ em_handoff: boolean }>(
+        `select (
+           c.force_human
+           or exists (
+             select 1 from conversations v
+             where v.organization_id = $1 and v.contact_id = c.id
+               and v.bot_silenced_until is not null and v.bot_silenced_until > now()
+           )
+         ) as em_handoff
+         from contacts c
+         where c.organization_id = $1 and c.id = $2`,
+        [orgId, contactId],
+      );
+      const { rows: pointerRows } = await pool.query<{ handoff_policy: "pause" | "cancel" | "allow" }>(
+        `select handoff_policy from followup_flow_pointers where organization_id = $1 and id = $2`,
+        [orgId, pointerId],
+      );
+      return {
+        emHandoff: contactRows[0]?.em_handoff === true,
+        handoffPolicy: pointerRows[0]?.handoff_policy ?? "pause",
+      };
+    },
     async loadFlowGraph(orgId, versionId) {
       const { rows } = await pool.query<{ graph: unknown }>(
         `select graph from followup_flow_versions where organization_id = $1 and id = $2`,

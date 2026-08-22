@@ -100,6 +100,7 @@ function fakeDb(opts: {
   });
   const db: TurnBridgeAdminClient = {
     claimDueEnrollments: async () => [],
+    loadHandoffGate: async () => ({ emHandoff: false, handoffPolicy: "pause" }),
     loadEnrollmentById: async () => opts.enrollment,
     loadFlowGraph: async () => opts.graph,
     loadLeadFacts: async () => ({ lead_stage: null, tags: [] }),
