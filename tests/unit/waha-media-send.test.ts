@@ -46,4 +46,16 @@ describe("isMediaPathOwnedBy", () => {
   it("confusão de prefixo (org-1x/...) → false", () => {
     expect(isMediaPathOwnedBy(`${orgId}x/${conversationId}/foo.jpg`, orgId, conversationId)).toBe(false);
   });
+
+  // ⭐ Mídia de follow-up (app/api/v1/ai/followups/media/route.ts) nasce ANTES
+  // de existir conversa — sem este segundo prefixo, send_media falhava 100%
+  // das vezes com "media_storage_path fora da conversa", medido em produção
+  // pra qualquer lead, sempre no primeiro nó de mídia do fluxo.
+  it("⭐ path {org}/followup-media/... (reutilizável entre conversas) → true, mesmo sem casar a conversa", () => {
+    expect(isMediaPathOwnedBy(`${orgId}/followup-media/x.jpg`, orgId, conversationId)).toBe(true);
+    expect(isMediaPathOwnedBy(`${orgId}/followup-media/x.jpg`, orgId, "qualquer-outra-conversa")).toBe(true);
+  });
+  it("followup-media de OUTRA org → false (a fronteira continua sendo a organização)", () => {
+    expect(isMediaPathOwnedBy(`org-2/followup-media/x.jpg`, orgId, conversationId)).toBe(false);
+  });
 });

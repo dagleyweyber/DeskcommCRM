@@ -4,8 +4,20 @@ import { MAX_MEDIA_BYTES } from "@/lib/messaging/media/types";
 export type MessageKind = "image" | "video" | "audio" | "document";
 
 /**
- * Posse do objeto no bucket: o path DEVE estar sob {org}/{conversation}/
- * (chaves do Storage são literais — sem semântica de traversal).
+ * Posse do objeto no bucket `whatsapp-media`: o path deve estar sob um dos
+ * DOIS prefixos legítimos da org — chaves do Storage são literais, sem
+ * semântica de traversal, então a fronteira de segurança real é a
+ * ORGANIZAÇÃO, não a conversa.
+ *
+ *  - `{org}/{conversation}/…` — upload feito DURANTE uma conversa (composer
+ *    do Inbox, `app/api/v1/conversations/[id]/media/route.ts`).
+ *  - `{org}/followup-media/…` — upload feito na TELA DO FLUXO, antes de
+ *    existir qualquer conversa (`app/api/v1/ai/followups/media/route.ts`):
+ *    o mesmo arquivo é reenviado a leads/conversas DIFERENTES a cada
+ *    matrícula, então não pode nascer preso a UMA conversa. Sem este
+ *    segundo prefixo, todo nó Ação (mode 'media') falhava 100% das vezes —
+ *    medido em produção, `send_media` sempre com "media_storage_path fora
+ *    da conversa", em qualquer lead.
  *
  * Morava dentro do módulo de transporte do provider legado e não tinha nada a
  * ver com o canal: valida um path do NOSSO Storage, antes de qualquer coisa
@@ -14,7 +26,7 @@ export type MessageKind = "image" | "video" | "audio" | "document";
  * `docs/doctrine/restricao-de-canal.md` proíbe.
  */
 export function isMediaPathOwnedBy(path: string, orgId: string, conversationId: string): boolean {
-  return path.startsWith(`${orgId}/${conversationId}/`);
+  return path.startsWith(`${orgId}/${conversationId}/`) || path.startsWith(`${orgId}/followup-media/`);
 }
 
 const DOCUMENT_MIMES = new Set([
