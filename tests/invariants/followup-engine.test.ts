@@ -89,6 +89,29 @@ function pgAdminClient(opts?: { failInboxTimes?: number }): AdminClient {
       ]);
       return rows.map(mapEnrollmentRow);
     },
+    async loadHandoffGate(orgId, contactId, pointerId) {
+      const { rows: contactRows } = await pool.query<{ em_handoff: boolean }>(
+        `select (
+           c.force_human
+           or exists (
+             select 1 from conversations v
+             where v.organization_id = $1 and v.contact_id = c.id
+               and v.bot_silenced_until is not null and v.bot_silenced_until > now()
+           )
+         ) as em_handoff
+         from contacts c
+         where c.organization_id = $1 and c.id = $2`,
+        [orgId, contactId],
+      );
+      const { rows: pointerRows } = await pool.query<{ handoff_policy: "pause" | "cancel" | "allow" }>(
+        `select handoff_policy from followup_flow_pointers where organization_id = $1 and id = $2`,
+        [orgId, pointerId],
+      );
+      return {
+        emHandoff: contactRows[0]?.em_handoff === true,
+        handoffPolicy: pointerRows[0]?.handoff_policy ?? "pause",
+      };
+    },
     async loadFlowGraph(orgId, versionId): Promise<FlowGraph | null> {
       const { rows } = await pool.query<{ graph: unknown }>(
         `select graph from followup_flow_versions where organization_id = $1 and id = $2`,
@@ -769,5 +792,128 @@ describe("runFollowupTick — action mode 'template'", () => {
       template_id: TEMPLATE_ID,
     });
     expect(jobs[0]!.payload.prompt_hint).toBeUndefined();
+  });
+});
+
+// ---- 12. handoff gate pró-ativo: contato JÁ em handoff antes do tick -------
+//
+// Medido em produção: um contato com force_human=true (ou conversa com
+// bot_silenced_until no futuro/infinito) desde ANTES do enrollment nascer.
+// reactToHandoffOpen (reactivity.ts) só reage ao EVENTO de abertura — sem
+// evento novo depois do enrollment, nada pausava, e o motor reenfileirava um
+// turno fadado a ser pulado a cada ACTION_RECHECK_MS, até o dead-man de
+// MAX_ACTION_RECHECKS desistir sozinho ~30min depois com motivo genérico.
+
+const ACAO_SIMPLES_GRAPH: FlowGraph = {
+  nodes: [
+    { id: "t1", type: "trigger", label: "Start", position: { x: 0, y: 0 }, config: {} },
+    {
+      id: "a1",
+      type: "action",
+      label: "Cutucada",
+      position: { x: 0, y: 0 },
+      config: { mode: "ai_message", prompt_hint: "oi" },
+    },
+  ],
+  edges: [{ id: "t1-a1", source: "t1", target: "a1", priority: 0, condition: { type: "always" } }],
+};
+
+beforeAll(() => {
+  flowGraphSchema.parse(ACAO_SIMPLES_GRAPH);
+});
+
+async function seedFlowComPolitica(
+  org: string,
+  graph: FlowGraph,
+  handoffPolicy: "pause" | "cancel" | "allow",
+): Promise<{ pointerId: string; versionId: string }> {
+  const r = await seedFlow(org, graph);
+  await pool.query(`update followup_flow_pointers set handoff_policy = $1 where id = $2`, [
+    handoffPolicy,
+    r.pointerId,
+  ]);
+  return r;
+}
+
+async function marcaForceHuman(contactId: string): Promise<void> {
+  await pool.query(`update contacts set force_human = true where id = $1`, [contactId]);
+}
+
+describe("runFollowupTick — handoff gate pró-ativo (contato já em handoff)", () => {
+  it("⭐ handoff_policy='pause' + force_human=true ⇒ pausa (paused_handoff), NENHUM job enfileirado", async () => {
+    const org = "bbbbbbb5-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    await marcaForceHuman(contactId);
+    const { pointerId, versionId } = await seedFlowComPolitica(org, ACAO_SIMPLES_GRAPH, "pause");
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(0);
+    const row = await getEnrollment(enrollmentId);
+    expect(row.status).toBe("paused_handoff");
+    expect(row.next_eval_at).toBeNull();
+  });
+
+  it("⭐ handoff_policy='cancel' + conversa com bot_silenced_until no futuro ⇒ cancela com outcome='handoff'", async () => {
+    const org = "bbbbbbb6-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const { rows: sessionRows } = await pool.query<{ id: string }>(
+      `insert into channel_sessions (organization_id, waha_session_name, webhook_secret_encrypted)
+       values ($1, $2, '\\x00'::bytea) returning id`,
+      [org, `handoff-cancel-${Date.now()}`],
+    );
+    await pool.query(
+      `insert into conversations (organization_id, contact_id, channel_session_id, status, bot_silenced_until)
+       values ($1, $2, $3, 'open', now() + interval '1 hour')`,
+      [org, contactId, sessionRows[0]!.id],
+    );
+    const { pointerId, versionId } = await seedFlowComPolitica(org, ACAO_SIMPLES_GRAPH, "cancel");
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(0);
+    const row = await getEnrollment(enrollmentId);
+    expect(row.status).toBe("cancelled");
+    expect(row.outcome).toBe("handoff");
+    expect(row.cancel_reason).toBe("handoff_triggered");
+  });
+
+  it("handoff_policy='allow' + force_human=true ⇒ segue normal, enfileira o turno mesmo em handoff", async () => {
+    const org = "bbbbbbb7-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    await marcaForceHuman(contactId);
+    const { pointerId, versionId } = await seedFlowComPolitica(org, ACAO_SIMPLES_GRAPH, "allow");
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload.followup_enrollment_id).toBe(enrollmentId);
+    const row = await getEnrollment(enrollmentId);
+    expect(row.status).not.toBe("paused_handoff");
+    expect(row.status).not.toBe("cancelled");
+  });
+
+  it("sem handoff nenhum ⇒ comportamento de sempre, intocado (regressão)", async () => {
+    const org = "bbbbbbb8-0000-4000-8000-000000000001";
+    await seedOrg(org);
+    const contactId = await seedContact(org);
+    const { pointerId, versionId } = await seedFlowComPolitica(org, ACAO_SIMPLES_GRAPH, "pause");
+    const enrollmentId = await seedEnrollment({ org, pointerId, versionId, contactId, currentNodeId: "a1" });
+
+    const jobs: FollowupJobRequest[] = [];
+    await runFollowupTick(makeDeps(jobs), { limit: 5 });
+
+    expect(jobs).toHaveLength(1);
+    const row = await getEnrollment(enrollmentId);
+    expect(row.status).not.toBe("paused_handoff");
   });
 });

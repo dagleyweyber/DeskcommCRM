@@ -75,9 +75,25 @@ export interface FollowupJobRequest {
   };
 }
 
+export type HandoffPolicy = "pause" | "cancel" | "allow";
+
 /** DB surface the engine needs — see file header for why this isn't `SupabaseClient` directly. */
 export interface AdminClient {
   claimDueEnrollments(limit: number, leaseSeconds: number): Promise<EnrollmentRow[]>;
+  /**
+   * Handoff humano AGORA (`contacts.force_human` OU alguma conversa do
+   * contato com `bot_silenced_until` no futuro/infinito — mesma regra de
+   * `isLeadInHandoff` em lib/agent-engine/agent/human-handoff.ts, duplicada
+   * aqui porque aquele fala `pg.Pool` do agent-engine e este client tem dois
+   * mundos, Supabase-js e pg puro — mesmo padrão de `reactivity.ts`) +
+   * `handoff_policy` do pointer do enrollment. Um único método porque as duas
+   * respostas são sempre consultadas juntas no mesmo ponto de decisão.
+   */
+  loadHandoffGate(
+    orgId: string,
+    contactId: string,
+    pointerId: string,
+  ): Promise<{ emHandoff: boolean; handoffPolicy: HandoffPolicy }>;
   loadFlowGraph(orgId: string, versionId: string): Promise<FlowGraph | null>;
   loadLeadFacts(orgId: string, contactId: string): Promise<{ lead_stage: string | null; tags: string[] }>;
   loadEnrollmentEvents(enrollmentId: string): Promise<EnrollmentEventRef[]>;
@@ -374,6 +390,71 @@ async function applyResult(
   if (!isReplay) tallyOutcome(result, summary);
 }
 
+/**
+ * Backstop pró-ativo do handoff (complementa `reactivity.ts`'s `reactToHandoffOpen`).
+ *
+ * `reactToHandoffOpen` só reage ao EVENTO `ai.handoff_triggered` — se o
+ * contato já estava em handoff ANTES do enrollment nascer (medido em
+ * produção: handoff de 2 dias atrás, enrollment novo), nenhum evento dispara
+ * DEPOIS pra pausar, e o motor ficava reenfileirando um turno fadado a ser
+ * pulado (`isLeadInHandoff` no agent-engine) — o job morre em segundos
+ * (`"turno concluiu sem produzir mensagem outbound"`), mas o ENROLLMENT
+ * continuava `active`, recheck-ando a cada `ACTION_RECHECK_MS` até o
+ * dead-man de `MAX_ACTION_RECHECKS` desistir sozinho, ~30min depois, com um
+ * motivo genérico que não diz "handoff" em lugar nenhum.
+ *
+ * Consultado a CADA tick, pra qualquer tipo de nó — mesmo escopo por
+ * contato de `reactToHandoffOpen` (o humano está atendendo a PESSOA, não um
+ * nó específico do fluxo). `handoff_policy='allow'` deixa passar. O
+ * `idempotency_key` inclui `current_node_id`+`steps_taken` (a ocupação
+ * atual) pra não pausar duas vezes na mesma ocupação sob replay.
+ *
+ * Retorna `true` se pausou/cancelou (o chamador não deve prosseguir).
+ */
+async function applyHandoffGate(
+  deps: Pick<TickDeps, "db" | "clock">,
+  enrollment: EnrollmentRow,
+): Promise<boolean> {
+  const { db, clock } = deps;
+  const gate = await db.loadHandoffGate(enrollment.organization_id, enrollment.contact_id, enrollment.pointer_id);
+  if (!gate.emHandoff || gate.handoffPolicy === "allow") return false;
+
+  const isCancel = gate.handoffPolicy === "cancel";
+  const idemKey = `handoff-gate:${enrollment.id}:${enrollment.current_node_id}:${enrollment.steps_taken}`;
+  // Mesmos event_type que `reactivity.ts` usa pro mesmo efeito — nenhuma
+  // vocabulário nova pro operador aprender, e `reactToHandoffClose` (o único
+  // consumidor que retoma `paused_handoff`) não distingue COMO a pausa
+  // aconteceu, só o status atual.
+  const { inserted } = await db.insertEnrollmentEvent({
+    organization_id: enrollment.organization_id,
+    enrollment_id: enrollment.id,
+    node_id: enrollment.current_node_id,
+    event_type: isCancel ? "reactivity_handoff_cancel" : "handoff_paused",
+    payload: { reason: "handoff_triggered", detected_by: "tick", prior_status: enrollment.status },
+    idempotency_key: idemKey,
+  });
+  if (!inserted) return true; // já aplicado nesta ocupação (replay) — ainda assim não prossegue
+
+  const patch: EnrollmentPatch = isCancel
+    ? {
+        status: "cancelled",
+        outcome: "handoff",
+        cancel_reason: "handoff_triggered",
+        next_eval_at: null,
+        claimed_until: null,
+        completed_at: clock().toISOString(),
+        updated_at: clock().toISOString(),
+      }
+    : {
+        status: "paused_handoff",
+        next_eval_at: null,
+        claimed_until: null,
+        updated_at: clock().toISOString(),
+      };
+  await db.updateEnrollment(enrollment.id, enrollment.organization_id, patch);
+  return true;
+}
+
 async function processEnrollment(deps: TickDeps, enrollment: EnrollmentRow, summary: TickSummary): Promise<void> {
   const { db, clock } = deps;
 
@@ -382,6 +463,8 @@ async function processEnrollment(deps: TickDeps, enrollment: EnrollmentRow, summ
     summary.dead++;
     return;
   }
+
+  if (await applyHandoffGate(deps, enrollment)) return;
 
   const graph = await db.loadFlowGraph(enrollment.organization_id, enrollment.version_id);
   if (!graph) throw new Error("flow_version_not_found");
@@ -510,6 +593,38 @@ export function createSupabaseAdminClient(admin: SupabaseClient): AdminClient {
       });
       if (error) throw new Error(error.message);
       return (data ?? []) as EnrollmentRow[];
+    },
+    async loadHandoffGate(orgId, contactId, pointerId) {
+      const [{ data: contact, error: cErr }, { data: pointer, error: pErr }] = await Promise.all([
+        admin.from("contacts").select("force_human").eq("organization_id", orgId).eq("id", contactId).maybeSingle(),
+        admin
+          .from("followup_flow_pointers")
+          .select("handoff_policy")
+          .eq("organization_id", orgId)
+          .eq("id", pointerId)
+          .maybeSingle(),
+      ]);
+      if (cErr) throw new Error(cErr.message);
+      if (pErr) throw new Error(pErr.message);
+
+      let emHandoff = contact?.force_human === true;
+      if (!emHandoff) {
+        const { data: silenciada, error: sErr } = await admin
+          .from("conversations")
+          .select("id")
+          .eq("organization_id", orgId)
+          .eq("contact_id", contactId)
+          .gt("bot_silenced_until", new Date().toISOString())
+          .limit(1)
+          .maybeSingle();
+        if (sErr) throw new Error(sErr.message);
+        emHandoff = !!silenciada;
+      }
+
+      return {
+        emHandoff,
+        handoffPolicy: (pointer?.handoff_policy as HandoffPolicy | undefined) ?? "pause",
+      };
     },
     async loadFlowGraph(orgId, versionId) {
       const { data, error } = await admin
