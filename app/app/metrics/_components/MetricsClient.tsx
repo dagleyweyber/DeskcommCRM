@@ -5,7 +5,11 @@ import { useAttendantMetrics, type AttendantMetric } from "@/hooks/metrics/useAt
 import { AtritoPanel } from "./AtritoPanel";
 import { SalesDashboardPanel } from "./SalesDashboardPanel";
 import { useTeamMembers } from "@/hooks/team/useTeamMembers";
+import { usePipelinesList } from "@/hooks/pipelines/usePipelinesList";
+import { LEAD_SOURCES } from "@/lib/leads/lead-form-shared";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -23,6 +27,20 @@ import {
 } from "@/components/ui/select";
 
 const ALL = "__all__";
+const ALL_PIPELINE = "__all_pipelines__";
+const ALL_SOURCE = "__all_origens__";
+
+/** yyyy-mm-dd (input date) → ISO com offset, início do dia UTC. */
+function inicioDoDiaISO(data: string): string {
+  return new Date(`${data}T00:00:00Z`).toISOString();
+}
+
+/** yyyy-mm-dd (input date) → ISO com offset, início do dia SEGUINTE (janela [from,to) inclui o dia inteiro). */
+function fimDoDiaExclusivoISO(data: string): string {
+  const d = new Date(`${data}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString();
+}
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return "—";
@@ -49,6 +67,22 @@ export function MetricsClient({ canCompare, currentUserId }: Props) {
   // Opções do filtro: só manager+ (a rota /team é manager+). Agent nem vê o filtro.
   const team = useTeamMembers({ enabled: canCompare });
 
+  // Filtros do Dashboard de Vendas — período (todo mundo), pipeline (só
+  // manager+, mesma restrição de /api/v1/pipelines) e origem (todo mundo,
+  // vocabulário fixo, sem chamada de API).
+  const [dataDe, setDataDe] = useState("");
+  const [dataAte, setDataAte] = useState("");
+  const [pipelineId, setPipelineId] = useState<string>(ALL_PIPELINE);
+  const [source, setSource] = useState<string>(ALL_SOURCE);
+  const pipelines = usePipelinesList({ enabled: canCompare });
+
+  const filtrosVendas = {
+    from: dataDe ? inicioDoDiaISO(dataDe) : undefined,
+    to: dataAte ? fimDoDiaExclusivoISO(dataAte) : undefined,
+    pipelineId: pipelineId === ALL_PIPELINE ? undefined : pipelineId,
+    source: source === ALL_SOURCE ? undefined : source,
+  };
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>;
   if (isError || !data) return <p className="text-sm text-destructive">Erro ao carregar métricas.</p>;
 
@@ -58,34 +92,98 @@ export function MetricsClient({ canCompare, currentUserId }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      {canCompare ? (
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">Atendente</span>
-          <Select value={owner} onValueChange={setOwner}>
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Todos os atendentes" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Todos os atendentes</SelectItem>
-              {(team.data?.data ?? [])
-                .filter((m) => m.role !== "viewer")
-                .map((m) => (
-                  <SelectItem key={m.user_id} value={m.user_id}>
-                    {m.full_name ?? m.email ?? m.user_id.slice(0, 8)}
-                    {m.user_id === currentUserId ? " (você)" : ""}
+      <div className="flex flex-wrap items-end gap-3">
+        {canCompare ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">Atendente</span>
+            <Select value={owner} onValueChange={setOwner}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Todos os atendentes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Todos os atendentes</SelectItem>
+                {(team.data?.data ?? [])
+                  .filter((m) => m.role !== "viewer")
+                  .map((m) => (
+                    <SelectItem key={m.user_id} value={m.user_id}>
+                      {m.full_name ?? m.email ?? m.user_id.slice(0, 8)}
+                      {m.user_id === currentUserId ? " (você)" : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="vendas-de" className="text-xs text-muted-foreground">
+            De
+          </Label>
+          <Input
+            id="vendas-de"
+            type="date"
+            className="w-40"
+            value={dataDe}
+            onChange={(e) => setDataDe(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="vendas-ate" className="text-xs text-muted-foreground">
+            Até
+          </Label>
+          <Input
+            id="vendas-ate"
+            type="date"
+            className="w-40"
+            value={dataAte}
+            onChange={(e) => setDataAte(e.target.value)}
+          />
+        </div>
+
+        {canCompare ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">Pipeline</span>
+            <Select value={pipelineId} onValueChange={setPipelineId}>
+              <SelectTrigger className="w-56">
+                <SelectValue placeholder="Todos os pipelines" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_PIPELINE}>Todos os pipelines</SelectItem>
+                {(pipelines.data?.data ?? []).map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground">Origem</span>
+          <Select value={source} onValueChange={setSource}>
+            <SelectTrigger className="w-56">
+              <SelectValue placeholder="Todas as origens" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_SOURCE}>Todas as origens</SelectItem>
+              {LEAD_SOURCES.map((s) => (
+                <SelectItem key={s.value} value={s.value}>
+                  {s.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
-      ) : null}
+      </div>
 
-      {/* Dashboard de Vendas, Fase 1: KPIs + gráficos com dado que já existe
-          (value_cents, closed_at, created_at, status, source). Não filtra por
-          atendente, igual ao Atrito — visão do negócio inteiro no período. */}
+      {/* Dashboard de Vendas: KPIs + gráficos com dado que já existe
+          (value_cents, closed_at, created_at, status, source). Filtrado por
+          período/pipeline/origem da linha acima — não por atendente, igual ao
+          Atrito (visão do negócio inteiro no período, não de uma pessoa). */}
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-medium">Vendas</h2>
-        <SalesDashboardPanel />
+        <SalesDashboardPanel filtros={filtrosVendas} />
       </div>
 
       {/* Acima do funil e da performance de propósito: é o número do sistema

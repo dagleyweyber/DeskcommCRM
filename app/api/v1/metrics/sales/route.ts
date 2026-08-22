@@ -24,6 +24,8 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const querySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
+  pipeline_id: z.string().uuid().optional(),
+  source: z.string().min(1).optional(),
 });
 
 interface SalesKpis {
@@ -65,6 +67,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   const parsed = querySchema.safeParse({
     from: url.searchParams.get("from") ?? undefined,
     to: url.searchParams.get("to") ?? undefined,
+    pipeline_id: url.searchParams.get("pipeline_id") ?? undefined,
+    source: url.searchParams.get("source") ?? undefined,
   });
   if (!parsed.success) {
     return fail("validation_failed", "Query inválida.", 422, {
@@ -88,6 +92,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     p_org: activeOrg.orgId,
     p_from: from.toISOString(),
     p_to: to.toISOString(),
+    p_pipeline_id: parsed.data.pipeline_id,
+    p_source: parsed.data.source,
   });
   if (error) return fail("internal_error", error.message, 500, { requestId });
 
@@ -107,6 +113,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   return ok(
     {
       window: { from: from.toISOString(), to: to.toISOString() },
+      pipeline_id: parsed.data.pipeline_id ?? null,
+      source: parsed.data.source ?? null,
       kpis: dashboard.kpis,
       leads_por_dia: dashboard.leads_por_dia,
       receita_por_origem: dashboard.receita_por_origem,

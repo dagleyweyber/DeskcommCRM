@@ -15,12 +15,20 @@ import { lastLine, sql } from "./gov-helpers";
 
 const ORG_A = "05050505-0000-4000-8000-000000000001";
 const ORG_B = "05050505-0000-4000-8000-000000000002";
+const ORG_C = "05050505-0000-4000-8000-000000000003";
 const MANAGER_A = "05050505-1111-4000-8000-000000000001";
 const MANAGER_B = "05050505-1111-4000-8000-000000000002";
+const MANAGER_C = "05050505-1111-4000-8000-000000000003";
 const PIPELINE_A = "05050505-5555-4000-8000-000000000001";
 const STAGE_A = "05050505-5555-4000-8000-000000000002";
 const PIPELINE_B = "05050505-5555-4000-8000-000000000003";
 const STAGE_B = "05050505-5555-4000-8000-000000000004";
+// ORG_C é exclusivo dos testes de filtro (pipeline/origem) — dataset separado
+// de ORG_A pra não recalcular os números exatos já verificados acima.
+const PIPELINE_C1 = "05050505-5555-4000-8000-000000000005";
+const STAGE_C1 = "05050505-5555-4000-8000-000000000006";
+const PIPELINE_C2 = "05050505-5555-4000-8000-000000000007";
+const STAGE_C2 = "05050505-5555-4000-8000-000000000008";
 
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
@@ -33,26 +41,33 @@ beforeAll(() => {
   sql(`
     insert into auth.users (id, email) values
       ('${MANAGER_A}', 'm9-manager-a@invariant.test'),
-      ('${MANAGER_B}', 'm9-manager-b@invariant.test')
+      ('${MANAGER_B}', 'm9-manager-b@invariant.test'),
+      ('${MANAGER_C}', 'm9-manager-c@invariant.test')
     on conflict do nothing;
 
     insert into public.organizations (id, slug, legal_name, display_name) values
       ('${ORG_A}', 'gov-sales-a', 'Gov Sales Org A', 'Gov Sales A'),
-      ('${ORG_B}', 'gov-sales-b', 'Gov Sales Org B', 'Gov Sales B')
+      ('${ORG_B}', 'gov-sales-b', 'Gov Sales Org B', 'Gov Sales B'),
+      ('${ORG_C}', 'gov-sales-c', 'Gov Sales Org C', 'Gov Sales C')
     on conflict do nothing;
 
     insert into public.user_organizations (user_id, organization_id, role, accepted_at) values
       ('${MANAGER_A}', '${ORG_A}', 'manager', now()),
-      ('${MANAGER_B}', '${ORG_B}', 'manager', now())
+      ('${MANAGER_B}', '${ORG_B}', 'manager', now()),
+      ('${MANAGER_C}', '${ORG_C}', 'manager', now())
     on conflict do nothing;
 
     insert into public.crm_pipelines (id, organization_id, name, slug) values
       ('${PIPELINE_A}', '${ORG_A}', 'Gov Sales A', 'gov-sales-a'),
-      ('${PIPELINE_B}', '${ORG_B}', 'Gov Sales B', 'gov-sales-b')
+      ('${PIPELINE_B}', '${ORG_B}', 'Gov Sales B', 'gov-sales-b'),
+      ('${PIPELINE_C1}', '${ORG_C}', 'Gov Sales C1', 'gov-sales-c1'),
+      ('${PIPELINE_C2}', '${ORG_C}', 'Gov Sales C2', 'gov-sales-c2')
     on conflict do nothing;
     insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position) values
       ('${STAGE_A}', '${ORG_A}', '${PIPELINE_A}', 'Novo', 'novo', 1000),
-      ('${STAGE_B}', '${ORG_B}', '${PIPELINE_B}', 'Novo', 'novo', 1000)
+      ('${STAGE_B}', '${ORG_B}', '${PIPELINE_B}', 'Novo', 'novo', 1000),
+      ('${STAGE_C1}', '${ORG_C}', '${PIPELINE_C1}', 'Novo', 'novo', 1000),
+      ('${STAGE_C2}', '${ORG_C}', '${PIPELINE_C2}', 'Novo', 'novo', 1000)
     on conflict do nothing;
 
     -- ORG_A: 3 opens (whatsapp, D1) + 2 won (whatsapp, D1→D1, 100000 cada) +
@@ -75,6 +90,13 @@ beforeAll(() => {
     -- ORG_B: 1 won gigante, pra provar que NÃO vaza pra ORG_A.
     insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
       values ('${ORG_B}', '${PIPELINE_B}', '${STAGE_B}', 'B won grande', 'won', 'meta_ads', 99999900, '${D1}', '${D1}');
+
+    -- ORG_C: dataset exclusivo dos testes de filtro p_pipeline_id/p_source —
+    -- um won em cada pipeline/origem, pra não recalcular os números de ORG_A.
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${ORG_C}', '${PIPELINE_C1}', '${STAGE_C1}', 'C won wa', 'won', 'whatsapp', 100000, '${D1}', '${D1}');
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${ORG_C}', '${PIPELINE_C2}', '${STAGE_C2}', 'C won ig', 'won', 'instagram', 200000, '${D1}', '${D1}');
   `);
 });
 
@@ -108,10 +130,16 @@ interface Dashboard {
   receita_por_origem: OrigemRow[];
 }
 
-function fetchDashboard(actorId: string, org: string): Dashboard {
+function fetchDashboard(
+  actorId: string,
+  org: string,
+  filtro?: { pipelineId?: string; source?: string },
+): Dashboard {
+  const pArg = filtro?.pipelineId ? `'${filtro.pipelineId}'::uuid` : "null";
+  const sArg = filtro?.source ? `'${filtro.source}'` : "null";
   const out = sql(`
     ${asRole(actorId)}
-    select public.fn_sales_dashboard('${org}', '${FROM}', '${TO}')::text;
+    select public.fn_sales_dashboard('${org}', '${FROM}', '${TO}', ${pArg}, ${sArg})::text;
   `);
   return JSON.parse(lastLine(out)) as Dashboard;
 }
@@ -192,5 +220,35 @@ describe("Dashboard de Vendas, Fase 1 — fn_sales_dashboard (números exatos)",
     expect(crossOrg.kpis.leads_total).toBe(0);
     expect(crossOrg.kpis.vendas).toBe(0);
     expect(crossOrg.kpis.receita_total_cents).toBe(0);
+  });
+});
+
+// ---- migration 0156: filtro por pipeline e por origem ----
+
+describe("fn_sales_dashboard — filtro p_pipeline_id/p_source (migration 0156)", () => {
+  it("sem filtro: ORG_C soma os dois pipelines/origens (leads_total=2, receita=300000)", () => {
+    const d = fetchDashboard(MANAGER_C, ORG_C);
+    expect(d.kpis).toMatchObject({ leads_total: 2, vendas: 2, receita_total_cents: 300_000 });
+  });
+
+  it("⭐ p_pipeline_id restringe ao pipeline escolhido — o won do OUTRO pipeline some", () => {
+    const d = fetchDashboard(MANAGER_C, ORG_C, { pipelineId: PIPELINE_C1 });
+    expect(d.kpis).toMatchObject({ leads_total: 1, vendas: 1, receita_total_cents: 100_000 });
+    expect(d.receita_por_origem).toEqual([
+      { origem: "whatsapp", leads: 1, vendas: 1, receita_cents: 100_000 },
+    ]);
+  });
+
+  it("⭐ p_source restringe à origem escolhida — receita_por_origem colapsa para 1 linha, sem caso especial", () => {
+    const d = fetchDashboard(MANAGER_C, ORG_C, { source: "instagram" });
+    expect(d.kpis).toMatchObject({ leads_total: 1, vendas: 1, receita_total_cents: 200_000 });
+    expect(d.receita_por_origem).toEqual([
+      { origem: "instagram", leads: 1, vendas: 1, receita_cents: 200_000 },
+    ]);
+  });
+
+  it("pipeline + origem que não combinam ⇒ zero (o won ig não está no pipeline C1)", () => {
+    const d = fetchDashboard(MANAGER_C, ORG_C, { pipelineId: PIPELINE_C1, source: "instagram" });
+    expect(d.kpis).toMatchObject({ leads_total: 0, vendas: 0, receita_total_cents: 0 });
   });
 });

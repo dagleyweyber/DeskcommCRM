@@ -26,16 +26,35 @@ export interface ReceitaPorOrigem {
 
 export interface SalesDashboard {
   window: { from: string; to: string };
+  pipeline_id: string | null;
+  source: string | null;
   kpis: SalesKpis;
   leads_por_dia: LeadsPorDia[];
   receita_por_origem: ReceitaPorOrigem[];
 }
 
-/** Dashboard de Vendas, Fase 1 — KPIs + gráficos com dado que já existe. Janela default: últimos 30 dias. */
-export function useSalesDashboard() {
+export interface SalesDashboardFiltros {
+  /** ISO-8601 com offset. Ausente ⇒ a rota assume os últimos 30 dias. */
+  from?: string;
+  to?: string;
+  pipelineId?: string;
+  source?: string;
+}
+
+/** Dashboard de Vendas — KPIs + gráficos com dado que já existe. Sem filtro, últimos 30 dias, sem recorte de pipeline/origem. */
+export function useSalesDashboard(filtros: SalesDashboardFiltros = {}) {
+  const { from, to, pipelineId, source } = filtros;
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  if (pipelineId) qs.set("pipeline_id", pipelineId);
+  if (source) qs.set("source", source);
+  const query = qs.toString();
+
   return useQuery({
-    queryKey: ["metrics", "sales"],
-    queryFn: async () => apiClient.get<{ data: SalesDashboard }>("/api/v1/metrics/sales"),
+    queryKey: ["metrics", "sales", from ?? null, to ?? null, pipelineId ?? null, source ?? null],
+    queryFn: async () =>
+      apiClient.get<{ data: SalesDashboard }>(`/api/v1/metrics/sales${query ? `?${query}` : ""}`),
     staleTime: 30_000,
   });
 }

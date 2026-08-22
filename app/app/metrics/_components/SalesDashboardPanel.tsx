@@ -10,7 +10,7 @@ import {
   Legend,
 } from "recharts";
 
-import { useSalesDashboard } from "@/hooks/metrics/useSalesDashboard";
+import { useSalesDashboard, type SalesDashboardFiltros } from "@/hooks/metrics/useSalesDashboard";
 import { KpiCard } from "./KpiCard";
 
 function formatCurrency(cents: number): string {
@@ -53,8 +53,12 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-export function SalesDashboardPanel() {
-  const { data, isLoading, isError } = useSalesDashboard();
+interface Props {
+  filtros?: SalesDashboardFiltros;
+}
+
+export function SalesDashboardPanel({ filtros }: Props) {
+  const { data, isLoading, isError } = useSalesDashboard(filtros);
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>;
   if (isError || !data) return <p className="text-sm text-destructive">Erro ao carregar o dashboard de vendas.</p>;
