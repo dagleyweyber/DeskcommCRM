@@ -103,14 +103,14 @@ export function SalesDashboardPanel() {
                   contentStyle={{
                     borderRadius: "8px",
                     fontSize: "12px",
-                    border: "1px solid hsl(var(--border))",
+                    border: "1px solid var(--color-border)",
                   }}
                 />
                 <Legend
                   formatter={(value) => (value === "criados" ? "Criados" : "Convertidos")}
                   wrapperStyle={{ fontSize: "12px" }}
                 />
-                <Bar dataKey="criados" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="criados" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="convertidos" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -143,10 +143,10 @@ export function SalesDashboardPanel() {
                   contentStyle={{
                     borderRadius: "8px",
                     fontSize: "12px",
-                    border: "1px solid hsl(var(--border))",
+                    border: "1px solid var(--color-border)",
                   }}
                 />
-                <Bar dataKey="receita_cents" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="receita_cents" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
