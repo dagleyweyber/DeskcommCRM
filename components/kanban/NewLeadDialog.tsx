@@ -24,6 +24,7 @@ import {
 import { useCreateLead } from "@/hooks/kanban/useCreateLead";
 import { useCreateContact } from "@/hooks/contacts/useCreateContact";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
+import { useServiceOptions } from "@/hooks/pipelines/useServiceOptions";
 import type { Stage } from "@/lib/kanban/types";
 import { createLeadSchema, type CreateLeadInput } from "@/lib/schemas/leads";
 import { LEAD_SOURCES, NO_OWNER, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
@@ -62,6 +63,8 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   const create = useCreateLead(pipelineId);
   const createContact = useCreateContact();
   const { data: members } = useAssignableMembers(open);
+  const { data: serviceOptionsRes } = useServiceOptions(pipelineId);
+  const serviceOptions = serviceOptionsRes?.data.service_options ?? [];
   const initialStage = useMemo(() => defaultStageId(stages), [stages]);
 
   const form = useForm<FormShape>({
@@ -179,6 +182,7 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   const stageId = form.watch("stage_id");
   const ownerUserId = form.watch("owner_user_id");
   const source = form.watch("source");
+  const produtoInteresse = form.watch("produtoInteresse");
   const busy = create.isPending || createContact.isPending;
 
   return (
@@ -279,11 +283,29 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="produtoInteresse">Produto de interesse</Label>
-              <Input
-                id="produtoInteresse"
-                placeholder="Ex: Combo Presente"
-                {...form.register("produtoInteresse")}
-              />
+              {serviceOptions.length > 0 ? (
+                <Select
+                  value={produtoInteresse}
+                  onValueChange={(v) => form.setValue("produtoInteresse", v)}
+                >
+                  <SelectTrigger id="produtoInteresse">
+                    <SelectValue placeholder="Selecione o serviço" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {serviceOptions.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="produtoInteresse"
+                  placeholder="Ex: Combo Presente"
+                  {...form.register("produtoInteresse")}
+                />
+              )}
             </div>
             <div className="space-y-2">
               <Label>Origem do lead</Label>

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { useEditLead } from "@/hooks/kanban/useUpdateLead";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
+import { useServiceOptions } from "@/hooks/pipelines/useServiceOptions";
 import { useContact } from "@/hooks/contacts/useContact";
 import { useCreateContact } from "@/hooks/contacts/useCreateContact";
 import { useUpdateContact } from "@/hooks/contacts/useUpdateContact";
@@ -85,6 +86,8 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   const updateContact = useUpdateContact(lead.contact_id ?? "");
   const contact = useContact(lead.contact_id ?? "");
   const { data: members } = useAssignableMembers(true);
+  const { data: serviceOptionsRes } = useServiceOptions(pipelineId);
+  const serviceOptions = serviceOptionsRes?.data.service_options ?? [];
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -226,6 +229,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
 
   const source = form.watch("source");
   const ownerUserId = form.watch("owner_user_id");
+  const produtoInteresse = form.watch("produtoInteresse");
   const busy = edit.isPending || createContact.isPending || updateContact.isPending;
 
   return (
@@ -276,7 +280,31 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="produtoInteresse">Produto de interesse</Label>
-            <Input id="produtoInteresse" placeholder="Ex: Combo Presente" {...form.register("produtoInteresse")} />
+            {serviceOptions.length > 0 ? (
+              <Select
+                value={produtoInteresse}
+                onValueChange={(v) => form.setValue("produtoInteresse", v)}
+              >
+                <SelectTrigger id="produtoInteresse">
+                  <SelectValue placeholder="Selecione o serviço" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* Lead com valor livre de antes da lista existir (ou digitado fora dela)
+                      continua aparecendo e sendo preservado — não é apagado por já não
+                      bater com nenhuma opção configurada agora. */}
+                  {produtoInteresse && !serviceOptions.includes(produtoInteresse) && (
+                    <SelectItem value={produtoInteresse}>{produtoInteresse}</SelectItem>
+                  )}
+                  {serviceOptions.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input id="produtoInteresse" placeholder="Ex: Combo Presente" {...form.register("produtoInteresse")} />
+            )}
           </div>
         </div>
 

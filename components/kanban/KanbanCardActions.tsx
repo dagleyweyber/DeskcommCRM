@@ -11,13 +11,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { DotsThree, PencilSimple, Users } from "@/lib/ui/icons";
+import { ChatCircle, DotsThree, PencilSimple, Users } from "@/lib/ui/icons";
 import { useWinLead, useEditLead } from "@/hooks/kanban/useUpdateLead";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
 import { usePermission } from "@/hooks/auth/AuthProvider";
 import { LoseLeadDialog } from "./LoseLeadDialog";
 import { EditLeadDialog } from "./EditLeadDialog";
+import { ObjectionDialog } from "./ObjectionDialog";
 import type { Lead } from "@/lib/types/leads";
 
 interface KanbanCardActionsProps {
@@ -28,6 +29,7 @@ interface KanbanCardActionsProps {
 export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) {
   const [loseOpen, setLoseOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [objectionOpen, setObjectionOpen] = useState(false);
   const winMutation = useWinLead(pipelineId);
   const editMutation = useEditLead(pipelineId);
   // spec 13 §4: escrita no funil é agent+ — viewer não reatribui (a rota
@@ -125,6 +127,14 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
             </DropdownMenuSub>
           )}
           <DropdownMenuItem
+            onSelect={() => {
+              setObjectionOpen(true);
+            }}
+          >
+            <ChatCircle size={14} className="mr-2" /> Registrar objeção
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
             disabled={winMutation.isPending}
             onSelect={() => {
               winMutation.mutate({ leadId: lead.id });
@@ -152,6 +162,12 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
         open={editOpen}
         onOpenChange={setEditOpen}
         lead={lead}
+        pipelineId={pipelineId}
+      />
+      <ObjectionDialog
+        open={objectionOpen}
+        onOpenChange={setObjectionOpen}
+        leadId={lead.id}
         pipelineId={pipelineId}
       />
     </>

@@ -24,6 +24,18 @@ export interface ReceitaPorOrigem {
   receita_cents: number;
 }
 
+export interface ReceitaPorServico {
+  servico: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
+
+export interface PrincipalObjecao {
+  motivo: string;
+  quantidade: number;
+}
+
 export interface SalesDashboard {
   window: { from: string; to: string };
   pipeline_id: string | null;
@@ -31,6 +43,8 @@ export interface SalesDashboard {
   kpis: SalesKpis;
   leads_por_dia: LeadsPorDia[];
   receita_por_origem: ReceitaPorOrigem[];
+  receita_por_servico: ReceitaPorServico[];
+  principais_objecoes: PrincipalObjecao[];
 }
 
 export interface SalesDashboardFiltros {

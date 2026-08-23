@@ -50,7 +50,12 @@ export type ActivityType =
   | "followup_snoozed"
   | "followup_step_skipped"
   | "demand_closed"
-  | "promise_unowned";
+  | "promise_unowned"
+  /** O cliente levantou uma objeção (preço, "vou pensar"...) enquanto o negócio
+   *  ainda está ABERTO — diferente de `lost_reason`, que só existe no fim. Sem
+   *  isto na timeline, "por que este lead não avança?" só tinha resposta depois
+   *  que ele já morreu. */
+  | "objection";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou pelo WhatsApp",
@@ -117,6 +122,7 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // invisível na timeline — só existia em audit e event_log, que ninguém lê na
   // tela — e o dossiê de um negócio fechado terminava sem dizer que fechou.
   demand_closed: "Demanda encerrada",
+  objection: "Objeção registrada",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */

@@ -146,5 +146,11 @@ export const pipelineConfigPatchSchema = z.object({
     .optional(),
   fields: z.array(customFieldSchema).max(50).optional(),
   lost_reasons: z.array(z.string().min(1).max(80)).max(50).optional(),
+  // Vocabulário fechado pro "Produto de interesse" (custom_fields.produto_interesse) —
+  // mesmo shape de lost_reasons. Sem isto o campo é texto livre e fragmenta
+  // "Receita por Serviço" em variações quase-duplicadas ("Botox"/"botox"/
+  // "Botox facial"). Ausente/vazio ⇒ LeadFieldsForm cai pro <Input> de texto
+  // livre de sempre — zero quebra pra quem já usa.
+  service_options: z.array(z.string().min(1).max(80)).max(50).optional(),
 });
 export type PipelineConfigPatch = z.infer<typeof pipelineConfigPatchSchema>;

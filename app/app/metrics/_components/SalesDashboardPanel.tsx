@@ -11,7 +11,12 @@ import {
 } from "recharts";
 
 import { useSalesDashboard, type SalesDashboardFiltros } from "@/hooks/metrics/useSalesDashboard";
+import { OBJECTION_LABELS } from "@/lib/schemas/leads";
 import { KpiCard } from "./KpiCard";
+
+function rotuloObjecao(motivo: string): string {
+  return OBJECTION_LABELS[motivo as keyof typeof OBJECTION_LABELS] ?? motivo;
+}
 
 function formatCurrency(cents: number): string {
   return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -63,9 +68,11 @@ export function SalesDashboardPanel({ filtros }: Props) {
   if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>;
   if (isError || !data) return <p className="text-sm text-destructive">Erro ao carregar o dashboard de vendas.</p>;
 
-  const { kpis, leads_por_dia, receita_por_origem } = data.data;
+  const { kpis, leads_por_dia, receita_por_origem, receita_por_servico, principais_objecoes } = data.data;
   const hasLeadsPorDia = leads_por_dia.some((d) => d.criados > 0 || d.convertidos > 0);
   const hasOrigem = receita_por_origem.length > 0;
+  const hasServico = receita_por_servico.length > 0;
+  const hasObjecoes = principais_objecoes.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -151,6 +158,77 @@ export function SalesDashboardPanel({ filtros }: Props) {
                   }}
                 />
                 <Bar dataKey="receita_cents" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Receita por Serviço">
+          {!hasServico ? (
+            <EmptyChart />
+          ) : (
+            <ResponsiveContainer width="100%" height={224}>
+              <BarChart data={receita_por_servico} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                <XAxis
+                  dataKey="servico"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={0}
+                />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => (v / 100).toLocaleString("pt-BR", { notation: "compact" })}
+                  width={50}
+                />
+                <Tooltip
+                  formatter={(value) => [formatCurrency(Number(value)), "Receita"]}
+                  contentStyle={{
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    border: "1px solid var(--color-border)",
+                  }}
+                />
+                <Bar dataKey="receita_cents" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Principais Objeções">
+          {!hasObjecoes ? (
+            <EmptyChart />
+          ) : (
+            <ResponsiveContainer width="100%" height={224}>
+              <BarChart
+                data={principais_objecoes}
+                layout="vertical"
+                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis
+                  type="category"
+                  dataKey="motivo"
+                  tickFormatter={rotuloObjecao}
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={130}
+                />
+                <Tooltip
+                  formatter={(value) => [formatInt(Number(value)), "Ocorrências"]}
+                  labelFormatter={(label) => rotuloObjecao(String(label))}
+                  contentStyle={{
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    border: "1px solid var(--color-border)",
+                  }}
+                />
+                <Bar dataKey="quantidade" fill="var(--color-accent)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}

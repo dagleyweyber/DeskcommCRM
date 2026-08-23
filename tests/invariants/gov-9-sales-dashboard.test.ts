@@ -29,6 +29,16 @@ const PIPELINE_C1 = "05050505-5555-4000-8000-000000000005";
 const STAGE_C1 = "05050505-5555-4000-8000-000000000006";
 const PIPELINE_C2 = "05050505-5555-4000-8000-000000000007";
 const STAGE_C2 = "05050505-5555-4000-8000-000000000008";
+// ORG_D é exclusivo dos testes de Fase 2 (receita por serviço + objeções) —
+// dataset separado, mesma razão do ORG_C acima.
+const ORG_D = "05050505-0000-4000-8000-000000000004";
+const MANAGER_D = "05050505-1111-4000-8000-000000000004";
+const PIPELINE_D = "05050505-5555-4000-8000-000000000009";
+const STAGE_D = "05050505-5555-4000-8000-00000000000a";
+const LEAD_D1 = "05050505-6666-4000-8000-000000000001"; // Botox
+const LEAD_D2 = "05050505-6666-4000-8000-000000000002"; // Botox
+const LEAD_D3 = "05050505-6666-4000-8000-000000000003"; // Preenchimento
+const LEAD_D4 = "05050505-6666-4000-8000-000000000004"; // sem produto_interesse
 
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
@@ -97,6 +107,44 @@ beforeAll(() => {
       values ('${ORG_C}', '${PIPELINE_C1}', '${STAGE_C1}', 'C won wa', 'won', 'whatsapp', 100000, '${D1}', '${D1}');
     insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
       values ('${ORG_C}', '${PIPELINE_C2}', '${STAGE_C2}', 'C won ig', 'won', 'instagram', 200000, '${D1}', '${D1}');
+
+    -- ORG_D: dataset exclusivo dos testes de Fase 2 (receita por serviço +
+    -- objeções). 4 leads won — 2 Botox, 1 Preenchimento, 1 SEM produto_interesse
+    -- (vira "Não informado" no relatório, mas ainda soma na receita).
+    insert into auth.users (id, email) values ('${MANAGER_D}', 'm9-manager-d@invariant.test')
+      on conflict do nothing;
+    insert into public.organizations (id, slug, legal_name, display_name)
+      values ('${ORG_D}', 'gov-sales-d', 'Gov Sales Org D', 'Gov Sales D')
+      on conflict do nothing;
+    insert into public.user_organizations (user_id, organization_id, role, accepted_at)
+      values ('${MANAGER_D}', '${ORG_D}', 'manager', now())
+      on conflict do nothing;
+    insert into public.crm_pipelines (id, organization_id, name, slug)
+      values ('${PIPELINE_D}', '${ORG_D}', 'Gov Sales D', 'gov-sales-d')
+      on conflict do nothing;
+    insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position)
+      values ('${STAGE_D}', '${ORG_D}', '${PIPELINE_D}', 'Novo', 'novo', 1000)
+      on conflict do nothing;
+
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, custom_fields, created_at, closed_at)
+      values ('${LEAD_D1}', '${ORG_D}', '${PIPELINE_D}', '${STAGE_D}', 'D won botox 1', 'won', 'whatsapp', 100000, '{"produto_interesse":"Botox"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, custom_fields, created_at, closed_at)
+      values ('${LEAD_D2}', '${ORG_D}', '${PIPELINE_D}', '${STAGE_D}', 'D won botox 2', 'won', 'whatsapp', 50000, '{"produto_interesse":"Botox"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, custom_fields, created_at, closed_at)
+      values ('${LEAD_D3}', '${ORG_D}', '${PIPELINE_D}', '${STAGE_D}', 'D won preenchimento', 'won', 'whatsapp', 200000, '{"produto_interesse":"Preenchimento"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${LEAD_D4}', '${ORG_D}', '${PIPELINE_D}', '${STAGE_D}', 'D won sem servico', 'won', 'whatsapp', 30000, '${D1}', '${D1}');
+
+    -- Objeções: 2x "price" no LEAD_D1 (repete no MESMO lead — quantidade conta
+    -- OCORRÊNCIAS, não leads distintos), 1x "need_to_think" no LEAD_D2, 1 FORA
+    -- da janela (não deve contar) e 1 de outro TYPE (não deve contar).
+    insert into public.crm_lead_activities (organization_id, lead_id, source_module, type, actor_kind, performed_by_user_id, reason, payload, performed_at)
+      values
+        ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Preço', '{"code":"price"}'::jsonb, '${D1}'),
+        ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Preço', '{"code":"price"}'::jsonb, '${D1}'),
+        ('${ORG_D}', '${LEAD_D2}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Precisa pensar', '{"code":"need_to_think"}'::jsonb, '${D1}'),
+        ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Preço', '{"code":"price"}'::jsonb, '${OLD}'),
+        ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'note', 'user', '${MANAGER_D}', 'Anotação qualquer', '{}'::jsonb, '${D1}');
   `);
 });
 
@@ -124,10 +172,22 @@ interface OrigemRow {
   vendas: number;
   receita_cents: number;
 }
+interface ServicoRow {
+  servico: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
+interface ObjecaoRow {
+  motivo: string;
+  quantidade: number;
+}
 interface Dashboard {
   kpis: Kpis;
   leads_por_dia: DiaRow[];
   receita_por_origem: OrigemRow[];
+  receita_por_servico: ServicoRow[];
+  principais_objecoes: ObjecaoRow[];
 }
 
 function fetchDashboard(
@@ -250,5 +310,33 @@ describe("fn_sales_dashboard — filtro p_pipeline_id/p_source (migration 0156)"
   it("pipeline + origem que não combinam ⇒ zero (o won ig não está no pipeline C1)", () => {
     const d = fetchDashboard(MANAGER_C, ORG_C, { pipelineId: PIPELINE_C1, source: "instagram" });
     expect(d.kpis).toMatchObject({ leads_total: 0, vendas: 0, receita_total_cents: 0 });
+  });
+});
+
+// ---- migration 0157: receita por serviço + principais objeções ----
+
+describe("fn_sales_dashboard — Fase 2 (receita por serviço + objeções, migration 0157)", () => {
+  const dashboard = () => fetchDashboard(MANAGER_D, ORG_D);
+
+  it("⭐ receita_por_servico: Preenchimento(200000) > Botox(150000, 2 leads somados) > Não informado(30000)", () => {
+    expect(dashboard().receita_por_servico).toEqual([
+      { servico: "Preenchimento", leads: 1, vendas: 1, receita_cents: 200_000 },
+      { servico: "Botox", leads: 2, vendas: 2, receita_cents: 150_000 },
+      { servico: "Não informado", leads: 1, vendas: 1, receita_cents: 30_000 },
+    ]);
+  });
+
+  it("⭐ principais_objecoes: price=2 (duas no MESMO lead — conta ocorrência, não lead distinto), need_to_think=1", () => {
+    expect(dashboard().principais_objecoes).toEqual([
+      { motivo: "price", quantidade: 2 },
+      { motivo: "need_to_think", quantidade: 1 },
+    ]);
+  });
+
+  it("objeção FORA da janela e de outro type ('note') não entram na contagem", () => {
+    // Se contassem, price seria 3 (não 2) — o teste acima já provaria isso
+    // errado sozinho; este é o controle explícito do PORQUÊ.
+    const total = dashboard().principais_objecoes.reduce((acc, o) => acc + o.quantidade, 0);
+    expect(total).toBe(3);
   });
 });

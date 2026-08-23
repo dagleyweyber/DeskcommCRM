@@ -38,6 +38,12 @@ function readLostReasons(settings: Record<string, unknown> | null): string[] {
   return Array.isArray(r) ? (r as string[]) : [];
 }
 
+function readServiceOptions(settings: Record<string, unknown> | null): string[] {
+  if (!settings) return [];
+  const r = (settings as { service_options?: unknown }).service_options;
+  return Array.isArray(r) ? (r as string[]) : [];
+}
+
 export function PipelinesClient({
   pipelines,
   podeEditarConfig,
@@ -93,6 +99,9 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
   const [won, setWon] = useState(v.won ?? "Ganho");
   const [lost, setLost] = useState(v.lost ?? "Perdido");
   const [reasonsText, setReasonsText] = useState(readLostReasons(pipeline.settings).join(", "));
+  const [servicesText, setServicesText] = useState(
+    readServiceOptions(pipeline.settings).join(", "),
+  );
   const [fieldsJson, setFieldsJson] = useState(
     JSON.stringify(readFields(pipeline.settings), null, 2),
   );
@@ -112,11 +121,16 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
       .split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
+    const services = servicesText
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
 
     const patch: PipelineConfigPatch = {
       vocabulary: { lead, deal, won, lost },
       fields: fields as PipelineConfigPatch["fields"],
       lost_reasons: reasons,
+      service_options: services,
     };
     startTransition(async () => {
       const r = await updatePipelineConfig(pipeline.id, patch);
@@ -151,6 +165,19 @@ function PipelineEditor({ pipeline }: { pipeline: PipelineRow }) {
       <div className="space-y-1">
         <Label className="text-xs">Motivos de perda (separados por vírgula)</Label>
         <Input value={reasonsText} onChange={(e) => setReasonsText(e.target.value)} />
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs">Serviços/produtos (separados por vírgula)</Label>
+        <Input
+          value={servicesText}
+          onChange={(e) => setServicesText(e.target.value)}
+          placeholder="Ex: Botox, Preenchimento, Bioestimulador, Papada"
+        />
+        <p className="text-xs text-muted-foreground">
+          Vira uma lista de opções no campo &quot;Produto de interesse&quot; do lead — e alimenta
+          o gráfico de Receita por Serviço. Vazio mantém o campo como texto livre.
+        </p>
       </div>
 
       <div className="space-y-1">

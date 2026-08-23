@@ -59,6 +59,7 @@ export async function updatePipelineConfig(
   const nextSettings: Record<string, unknown> = { ...currentSettings };
   if (parsed.data.fields !== undefined) nextSettings.fields = parsed.data.fields;
   if (parsed.data.lost_reasons !== undefined) nextSettings.lost_reasons = parsed.data.lost_reasons;
+  if (parsed.data.service_options !== undefined) nextSettings.service_options = parsed.data.service_options;
 
   const { error } = await supabase
     .from("crm_pipelines")
@@ -77,6 +78,7 @@ export async function updatePipelineConfig(
       vocabulary_changed: !!parsed.data.vocabulary,
       fields_count: parsed.data.fields?.length ?? null,
       lost_reasons_count: parsed.data.lost_reasons?.length ?? null,
+      service_options_count: parsed.data.service_options?.length ?? null,
     },
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moveLeadSchema, loseLeadSchema, bulkLeadActionSchema } from "./leads";
+import { moveLeadSchema, loseLeadSchema, bulkLeadActionSchema, objectionSchema } from "./leads";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const UUID2 = "22222222-2222-4222-8222-222222222222";
@@ -47,6 +47,33 @@ describe("loseLeadSchema", () => {
   it("accepts a non-empty reason", () => {
     const r = loseLeadSchema.safeParse({ lost_reason: "Sem orçamento" });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("objectionSchema", () => {
+  it("accepts a canonical reason without a note", () => {
+    const r = objectionSchema.safeParse({ reason: "price" });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a canonical reason with a note", () => {
+    const r = objectionSchema.safeParse({ reason: "other", note: "Achou o valor alto" });
+    expect(r.success).toBe(true);
+  });
+
+  it("⭐ rejects a reason outside CANONICAL_OBJECTIONS — não é texto livre como lost_reason", () => {
+    const r = objectionSchema.safeParse({ reason: "cancelled_by_store" });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects missing reason", () => {
+    const r = objectionSchema.safeParse({ note: "sem motivo" });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects note acima de 500 caracteres", () => {
+    const r = objectionSchema.safeParse({ reason: "price", note: "x".repeat(501) });
+    expect(r.success).toBe(false);
   });
 });
 

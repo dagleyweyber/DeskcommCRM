@@ -126,4 +126,16 @@ describe("pipelineConfigPatchSchema", () => {
     });
     expect(r.success).toBe(true);
   });
+
+  it("accepts service_options (lista de serviços do 'Produto de interesse')", () => {
+    const r = pipelineConfigPatchSchema.safeParse({
+      service_options: ["Botox", "Preenchimento", "Bioestimulador"],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("service_options ausente é válido (fallback pro texto livre)", () => {
+    const r = pipelineConfigPatchSchema.safeParse({});
+    expect(r.success).toBe(true);
+  });
 });

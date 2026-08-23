@@ -56,6 +56,40 @@ export const loseLeadSchema = z.object({
 export type LoseLeadInput = z.infer<typeof loseLeadSchema>;
 
 /**
+ * Objeção levantada com o negócio ainda ABERTO — vocabulário próprio, não
+ * reaproveita CANONICAL_LOST_REASONS: aqueles são desfechos TERMINAIS
+ * ("cancelado pela loja", "falha no pagamento") que não fazem sentido pra
+ * uma objeção em andamento.
+ */
+export const CANONICAL_OBJECTIONS = [
+  "price",
+  "no_budget",
+  "need_to_think",
+  "comparing_competitors",
+  "no_authority",
+  "timing",
+  "other",
+] as const;
+export type CanonicalObjection = (typeof CANONICAL_OBJECTIONS)[number];
+
+/** Rótulo PT-BR de cada código — fonte única (dialog, rota, dashboard). */
+export const OBJECTION_LABELS: Record<CanonicalObjection, string> = {
+  price: "Preço",
+  no_budget: "Sem orçamento agora",
+  need_to_think: "Precisa pensar",
+  comparing_competitors: "Comparando outras opções",
+  no_authority: "Não decide sozinho",
+  timing: "Não é o momento",
+  other: "Outro motivo",
+};
+
+export const objectionSchema = z.object({
+  reason: z.enum(CANONICAL_OBJECTIONS),
+  note: z.string().max(500).optional(),
+});
+export type ObjectionInput = z.infer<typeof objectionSchema>;
+
+/**
  * createLeadSchema → POST /api/v1/leads
  * Status, source_metadata, position_in_stage are server-managed.
  * custom_fields aceita valor inicial do cliente (ex.: produto de interesse
