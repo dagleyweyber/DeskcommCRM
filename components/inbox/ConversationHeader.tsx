@@ -62,6 +62,35 @@ export function ConversationHeader({ conversation }: Props) {
   const emAtendimentoHumano =
     (silenciada || c?.force_human === true) && status !== "closed" && status !== "archived";
 
+  /**
+   * Fechar sem perguntar deixava o contato PARA SEMPRE fora do automático:
+   * `force_human`/`bot_silenced_until` não são tocados por fechar (só por
+   * "Devolver ao automático", que ninguém clica antes de fechar — a ação
+   * natural é só fechar e seguir para o próximo). Medido em produção: um
+   * follow-up matriculado depois nunca conseguia mandar nada, sem aviso
+   * nenhum — a matrícula parecia saudável na fila, o envio é que era vetado
+   * em silêncio lá na base. Pergunta só quando `emAtendimentoHumano` é
+   * verdade — a MESMA trava que já decide se o botão "Devolver ao
+   * automático" aparece, não uma segunda checagem divergente.
+   */
+  async function handleFechar(): Promise<void> {
+    if (!confirm(t("Fechar esta conversa?"))) return;
+    if (emAtendimentoHumano) {
+      const devolver = confirm(
+        t("Esse contato está em atendimento humano. Devolver ao bot automático antes de fechar?"),
+      );
+      if (devolver) {
+        try {
+          await retomar.mutateAsync({ conversation_id: conversation.id });
+        } catch {
+          // erro já mostrado pelo onError do hook — não fecha sem saber se devolveu de verdade.
+          return;
+        }
+      }
+    }
+    close.mutate({ conversation_id: conversation.id });
+  }
+
   return (
     // `flex-wrap` porque este header travava a LARGURA DA TELA INTEIRA. Ele
     // media 707px de `min-content` — a identidade do contato encolhia bem
@@ -161,12 +190,8 @@ export function ConversationHeader({ conversation }: Props) {
           <Button
             size="sm"
             variant="outline"
-            disabled={close.isPending}
-            onClick={() => {
-              if (confirm("Fechar esta conversa?")) {
-                close.mutate({ conversation_id: conversation.id });
-              }
-            }}
+            disabled={close.isPending || retomar.isPending}
+            onClick={handleFechar}
           >
             {t("Fechar")}
           </Button>
