@@ -205,6 +205,14 @@ export function KanbanCard({
               // 12px); a cor cheia fica na borda de estado, que é gráfica.
               <span className="truncate text-warning-fg">{state.slot.label}</span>
             )}
+            {state.slot.type === "lost" && (
+              <span
+                className="truncate text-text-muted"
+                title={`Motivo da perda: ${state.slot.label}`}
+              >
+                Perdido — {state.slot.label}
+              </span>
+            )}
             {state.slot.type === "meter" && (
               <ScoreSlot
                 probability={state.slot.probability}

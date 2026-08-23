@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { moveLeadSchema, loseLeadSchema, bulkLeadActionSchema, objectionSchema } from "./leads";
+import {
+  moveLeadSchema,
+  loseLeadSchema,
+  bulkLeadActionSchema,
+  objectionSchema,
+  formatLostReason,
+} from "./leads";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const UUID2 = "22222222-2222-4222-8222-222222222222";
@@ -47,6 +53,16 @@ describe("loseLeadSchema", () => {
   it("accepts a non-empty reason", () => {
     const r = loseLeadSchema.safeParse({ lost_reason: "Sem orçamento" });
     expect(r.success).toBe(true);
+  });
+});
+
+describe("formatLostReason", () => {
+  it("traduz código canônico pro rótulo PT-BR", () => {
+    expect(formatLostReason("price")).toBe("Preço");
+  });
+
+  it("texto livre (motivo extra do pipeline) passa direto — já é o rótulo", () => {
+    expect(formatLostReason("Mudou de cidade")).toBe("Mudou de cidade");
   });
 });
 

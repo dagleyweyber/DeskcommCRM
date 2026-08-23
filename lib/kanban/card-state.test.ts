@@ -115,6 +115,25 @@ describe("resolveCardState — precedência estrita", () => {
   });
 });
 
+describe("resolveCardState · motivo de perda", () => {
+  it("perdido vence tudo — próxima ação, esfriando e score somem do slot", () => {
+    const r = resolveCardState({
+      ...base,
+      lostReason: "Preço",
+      probability: 72,
+      band: "quente" as const,
+      isCooling: true,
+      nextAction: { label: "Ligar" },
+    });
+    expect(r.slot).toEqual({ type: "lost", label: "Preço" });
+    expect(r.showStageAge).toBe(true);
+  });
+
+  it("sem lostReason, comportamento de sempre (idle)", () => {
+    expect(resolveCardState({ ...base, lostReason: null }).slot).toEqual({ type: "idle" });
+  });
+});
+
 describe("rótulos de tempo", () => {
   it("coolingLabel: horas viram dias depois de 48h", () => {
     expect(coolingLabel(6)).toBe("Sem resposta há 6h");

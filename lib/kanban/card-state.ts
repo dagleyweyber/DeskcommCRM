@@ -1,5 +1,6 @@
 import type { ScoreBand } from "@/lib/kanban/score-band";
 import { resolveLeadOwner, type OwnerDisplay } from "@/lib/kanban/owner";
+import { formatLostReason } from "@/lib/schemas/leads";
 import type { Lead } from "@/lib/types/leads";
 
 /**
@@ -59,6 +60,12 @@ export interface CardInput {
   canonicalTag?: string | null;
   /** Todas as tags — fora do card, acessíveis no hover. */
   tags: string[];
+  /**
+   * Motivo de perda, já rotulado — só quando `status = 'lost'`. Vence toda a
+   * precedência da faixa ③: um negócio fechado não tem mais próxima ação nem
+   * proposta de retomada pendente para mostrar.
+   */
+  lostReason?: string | null;
 }
 
 /**
@@ -82,6 +89,8 @@ export function buildCardInput(
     | "owner_agent"
     | "next_action"
     | "score"
+    | "status"
+    | "lost_reason"
   >,
   opts: {
     stageName: string;
@@ -128,6 +137,8 @@ export function buildCardInput(
     nextAction: lead.next_action ? { label: lead.next_action.label } : null,
     canonicalTag: (opts.canonicalTags ?? []).find((t) => lead.tags.includes(t)) ?? null,
     tags: lead.tags,
+    lostReason:
+      lead.status === "lost" && lead.lost_reason ? formatLostReason(lead.lost_reason) : null,
   };
 }
 
@@ -136,6 +147,7 @@ export type CardSlot =
   | { type: "awaiting"; label: string }
   | { type: "cooling"; label: string }
   | { type: "reactivation"; proposalId: string; expiresAt: string }
+  | { type: "lost"; label: string }
   | {
       type: "meter";
       probability: number;
@@ -173,6 +185,18 @@ export interface CardState {
  * reimplementada dentro de componente é rejeição de review.
  */
 export function resolveCardState(input: CardInput): CardState {
+  // Perdido VENCE tudo: um negócio fechado não tem mais próxima ação, proposta
+  // de retomada, esfriamento ou score pendentes — mostrar qualquer um deles
+  // junto do motivo de perda ofereceria uma decisão sobre algo que já acabou.
+  if (input.lostReason) {
+    return {
+      kind: "normal",
+      border: "neutral",
+      slot: { type: "lost", label: input.lostReason },
+      showStageAge: true,
+    };
+  }
+
   if (input.nextAction?.label) {
     return {
       kind: "awaiting",

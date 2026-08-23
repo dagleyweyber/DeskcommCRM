@@ -45,6 +45,27 @@ export const CANONICAL_LOST_REASONS = [
 ] as const;
 export type CanonicalLostReason = (typeof CANONICAL_LOST_REASONS)[number];
 
+/** Rótulo PT-BR de cada código canônico — fonte única (dialog, card do Kanban). */
+export const LOST_REASON_LABELS: Record<CanonicalLostReason, string> = {
+  requested_by_customer: "Cliente solicitou cancelamento",
+  price: "Preço",
+  no_response: "Sem resposta do cliente",
+  product_unavailable: "Produto indisponível",
+  cancelled_by_store: "Cancelado pela loja",
+  cancelled_by_customer: "Cancelado pelo cliente",
+  payment_failed: "Falha no pagamento",
+  other: "Outro motivo",
+};
+
+/**
+ * `lost_reason` guarda ou um código canônico ou texto livre (extensão do
+ * pipeline, já em PT-BR) — motivo de `loseLeadSchema` aceitar qualquer string.
+ * Sem entrada no mapa, o valor já É o rótulo.
+ */
+export function formatLostReason(raw: string): string {
+  return (LOST_REASON_LABELS as Record<string, string>)[raw] ?? raw;
+}
+
 /**
  * loseLeadSchema accepts canonical reasons OR any string (pipeline-extended).
  * The server-side DB trigger is the source of truth; we keep the Zod schema

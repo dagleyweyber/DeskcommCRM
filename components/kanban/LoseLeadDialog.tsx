@@ -12,18 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useLoseLead } from "@/hooks/kanban/useUpdateLead";
-import { CANONICAL_LOST_REASONS } from "@/lib/schemas/leads";
-
-const REASON_LABELS: Record<(typeof CANONICAL_LOST_REASONS)[number], string> = {
-  requested_by_customer: "Cliente solicitou cancelamento",
-  price: "Preço",
-  no_response: "Sem resposta do cliente",
-  product_unavailable: "Produto indisponível",
-  cancelled_by_store: "Cancelado pela loja",
-  cancelled_by_customer: "Cancelado pelo cliente",
-  payment_failed: "Falha no pagamento",
-  other: "Outro motivo",
-};
+import { CANONICAL_LOST_REASONS, LOST_REASON_LABELS } from "@/lib/schemas/leads";
 
 interface LoseLeadDialogProps {
   open: boolean;
@@ -84,7 +73,7 @@ export function LoseLeadDialog({
                   checked={reasonCode === code}
                   onChange={(e) => setReasonCode(e.target.value)}
                 />
-                <span>{REASON_LABELS[code]}</span>
+                <span>{LOST_REASON_LABELS[code]}</span>
               </label>
             ))}
           </div>

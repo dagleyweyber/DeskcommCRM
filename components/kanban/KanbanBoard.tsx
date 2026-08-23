@@ -13,6 +13,7 @@ import type { Lead } from "@/lib/types/leads";
 import type { Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
+import { LoseLeadDialog } from "./LoseLeadDialog";
 
 interface KanbanBoardProps {
   pipelineId: string;
@@ -114,6 +115,9 @@ export function KanbanBoard({
   // O dossiê é do BOARD e não da página: ele precisa do lead inteiro e do nome
   // do estágio, que só existem aqui depois do agrupamento.
   const [dossieId, setDossieId] = useState<string | null>(null);
+  // Arrastar pra um estágio de perda abre o mesmo diálogo do menu do card —
+  // ver o guard em `handleDragEnd`.
+  const [loseDragLeadId, setLoseDragLeadId] = useState<string | null>(null);
   const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
   const selectedLeadIds = useMemo(
     () => (selectedIds ? new Set(selectedIds) : internalSelected),
@@ -177,6 +181,23 @@ export function KanbanBoard({
       if (!lead) return;
 
       const destStageId = destination.droppableId;
+
+      // Arrastar pra um estágio `is_lost` fecha o negócio (o trigger
+      // `fn_crm_lead_close_on_stage` marca status='lost'), e o banco EXIGE
+      // `lost_reason` nesse instante (`crm_leads_lost_reason_required`). O
+      // endpoint de mover não coleta motivo — sem esta trava, o arrasto sempre
+      // falhava com 500. Em vez de mover direto, abre o mesmo diálogo do menu
+      // "Marcar como perdido" e não mexe no card até confirmar (sem
+      // `moveCard.mutate`, o board não muda e o card volta pro lugar sozinho).
+      if (
+        destStageId !== lead.stage_id &&
+        lead.status !== "lost" &&
+        data.stages.find((s) => s.id === destStageId)?.is_lost
+      ) {
+        setLoseDragLeadId(lead.id);
+        return;
+      }
+
       const destList = (grouped.get(destStageId) ?? []).filter(
         (l) => l.id !== draggableId,
       );
@@ -262,6 +283,12 @@ export function KanbanBoard({
           ownerNames={ownerNames}
         />
       )}
+      <LoseLeadDialog
+        open={loseDragLeadId !== null}
+        onOpenChange={(v) => !v && setLoseDragLeadId(null)}
+        leadId={loseDragLeadId ?? ""}
+        pipelineId={pipelineId}
+      />
     </DragDropContext>
   );
 }
