@@ -96,6 +96,17 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     return this;
   }
 
+  /**
+   * `IS NULL`/`IS TRUE`/`IS FALSE` — nasceu porque `queryTolerantToMissingArchived`
+   * (lib/channels/archived.ts) usa `.is(ARCHIVED_AT, null)` e o adaptador
+   * ESTOUROU ao ser chamado. `= NULL` não existe em SQL (sempre falso), por
+   * isso é operador próprio em vez de reaproveitar `eq`.
+   */
+  is(coluna: string, valor: null | boolean): this {
+    this.filtros.push(["is", coluna, valor]);
+    return this;
+  }
+
   order(coluna: string, opts?: { ascending?: boolean }): this {
     this.ordem = { coluna, asc: opts?.ascending !== false };
     return this;
@@ -117,6 +128,9 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
   private montar(): { texto: string; valores: unknown[] } {
     const valores: unknown[] = [];
     const onde = this.filtros.map(([op, c, v]) => {
+      // `IS NULL`/`IS TRUE`/`IS FALSE` não aceitam parâmetro — `IS $1` não é
+      // sintaxe válida de Postgres pra este operador.
+      if (op === "is") return `"${c}" is ${v === null ? "null" : v ? "true" : "false"}`;
       valores.push(v);
       return `"${c}" ${op} $${valores.length}`;
     });

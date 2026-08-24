@@ -99,6 +99,22 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
     expect(nomes).toEqual(["Bravo", "Zulu"]);
   });
 
+  it("⭐ `is` filtra IS NULL/IS TRUE/IS FALSE — `= NULL` não existe em SQL", async () => {
+    // Nasceu por pressão do mesmo mecanismo: `sessionByPhoneNumberId`
+    // (lib/channels/meta/ingest.ts, via lib/channels/archived.ts) chama
+    // `.is(ARCHIVED_AT, null)` e o adaptador ESTOUROU. `.eq(col, null)`
+    // geraria `col = $1` com `$1 = NULL`, que em SQL nunca casa — daria
+    // "nenhuma sessão encontrada" mesmo com a sessão existindo.
+    const { data } = await db
+      .from("crm_pipelines")
+      .select("name")
+      .eq("organization_id", ORG)
+      .is("is_default", false)
+      .order("position", { ascending: true });
+    const nomes = (data as Array<{ name: string }>).map((x) => x.name);
+    expect(nomes).toEqual(["Zulu", "Bravo", "Alfa"]);
+  });
+
   it("`gt` é o espelho — e os dois convivem com `eq` na mesma consulta", async () => {
     const { data } = await db
       .from("crm_pipelines")
