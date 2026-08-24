@@ -96,6 +96,66 @@ describe("o que separa inbound de status de entrega", () => {
   });
 });
 
+describe("adReferral — o clique em anúncio (Fase A da atribuição pro Meta Ads)", () => {
+  const envelopeComReferral = (referral: Record<string, unknown>) => ({
+    object: "whatsapp_business_account" as const,
+    entry: [
+      {
+        id: "w",
+        changes: [
+          {
+            field: "messages",
+            value: {
+              metadata: { phone_number_id: "pn1" },
+              messages: [
+                { id: "wamid.AD", from: "5531", timestamp: "1785342028", type: "text", text: { body: "oi" }, referral },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  it("⭐ extrai ctwa_clid + source_id + headline + source_url do referral", () => {
+    const [e] = parseMetaWebhook(
+      envelopeComReferral({
+        source_id: "120210000000000",
+        source_type: "ad",
+        source_url: "https://fb.me/xyz",
+        headline: "Promoção de Botox",
+        ctwa_clid: "AbCdEf123",
+      }),
+    ) as InboundMessageEvent[];
+    expect(e!.adReferral).toEqual({
+      clickId: "AbCdEf123",
+      sourceId: "120210000000000",
+      sourceType: "ad",
+      headline: "Promoção de Botox",
+      sourceUrl: "https://fb.me/xyz",
+    });
+  });
+
+  it("sem referral no payload, adReferral é null (maioria das mensagens)", () => {
+    const [e] = inbound(0);
+    expect(e!.adReferral).toBeNull();
+  });
+
+  it("referral sem ctwa_clid nem source_id vira null — objeto vazio não é atribuição", () => {
+    const [e] = parseMetaWebhook(
+      envelopeComReferral({ source_type: "post" }),
+    ) as InboundMessageEvent[];
+    expect(e!.adReferral).toBeNull();
+  });
+
+  it("source_id sem ctwa_clid ainda é atribuição válida (clickId null, resto preenchido)", () => {
+    const [e] = parseMetaWebhook(
+      envelopeComReferral({ source_id: "12345", source_type: "post" }),
+    ) as InboundMessageEvent[];
+    expect(e!.adReferral).toMatchObject({ clickId: null, sourceId: "12345" });
+  });
+});
+
 describe("payload capenga não vira linha meia-boca", () => {
   it("mensagem sem id é descartada", () => {
     const r = parseMetaWebhook({

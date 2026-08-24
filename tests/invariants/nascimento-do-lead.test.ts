@@ -406,3 +406,72 @@ describe("a etapa de entrada nunca é uma etapa de fechamento", () => {
     expect(rows[0]!.is_lost).toBe(false);
   });
 });
+
+describe("adReferral — atribuição de anúncio (Fase A do Meta Ads)", () => {
+  it("⭐ ctwa_clid vira source_metadata no lead recém-nascido", async () => {
+    const contato = await criarContato(ORG_VIVA, "Anúncio Ferreira");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Anúncio Ferreira",
+      adReferral: {
+        clickId: "AbCdEf123",
+        sourceId: "120210000000000",
+        headline: "Promoção de Botox",
+        sourceUrl: "https://fb.me/xyz",
+      },
+    });
+    expect(r.criado).toBe(true);
+    if (!r.criado) return;
+
+    const { rows } = await pool.query<{ source_metadata: Record<string, unknown> }>(
+      "select source_metadata from crm_leads where id = $1",
+      [r.leadId],
+    );
+    expect(rows[0]!.source_metadata).toEqual({
+      ad_click_id: "AbCdEf123",
+      ad_click_id_type: "ctwa_clid",
+      ad_id: "120210000000000",
+      ad_headline: "Promoção de Botox",
+      ad_source_url: "https://fb.me/xyz",
+    });
+  });
+
+  it("sem adReferral, source_metadata continua vazio — zero mudança pra quem não anuncia", async () => {
+    const contato = await criarContato(ORG_VIVA, "Sem Anúncio Rocha");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Sem Anúncio Rocha",
+    });
+    expect(r.criado).toBe(true);
+    if (!r.criado) return;
+
+    const { rows } = await pool.query<{ source_metadata: Record<string, unknown> }>(
+      "select source_metadata from crm_leads where id = $1",
+      [r.leadId],
+    );
+    expect(rows[0]!.source_metadata).toEqual({});
+  });
+
+  it("adReferral com só sourceId (sem clickId) grava o que houver, sem inventar o click_id", async () => {
+    const contato = await criarContato(ORG_VIVA, "Post Orgânico Melo");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Post Orgânico Melo",
+      adReferral: { clickId: null, sourceId: "999" },
+    });
+    expect(r.criado).toBe(true);
+    if (!r.criado) return;
+
+    const { rows } = await pool.query<{ source_metadata: Record<string, unknown> }>(
+      "select source_metadata from crm_leads where id = $1",
+      [r.leadId],
+    );
+    expect(rows[0]!.source_metadata).toEqual({ ad_id: "999" });
+  });
+});

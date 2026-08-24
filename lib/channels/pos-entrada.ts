@@ -97,6 +97,20 @@ export interface EntradaDeMensagem {
    * lendo o `event_log` meses depois, se saiba por onde a mensagem entrou.
    */
   origem: string;
+  /**
+   * O clique em anúncio que originou esta mensagem, quando houver — genérico
+   * de propósito (a doutrina de restrição de canal proíbe este arquivo e
+   * `nascimento-do-lead.ts` de saberem o nome do provider; quem sabe que é
+   * `ctwa_clid`/`externalAdReplyInfo` é cada `lib/channels/<provider>/`).
+   * Só entra em `crm_leads.source_metadata` no NASCIMENTO do lead — mensagem
+   * de conversa já aberta não reescreve a atribuição original.
+   */
+  adReferral?: {
+    clickId: string | null;
+    sourceId?: string | null;
+    headline?: string | null;
+    sourceUrl?: string | null;
+  } | null;
 }
 
 /**
@@ -175,6 +189,7 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
       contactId: entrada.contactId,
       conversationId: entrada.conversationId,
       nomeDoContato: entrada.nomeDoContato,
+      adReferral: entrada.adReferral,
     });
 
     // Os DOIS desfechos viram log. Sem a linha do "não criou", o silêncio de

@@ -23,6 +23,7 @@ import { fail } from "@/lib/api/wrappers";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
+import { aplicarEfeitosPosEntrada } from "@/lib/channels/pos-entrada";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,31 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           reason: r.status === "failed" ? r.reason : undefined,
           external_id: e.externalId,
           phone_number_id: e.phoneNumberId,
+        });
+      }
+      // Os TRÊS efeitos de negócio (opt-out, nascimento do lead, despacho do
+      // agente) — mesmo passo que o canal por QR e o canal intermediado já
+      // chamam. Sem isto, mensagem chegando pelo número oficial direto ficava
+      // gravada e nada mais acontecia: sem lead, sem opt-out, sem IA.
+      if (r.status === "ingested") {
+        await aplicarEfeitosPosEntrada(admin, {
+          organizationId: session.organizationId,
+          contactId: r.contactId,
+          conversationId: r.conversationId,
+          messageId: r.messageId || null,
+          channelSessionId: r.channelSessionId,
+          texto: e.text,
+          nomeDoContato: e.profileName,
+          requestId,
+          origem: "meta_cloud_webhook",
+          adReferral: e.adReferral
+            ? {
+                clickId: e.adReferral.clickId,
+                sourceId: e.adReferral.sourceId,
+                headline: e.adReferral.headline,
+                sourceUrl: e.adReferral.sourceUrl,
+              }
+            : null,
         });
       }
       continue;

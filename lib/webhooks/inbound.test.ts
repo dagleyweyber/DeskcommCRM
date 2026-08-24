@@ -39,6 +39,28 @@ describe("mapInboundPayload", () => {
     const m = mapInboundPayload({ nome: "Ana", idade: 30, nested: { a: 1 } });
     expect(m.custom_fields).toEqual({ idade: "30" });
   });
+
+  it("⭐ fbclid/fbc/fbp/gclid vão pra source_metadata, igual utm_*", () => {
+    const m = mapInboundPayload({
+      nome: "Ana",
+      fbclid: "IwAR123",
+      fbc: "fb.1.123.456",
+      fbp: "fb.1.789.012",
+      gclid: "Cj0KCQ",
+    });
+    expect(m.source_metadata).toEqual({
+      fbclid: "IwAR123",
+      fbc: "fb.1.123.456",
+      fbp: "fb.1.789.012",
+      gclid: "Cj0KCQ",
+    });
+    expect(m.custom_fields).toEqual({});
+  });
+
+  it("FBCLID em maiúscula ainda casa (mesma normalização de utm_*)", () => {
+    const m = mapInboundPayload({ FBCLID: "IwAR123" });
+    expect(m.source_metadata).toEqual({ fbclid: "IwAR123" });
+  });
 });
 
 describe("verifyInboundSignature", () => {

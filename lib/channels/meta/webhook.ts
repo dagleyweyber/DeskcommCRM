@@ -60,6 +60,22 @@ export interface TemplateStatusEvent {
  * é um megafone — o cliente responde e nada chega, nenhum lead se move, o agente não
  * acorda, e a janela de 24h (que deriva de `last_inbound_at`) nunca abre.
  */
+/**
+ * O clique em anúncio que originou esta mensagem — a Meta manda isto no
+ * `referral` da PRIMEIRA mensagem de uma conversa aberta por um anúncio
+ * "Clique para o WhatsApp". `clickId` (`ctwa_clid`) é o identificador que a
+ * própria Meta usa para casar uma conversão (Conversions API) com o anúncio
+ * exato que originou o clique — é o dado que faltava pra saber QUAL anúncio
+ * vendeu, não só QUE fonte é "meta_ads".
+ */
+export interface AdReferral {
+  clickId: string | null;
+  sourceId: string | null;
+  sourceType: string | null;
+  headline: string | null;
+  sourceUrl: string | null;
+}
+
 export interface InboundMessageEvent {
   kind: "inbound_message";
   wabaId: string;
@@ -86,6 +102,8 @@ export interface InboundMessageEvent {
     /** Nota de voz de verdade (não anexo de áudio). */
     voice: boolean;
   } | null;
+  /** `null` quando a mensagem não veio de clique em anúncio (a maioria). */
+  adReferral: AdReferral | null;
 }
 
 /** Status de entrega de uma mensagem que ENVIAMOS (sent/delivered/read/failed). */
@@ -130,6 +148,25 @@ export function normalizeRejectedReason(v: unknown): string | null {
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/** `raw.referral`, quando a mensagem veio de um clique em anúncio. */
+function parseAdReferral(raw: Record<string, unknown>): AdReferral | null {
+  const r = raw.referral as Record<string, unknown> | undefined;
+  if (!r) return null;
+  const clickId = str(r.ctwa_clid);
+  const sourceId = str(r.source_id);
+  // Sem NENHUM identificador útil, não vale gravar um objeto vazio — a
+  // ausência (null) é o sinal de "não veio de anúncio", não um objeto com
+  // tudo nulo por dentro.
+  if (!clickId && !sourceId) return null;
+  return {
+    clickId,
+    sourceId,
+    sourceType: str(r.source_type),
+    headline: str(r.headline),
+    sourceUrl: str(r.source_url),
+  };
 }
 
 /**
@@ -196,6 +233,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
                     voice: corpoMidia.voice === true,
                   }
                 : null,
+            adReferral: parseAdReferral(raw),
           });
         }
         continue;

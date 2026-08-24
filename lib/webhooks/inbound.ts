@@ -16,6 +16,15 @@ const DEFAULT_FIELD_MAP: Required<FieldMap> = {
   email: ["email", "e-mail", "mail"],
 };
 
+/**
+ * Identificadores de clique de anúncio que chegam soltos na URL (site,
+ * Typebot) — mesmo destino dos `utm_*`: `source_metadata`, pra alimentar o
+ * dashboard e o futuro envio ao Meta/Google Conversions API. `fbclid` é o
+ * parâmetro que a Meta gruda na URL de quem clicou; `fbc`/`fbp` são os
+ * cookies do Pixel quando o site os tem instalados.
+ */
+const ATTRIBUTION_KEYS = new Set(["fbclid", "fbc", "fbp", "gclid"]);
+
 export interface MappedLead {
   name: string | null;
   phone: string | null;
@@ -76,7 +85,8 @@ export function mapInboundPayload(
     const str =
       typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : null;
     if (str === null) continue; // objetos/arrays aninhados: descartados no v1
-    if (key.toLowerCase().startsWith("utm_")) source_metadata[key.toLowerCase()] = str;
+    const lower = key.toLowerCase();
+    if (lower.startsWith("utm_") || ATTRIBUTION_KEYS.has(lower)) source_metadata[lower] = str;
     else custom_fields[key] = str;
   }
 

@@ -257,6 +257,46 @@ function notifyNameOf(p: WahaPayload): string | null {
   return p._data?.notifyName ?? p._data?.pushName ?? null;
 }
 
+function str(v: unknown): string | null {
+  return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/**
+ * O clique em anúncio que originou esta mensagem, quando ela veio de um
+ * "Clique para o WhatsApp" — o Baileys/WAHA entrega isso em `contextInfo.
+ * externalAdReplyInfo`, dentro da chave do TIPO da mensagem
+ * (`extendedTextMessage`, `imageMessage`...), não num lugar fixo. Por isso
+ * varre todas as chaves de `_data.message` em vez de ler um caminho só —
+ * mesma limitação que `resolveMessageType` já documenta pra NOWEB.
+ */
+export function adReferralDe(
+  p: WahaPayload,
+): { clickId: string | null; sourceId: string | null; headline: string | null; sourceUrl: string | null } | null {
+  const msg = p._data?.message;
+  if (!msg || typeof msg !== "object") return null;
+
+  for (const value of Object.values(msg)) {
+    const contextInfo = (value as { contextInfo?: unknown } | undefined)?.contextInfo as
+      | { externalAdReplyInfo?: unknown }
+      | undefined;
+    const info = contextInfo?.externalAdReplyInfo as Record<string, unknown> | undefined;
+    if (!info) continue;
+
+    const clickId = str(info.ctwaClid);
+    const sourceId = str(info.sourceId);
+    // Sem nenhum identificador útil, não vale gravar — mesmo critério do
+    // parser do outro canal (lib/channels/meta/webhook.ts).
+    if (!clickId && !sourceId) continue;
+    return {
+      clickId,
+      sourceId,
+      headline: str(info.title),
+      sourceUrl: str(info.sourceUrl),
+    };
+  }
+  return null;
+}
+
 /**
  * O telefone REAL de quem escreveu, quando o chat chega como `@lid`.
  *
@@ -538,6 +578,7 @@ async function handleInbound(
     nomeDoContato: notifyNameOf(p),
     requestId,
     origem: "waha_webhook",
+    adReferral: adReferralDe(p),
   });
 
   // ── POR QUE NÃO SE EMITE `message.received` AQUI ────────────────────────────

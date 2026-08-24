@@ -69,6 +69,19 @@ export interface DadosDoNascimento {
   conversationId: string;
   /** nome do contato, para o título do card. */
   nomeDoContato: string | null;
+  /**
+   * O clique em anúncio que originou a conversa, quando houver — genérico
+   * de propósito (ver o comentário em `lib/channels/pos-entrada.ts`). Vira
+   * `crm_leads.source_metadata`; é a peça que faz o dashboard e o futuro
+   * envio ao Meta Conversions API saberem qual anúncio vendeu, não só que a
+   * origem foi "meta_ads".
+   */
+  adReferral?: {
+    clickId: string | null;
+    sourceId?: string | null;
+    headline?: string | null;
+    sourceUrl?: string | null;
+  } | null;
 }
 
 /**
@@ -182,6 +195,24 @@ export async function garantirLeadDaConversa(
         : // "Sem nome" serve para uma linha de lista; um card de kanban precisa
           // dizer de onde veio, senão o quadro vira uma coluna de anônimos iguais.
           "Novo contato pelo WhatsApp";
+  // O shape canônico de atribuição de anúncio — mesmo formato lido depois
+  // pelo dashboard e pelo envio ao Meta Conversions API. `undefined` quando
+  // não há clique de anúncio: comportamento de hoje, sem mudança pra quem
+  // não anuncia. `clickId` pode faltar mesmo com `adReferral` presente (a
+  // Meta manda `source_id` sem `ctwa_clid` em alguns formatos de anúncio) —
+  // grava o que houver, sem inventar o que faltou.
+  const sourceMetadata = dados.adReferral
+    ? {
+        ...(dados.adReferral.clickId
+          ? { ad_click_id: dados.adReferral.clickId, ad_click_id_type: "ctwa_clid" }
+          : {}),
+        ...(dados.adReferral.sourceId ? { ad_id: dados.adReferral.sourceId } : {}),
+        ...(dados.adReferral.headline ? { ad_headline: dados.adReferral.headline } : {}),
+        ...(dados.adReferral.sourceUrl ? { ad_source_url: dados.adReferral.sourceUrl } : {}),
+      }
+    : undefined;
+  const temSourceMetadata = sourceMetadata && Object.keys(sourceMetadata).length > 0;
+
   const { data: lead, error } = await db
     .from("crm_leads")
     .insert({
@@ -191,6 +222,7 @@ export async function garantirLeadDaConversa(
       contact_id: contactId,
       title: titulo,
       source: "whatsapp",
+      ...(temSourceMetadata ? { source_metadata: sourceMetadata } : {}),
     })
     .select("id")
     .single();

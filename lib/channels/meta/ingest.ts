@@ -30,7 +30,14 @@ import type { InboundMessageEvent } from "./webhook";
 type Admin = SupabaseClient;
 
 export type IngestOutcome =
-  | { status: "ingested"; messageId: string; conversationId: string }
+  | {
+      status: "ingested";
+      messageId: string;
+      conversationId: string;
+      /** Pra quem chama poder rodar os efeitos de pós-entrada (opt-out, lead, despacho). */
+      contactId: string;
+      channelSessionId: string;
+    }
   | { status: "duplicate" }
   | { status: "no_session" }
   | { status: "failed"; reason: string };
@@ -169,5 +176,7 @@ export async function ingestMetaInbound(
     status: "ingested",
     messageId: (inserida as { id: string } | null)?.id ?? "",
     conversationId: conversationId as string,
+    contactId: contactId as string,
+    channelSessionId: sessao.id,
   };
 }

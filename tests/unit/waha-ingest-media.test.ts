@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/audit", () => ({ audit: vi.fn() }));
 
 import {
+  adReferralDe,
   mediaMimeOf,
   mediaUrlOf,
   resolveMessageType,
@@ -76,5 +77,58 @@ describe("resolveMessageType", () => {
 
   it("sem type, sem message e sem mídia → text", () => {
     expect(resolveMessageType({ body: "oi" })).toBe("text");
+  });
+});
+
+describe("adReferralDe — o clique em anúncio (Fase A da atribuição pro Meta Ads)", () => {
+  function withExternalAdReply(
+    messageKey: string,
+    info: Record<string, unknown>,
+  ): WahaPayload {
+    return {
+      id: "false_x@lid_ABC",
+      from: "5531999999999@s.whatsapp.net",
+      fromMe: false,
+      body: "oi",
+      _data: {
+        message: {
+          [messageKey]: { contextInfo: { externalAdReplyInfo: info } },
+        },
+      },
+    };
+  }
+
+  it("⭐ extrai ctwaClid + sourceId + title + sourceUrl de extendedTextMessage (resposta de texto a um CTWA)", () => {
+    const p = withExternalAdReply("extendedTextMessage", {
+      ctwaClid: "AbCdEf123",
+      sourceId: "120210000000000",
+      title: "Promoção de Botox",
+      sourceUrl: "https://fb.me/xyz",
+    });
+    expect(adReferralDe(p)).toEqual({
+      clickId: "AbCdEf123",
+      sourceId: "120210000000000",
+      headline: "Promoção de Botox",
+      sourceUrl: "https://fb.me/xyz",
+    });
+  });
+
+  it("também acha o contextInfo dentro de uma mensagem de mídia (imageMessage)", () => {
+    const p = withExternalAdReply("imageMessage", { ctwaClid: "XYZ", sourceId: "1" });
+    expect(adReferralDe(p)?.clickId).toBe("XYZ");
+  });
+
+  it("mensagem comum, sem contextInfo, devolve null (maioria das mensagens)", () => {
+    const p: WahaPayload = { id: "x", from: "553199@s.whatsapp.net", body: "oi", _data: { message: { conversation: "oi" } } };
+    expect(adReferralDe(p)).toBeNull();
+  });
+
+  it("sem _data.message nenhum, devolve null", () => {
+    expect(adReferralDe({ id: "x", body: "oi" })).toBeNull();
+  });
+
+  it("externalAdReplyInfo sem ctwaClid nem sourceId vira null — objeto vazio não é atribuição", () => {
+    const p = withExternalAdReply("extendedTextMessage", { title: "algo" });
+    expect(adReferralDe(p)).toBeNull();
   });
 });
