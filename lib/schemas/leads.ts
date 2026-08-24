@@ -111,6 +111,28 @@ export const objectionSchema = z.object({
 export type ObjectionInput = z.infer<typeof objectionSchema>;
 
 /**
+ * Fase 3 do dashboard — funil real. `scheduled_at` é ISO-8601 e PODE estar no
+ * passado (agendamento retroativo, alguém registrando depois do fato) — quem
+ * decide se faz sentido é o humano, não o schema.
+ */
+export const scheduleMeetingSchema = z.object({
+  scheduled_at: z.string().datetime({ offset: true }),
+});
+export type ScheduleMeetingInput = z.infer<typeof scheduleMeetingSchema>;
+
+export const MEETING_OUTCOMES = ["attended", "no_show"] as const;
+export type MeetingOutcome = (typeof MEETING_OUTCOMES)[number];
+export const MEETING_OUTCOME_LABELS: Record<MeetingOutcome, string> = {
+  attended: "Compareceu",
+  no_show: "Não compareceu",
+};
+
+export const meetingOutcomeSchema = z.object({
+  outcome: z.enum(MEETING_OUTCOMES),
+});
+export type MeetingOutcomeInput = z.infer<typeof meetingOutcomeSchema>;
+
+/**
  * createLeadSchema → POST /api/v1/leads
  * Status, source_metadata, position_in_stage are server-managed.
  * custom_fields aceita valor inicial do cliente (ex.: produto de interesse

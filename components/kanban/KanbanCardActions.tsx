@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { ChatCircle, DotsThree, PencilSimple, Users } from "@/lib/ui/icons";
+import { CalendarPlus, ChatCircle, DotsThree, PencilSimple, UserCheck, Users } from "@/lib/ui/icons";
 import { useWinLead, useEditLead } from "@/hooks/kanban/useUpdateLead";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
@@ -19,6 +19,8 @@ import { usePermission } from "@/hooks/auth/AuthProvider";
 import { LoseLeadDialog } from "./LoseLeadDialog";
 import { EditLeadDialog } from "./EditLeadDialog";
 import { ObjectionDialog } from "./ObjectionDialog";
+import { ScheduleMeetingDialog } from "./ScheduleMeetingDialog";
+import { MeetingOutcomeDialog } from "./MeetingOutcomeDialog";
 import type { Lead } from "@/lib/types/leads";
 
 interface KanbanCardActionsProps {
@@ -30,6 +32,8 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
   const [loseOpen, setLoseOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [objectionOpen, setObjectionOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
   const winMutation = useWinLead(pipelineId);
   const editMutation = useEditLead(pipelineId);
   // spec 13 §4: escrita no funil é agent+ — viewer não reatribui (a rota
@@ -133,6 +137,20 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
           >
             <ChatCircle size={14} className="mr-2" /> Registrar objeção
           </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setScheduleOpen(true);
+            }}
+          >
+            <CalendarPlus size={14} className="mr-2" /> Agendar visita/reunião
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setOutcomeOpen(true);
+            }}
+          >
+            <UserCheck size={14} className="mr-2" /> Registrar presença
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={winMutation.isPending}
@@ -167,6 +185,18 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
       <ObjectionDialog
         open={objectionOpen}
         onOpenChange={setObjectionOpen}
+        leadId={lead.id}
+        pipelineId={pipelineId}
+      />
+      <ScheduleMeetingDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        leadId={lead.id}
+        pipelineId={pipelineId}
+      />
+      <MeetingOutcomeDialog
+        open={outcomeOpen}
+        onOpenChange={setOutcomeOpen}
         leadId={lead.id}
         pipelineId={pipelineId}
       />

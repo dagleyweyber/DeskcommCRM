@@ -112,4 +112,7 @@ export {
   Key,
   UserCircle,
   ClockCounterClockwise,
+  // funil real (Fase 3 do dashboard): agendar visita/reunião, registrar presença
+  CalendarPlus,
+  UserCheck,
 } from "@phosphor-icons/react/dist/ssr";

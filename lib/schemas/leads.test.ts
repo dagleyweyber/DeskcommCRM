@@ -5,6 +5,8 @@ import {
   bulkLeadActionSchema,
   objectionSchema,
   formatLostReason,
+  scheduleMeetingSchema,
+  meetingOutcomeSchema,
 } from "./leads";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -90,6 +92,37 @@ describe("objectionSchema", () => {
   it("rejects note acima de 500 caracteres", () => {
     const r = objectionSchema.safeParse({ reason: "price", note: "x".repeat(501) });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("scheduleMeetingSchema", () => {
+  it("aceita ISO-8601 com offset", () => {
+    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "2026-08-25T14:30:00-03:00" });
+    expect(r.success).toBe(true);
+  });
+
+  it("⭐ rejeita data sem offset — mesma exigência de outras datas da API", () => {
+    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "2026-08-25T14:30:00" });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejeita string que não é data", () => {
+    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "amanhã" });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("meetingOutcomeSchema", () => {
+  it("aceita 'attended'", () => {
+    expect(meetingOutcomeSchema.safeParse({ outcome: "attended" }).success).toBe(true);
+  });
+
+  it("aceita 'no_show'", () => {
+    expect(meetingOutcomeSchema.safeParse({ outcome: "no_show" }).success).toBe(true);
+  });
+
+  it("rejeita valor fora do vocabulário fechado", () => {
+    expect(meetingOutcomeSchema.safeParse({ outcome: "maybe" }).success).toBe(false);
   });
 });
 

@@ -36,6 +36,14 @@ export interface PrincipalObjecao {
   quantidade: number;
 }
 
+export interface FunilAgendamento {
+  agendados: number;
+  compareceram: number;
+  nao_compareceram: number;
+  compareceram_e_fecharam: number;
+  taxa_comparecimento_pct: number | null;
+}
+
 export interface SalesDashboard {
   window: { from: string; to: string };
   pipeline_id: string | null;
@@ -45,6 +53,7 @@ export interface SalesDashboard {
   receita_por_origem: ReceitaPorOrigem[];
   receita_por_servico: ReceitaPorServico[];
   principais_objecoes: PrincipalObjecao[];
+  funil_agendamento: FunilAgendamento;
 }
 
 export interface SalesDashboardFiltros {

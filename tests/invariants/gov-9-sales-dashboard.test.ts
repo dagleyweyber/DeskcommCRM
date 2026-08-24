@@ -39,6 +39,16 @@ const LEAD_D1 = "05050505-6666-4000-8000-000000000001"; // Botox
 const LEAD_D2 = "05050505-6666-4000-8000-000000000002"; // Botox
 const LEAD_D3 = "05050505-6666-4000-8000-000000000003"; // Preenchimento
 const LEAD_D4 = "05050505-6666-4000-8000-000000000004"; // sem produto_interesse
+// ORG_E é exclusivo dos testes de Fase 3 (funil de agendamento) — dataset
+// separado, mesma razão do ORG_D acima.
+const ORG_E = "05050505-0000-4000-8000-000000000005";
+const MANAGER_E = "05050505-1111-4000-8000-000000000005";
+const PIPELINE_E = "05050505-5555-4000-8000-00000000000b";
+const STAGE_E = "05050505-5555-4000-8000-00000000000c";
+const LEAD_E1 = "05050505-7777-4000-8000-000000000001"; // agendou, compareceu, fechou
+const LEAD_E2 = "05050505-7777-4000-8000-000000000002"; // agendou, compareceu, NÃO fechou
+const LEAD_E3 = "05050505-7777-4000-8000-000000000003"; // agendou, NÃO compareceu
+const LEAD_E4 = "05050505-7777-4000-8000-000000000004"; // agendou, ainda sem desfecho
 
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
@@ -145,6 +155,45 @@ beforeAll(() => {
         ('${ORG_D}', '${LEAD_D2}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Precisa pensar', '{"code":"need_to_think"}'::jsonb, '${D1}'),
         ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'objection', 'user', '${MANAGER_D}', 'Preço', '{"code":"price"}'::jsonb, '${OLD}'),
         ('${ORG_D}', '${LEAD_D1}', 'gov-invariant-test', 'note', 'user', '${MANAGER_D}', 'Anotação qualquer', '{}'::jsonb, '${D1}');
+
+    -- ORG_E: dataset exclusivo dos testes de Fase 3 (funil de agendamento).
+    -- E1 agendou+compareceu+fechou, E2 agendou+compareceu mas segue aberto,
+    -- E3 agendou e NÃO compareceu, E4 agendou e ainda não tem desfecho.
+    insert into auth.users (id, email) values ('${MANAGER_E}', 'm9-manager-e@invariant.test')
+      on conflict do nothing;
+    insert into public.organizations (id, slug, legal_name, display_name)
+      values ('${ORG_E}', 'gov-sales-e', 'Gov Sales Org E', 'Gov Sales E')
+      on conflict do nothing;
+    insert into public.user_organizations (user_id, organization_id, role, accepted_at)
+      values ('${MANAGER_E}', '${ORG_E}', 'manager', now())
+      on conflict do nothing;
+    insert into public.crm_pipelines (id, organization_id, name, slug)
+      values ('${PIPELINE_E}', '${ORG_E}', 'Gov Sales E', 'gov-sales-e')
+      on conflict do nothing;
+    insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position)
+      values ('${STAGE_E}', '${ORG_E}', '${PIPELINE_E}', 'Novo', 'novo', 1000)
+      on conflict do nothing;
+
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${LEAD_E1}', '${ORG_E}', '${PIPELINE_E}', '${STAGE_E}', 'E won', 'won', 'whatsapp', 100000, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, created_at)
+      values ('${LEAD_E2}', '${ORG_E}', '${PIPELINE_E}', '${STAGE_E}', 'E open compareceu', 'open', 'whatsapp', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, created_at)
+      values ('${LEAD_E3}', '${ORG_E}', '${PIPELINE_E}', '${STAGE_E}', 'E open no-show', 'open', 'whatsapp', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, created_at)
+      values ('${LEAD_E4}', '${ORG_E}', '${PIPELINE_E}', '${STAGE_E}', 'E open sem desfecho', 'open', 'whatsapp', '${D1}');
+
+    insert into public.crm_lead_activities (organization_id, lead_id, source_module, type, actor_kind, performed_by_user_id, reason, payload, performed_at)
+      values
+        ('${ORG_E}', '${LEAD_E1}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E1}', 'gov-invariant-test', 'meeting_outcome', 'user', '${MANAGER_E}', 'Compareceu', '{"outcome":"attended","scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E2}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E2}', 'gov-invariant-test', 'meeting_outcome', 'user', '${MANAGER_E}', 'Compareceu', '{"outcome":"attended","scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E3}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E3}', 'gov-invariant-test', 'meeting_outcome', 'user', '${MANAGER_E}', 'Não compareceu', '{"outcome":"no_show","scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado FORA da janela', '{"scheduled_at":"${OLD}"}'::jsonb, '${OLD}'),
+        ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'note', 'user', '${MANAGER_E}', 'Anotação qualquer', '{}'::jsonb, '${D1}');
   `);
 });
 
@@ -182,12 +231,20 @@ interface ObjecaoRow {
   motivo: string;
   quantidade: number;
 }
+interface FunilAgendamento {
+  agendados: number;
+  compareceram: number;
+  nao_compareceram: number;
+  compareceram_e_fecharam: number;
+  taxa_comparecimento_pct: number | null;
+}
 interface Dashboard {
   kpis: Kpis;
   leads_por_dia: DiaRow[];
   receita_por_origem: OrigemRow[];
   receita_por_servico: ServicoRow[];
   principais_objecoes: ObjecaoRow[];
+  funil_agendamento: FunilAgendamento;
 }
 
 function fetchDashboard(
@@ -338,5 +395,29 @@ describe("fn_sales_dashboard — Fase 2 (receita por serviço + objeções, migr
     // errado sozinho; este é o controle explícito do PORQUÊ.
     const total = dashboard().principais_objecoes.reduce((acc, o) => acc + o.quantidade, 0);
     expect(total).toBe(3);
+  });
+});
+
+// ---- migration 0158: funil real (agendamento → presença → conversão) ----
+
+describe("fn_sales_dashboard — Fase 3 (funil de agendamento, migration 0158)", () => {
+  const dashboard = () => fetchDashboard(MANAGER_E, ORG_E);
+
+  it("⭐ agendados=4 (E1..E4 — o agendamento FORA da janela de E4 conta só o lead, não dobra)", () => {
+    expect(dashboard().funil_agendamento.agendados).toBe(4);
+  });
+
+  it("⭐ compareceram=2 (E1+E2), nao_compareceram=1 (E3) — E4 sem desfecho não entra em nenhum dos dois", () => {
+    const f = dashboard().funil_agendamento;
+    expect(f.compareceram).toBe(2);
+    expect(f.nao_compareceram).toBe(1);
+  });
+
+  it("⭐ compareceram_e_fecharam=1 — só E1 (won); E2 compareceu mas segue 'open'", () => {
+    expect(dashboard().funil_agendamento.compareceram_e_fecharam).toBe(1);
+  });
+
+  it("taxa_comparecimento_pct=66.7 (2 de 3 desfechos registrados — E4 sem desfecho não entra no denominador)", () => {
+    expect(dashboard().funil_agendamento.taxa_comparecimento_pct).toBe(66.7);
   });
 });

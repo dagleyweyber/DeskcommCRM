@@ -55,7 +55,17 @@ export type ActivityType =
    *  ainda está ABERTO — diferente de `lost_reason`, que só existe no fim. Sem
    *  isto na timeline, "por que este lead não avança?" só tinha resposta depois
    *  que ele já morreu. */
-  | "objection";
+  | "objection"
+  /**
+   * Fase 3 do dashboard: o funil real vaza entre "marcou" e "veio". Sem estes
+   * dois tipos, o único jeito de saber "quantos agendaram e sumiram" era ler
+   * conversa por conversa — a mesma razão de `objection` existir. Cada
+   * remarcação é um NOVO `meeting_scheduled`: o histórico de reagendamentos é
+   * de graça por ser timeline, e não uma coluna mutável que perde o passado.
+   */
+  | "meeting_scheduled"
+  /** Sempre associado ao `meeting_scheduled` mais recente — ver payload.outcome. */
+  | "meeting_outcome";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou pelo WhatsApp",
@@ -123,6 +133,8 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // tela — e o dossiê de um negócio fechado terminava sem dizer que fechou.
   demand_closed: "Demanda encerrada",
   objection: "Objeção registrada",
+  meeting_scheduled: "Visita/reunião agendada",
+  meeting_outcome: "Presença registrada",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */
