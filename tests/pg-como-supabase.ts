@@ -117,10 +117,17 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     return this;
   }
 
-  /** Presentes para ESTOURAR: o código que os usar precisa de implementação real. */
-  in(): never {
-    return naoImplementado("in");
+  /**
+   * `IN (...)` — nasceu porque `findContactByVariants`
+   * (lib/channels/meta/ingest.ts, via `phoneLookupVariants`) chama
+   * `.in("phone_number", variantes)` e o adaptador ESTOUROU. Lista vazia vira
+   * `false` (nunca casa) em vez de `IN ()`, que é erro de sintaxe em SQL.
+   */
+  in(coluna: string, valores: unknown[]): this {
+    this.filtros.push(["in", coluna, valores]);
+    return this;
   }
+  /** Presente para ESTOURAR: o código que o usar precisa de implementação real. */
   neq(): never {
     return naoImplementado("neq");
   }
@@ -131,6 +138,15 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
       // `IS NULL`/`IS TRUE`/`IS FALSE` não aceitam parâmetro — `IS $1` não é
       // sintaxe válida de Postgres pra este operador.
       if (op === "is") return `"${c}" is ${v === null ? "null" : v ? "true" : "false"}`;
+      if (op === "in") {
+        const lista = v as unknown[];
+        if (lista.length === 0) return "false";
+        const placeholders = lista.map((item) => {
+          valores.push(item);
+          return `$${valores.length}`;
+        });
+        return `"${c}" in (${placeholders.join(", ")})`;
+      }
       valores.push(v);
       return `"${c}" ${op} $${valores.length}`;
     });

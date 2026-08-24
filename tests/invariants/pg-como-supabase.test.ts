@@ -115,6 +115,27 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
     expect(nomes).toEqual(["Zulu", "Bravo", "Alfa"]);
   });
 
+  it("⭐ `in` casa qualquer valor da lista — e lista vazia não vira `IN ()` (erro de sintaxe)", async () => {
+    // Nasceu por pressão do mesmo mecanismo: `findContactByVariants`
+    // (lib/channels/meta/ingest.ts) chama `.in("phone_number", variantes)` e
+    // o adaptador ESTOUROU.
+    const { data } = await db
+      .from("crm_pipelines")
+      .select("name")
+      .eq("organization_id", ORG)
+      .in("slug", ["zulu", "alfa", "nao-existe"])
+      .order("position", { ascending: true });
+    expect((data as Array<{ name: string }>).map((x) => x.name)).toEqual(["Zulu", "Alfa"]);
+
+    const vazio = await db
+      .from("crm_pipelines")
+      .select("name")
+      .eq("organization_id", ORG)
+      .in("slug", []);
+    expect(vazio.error).toBeNull();
+    expect(vazio.data).toEqual([]);
+  });
+
   it("`gt` é o espelho — e os dois convivem com `eq` na mesma consulta", async () => {
     const { data } = await db
       .from("crm_pipelines")
