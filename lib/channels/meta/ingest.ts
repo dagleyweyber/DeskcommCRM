@@ -23,6 +23,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { phoneLookupVariants } from "../phone-variants";
 import type { InboundMessageEvent } from "./webhook";
@@ -30,14 +31,7 @@ import type { InboundMessageEvent } from "./webhook";
 type Admin = SupabaseClient;
 
 export type IngestOutcome =
-  | {
-      status: "ingested";
-      messageId: string;
-      conversationId: string;
-      /** Pra quem chama poder rodar os efeitos de pós-entrada (opt-out, lead, despacho). */
-      contactId: string;
-      channelSessionId: string;
-    }
+  | { status: "ingested"; messageId: string; conversationId: string }
   | { status: "duplicate" }
   | { status: "no_session" }
   | { status: "failed"; reason: string };
@@ -98,6 +92,7 @@ function previewOf(e: InboundMessageEvent): string {
 export async function ingestMetaInbound(
   admin: Admin,
   e: InboundMessageEvent,
+  requestId?: string,
 ): Promise<IngestOutcome> {
   const sessao = await sessionByPhoneNumberId(admin, e.phoneNumberId);
   // Sem sessão: a mensagem é de um número que não administramos. Devolver 200 (o
@@ -172,11 +167,36 @@ export async function ingestMetaInbound(
     p_at: e.sentAt.toISOString(),
   } as never);
 
+  const messageId = (inserida as { id: string } | null)?.id ?? "";
+
+  // Os TRÊS efeitos de negócio (opt-out, nascimento do lead, despacho do
+  // agente) — mesmo passo que o canal por QR e o canal intermediado já
+  // chamam. Sem isto, mensagem chegando pelo número oficial direto ficava
+  // gravada e nada mais acontecia: sem lead, sem opt-out, sem IA. Medido em
+  // produção antes do conserto: 806 despachos do outro canal, 0 deste.
+  await aplicarEfeitosPosEntrada(admin, {
+    organizationId: orgId,
+    contactId: contactId as string,
+    conversationId: conversationId as string,
+    messageId: messageId || null,
+    channelSessionId: sessao.id,
+    texto: e.text,
+    nomeDoContato: e.profileName,
+    requestId,
+    origem: "meta_cloud_webhook",
+    adReferral: e.adReferral
+      ? {
+          clickId: e.adReferral.clickId,
+          sourceId: e.adReferral.sourceId,
+          headline: e.adReferral.headline,
+          sourceUrl: e.adReferral.sourceUrl,
+        }
+      : null,
+  });
+
   return {
     status: "ingested",
-    messageId: (inserida as { id: string } | null)?.id ?? "",
+    messageId,
     conversationId: conversationId as string,
-    contactId: contactId as string,
-    channelSessionId: sessao.id,
   };
 }
