@@ -29,6 +29,10 @@ const EXPECTED_ENTITY_KIND: Record<string, string> = {
   "lead.tag_added": "crm_lead",
   "contact.tag_added": "contact",
   "message.received": "message",
+  // `fn_emit_event_on_lead_change` (trigger legado) deriva `entity_kind` por
+  // `split_part(event_type, '.', 1)` — 'lead', não 'crm_lead'. Mesma
+  // pegacinha documentada no cabeçalho do arquivo, aqui pro terceiro evento.
+  "lead.won": "lead",
 };
 
 interface RuleRow {
@@ -44,7 +48,10 @@ export async function buildContext(admin: SupabaseClient, row: EventRow): Promis
   // Admin client bypassa RLS — todo lookup filtra organization_id do evento
   // (doutrina multi-tenant; um FK cross-org corrompido nunca vaza pro contexto).
   const org = row.organization_id;
-  if (row.entity_kind === "crm_lead" && row.entity_id) {
+  // 'crm_lead' é o entity_kind dos handlers desta feature; 'lead' é o que o
+  // trigger legado deriva por split_part (ver EXPECTED_ENTITY_KIND acima) —
+  // os dois apontam pro mesmo lead, só o rótulo difere.
+  if ((row.entity_kind === "crm_lead" || row.entity_kind === "lead") && row.entity_id) {
     const { data: lead } = await admin
       .from("crm_leads")
       .select("*")

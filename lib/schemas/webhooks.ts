@@ -1,6 +1,6 @@
 /**
  * Zod schemas for webhook-sources e automation-rules (feature Webhooks, Task 12).
- * TRIGGER_EVENTS deve espelhar exatamente os 5 eventos que o motor
+ * TRIGGER_EVENTS deve espelhar exatamente os 6 eventos que o motor
  * (`lib/automation/engine.ts` → EXPECTED_ENTITY_KIND) reconhece.
  */
 import { z } from "zod";
@@ -11,6 +11,7 @@ export const TRIGGER_EVENTS = [
   "message.received",
   "lead.tag_added",
   "contact.tag_added",
+  "lead.won",
 ] as const;
 
 export const conditionSchema = z.object({

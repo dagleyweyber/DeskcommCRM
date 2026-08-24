@@ -18,6 +18,7 @@ export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   "message.received": "Quando chegar mensagem no WhatsApp",
   "lead.tag_added": "Quando um lead ganhar uma tag",
   "contact.tag_added": "Quando um contato ganhar uma tag",
+  "lead.won": "Quando um lead for marcado como ganho",
 };
 
 export const ACTION_LABELS: Record<ActionType, string> = {

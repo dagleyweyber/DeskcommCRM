@@ -189,6 +189,8 @@ const R3 = "dddddddd-1111-4000-8000-000000000003";
 const R4 = "dddddddd-1111-4000-8000-000000000004";
 const R5 = "dddddddd-1111-4000-8000-000000000005";
 const R6 = "dddddddd-1111-4000-8000-000000000006";
+const R7 = "dddddddd-1111-4000-8000-000000000007";
+const R8 = "dddddddd-1111-4000-8000-000000000008";
 
 let fakeOkCalls = 0;
 registerAction({
@@ -234,7 +236,12 @@ beforeAll(() => {
         ('${R5}', '${GOV_ORG}', 'R5', 'lead.stage_changed', '[]'::jsonb,
           '[{"type":"fake_postpone"},{"type":"fake_ok"}]'::jsonb, true),
         ('${R6}', '${GOV_ORG}', 'R6', 'lead.tag_added', '[]'::jsonb,
-          '[{"type":"nope"}]'::jsonb, true)
+          '[{"type":"nope"}]'::jsonb, true),
+        ('${R7}', '${GOV_ORG}', 'R7', 'lead.won', '[]'::jsonb,
+          '[{"type":"fake_ok"}]'::jsonb, true),
+        ('${R8}', '${GOV_ORG}', 'R8', 'lead.won',
+          '[{"field":"lead.title","op":"eq","value":"Gov invariant lead"}]'::jsonb,
+          '[{"type":"fake_ok"}]'::jsonb, true)
       on conflict do nothing;
   `);
 });
@@ -334,5 +341,28 @@ describe("runAutomationForEvent — motor de regras (Task 8)", () => {
     const result = await runAutomationForEvent(fakeAdminClient(), row);
     expect(result).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "entity_kind_mismatch" });
     expect(runsCount()).toBe(before);
+  });
+
+  // ---- Fase B do Meta Ads: lead.won passa a ser escutado pelo motor ----
+
+  it("⭐ lead.won com entity_kind='lead' RODA as duas regras — R7 (sem condição) e R8 (condição sobre lead.title)", async () => {
+    // Uma única chamada cobre os dois achados desta fase: (1) o evento
+    // lead.won — antes desta fase, nunca chegava ao motor (entity_kind
+    // mismatch silencioso); (2) buildContext hidrata lead.* mesmo com
+    // entity_kind='lead' (antes só tratava 'crm_lead') — sem isso R8, cuja
+    // condição é sobre lead.title, nunca casaria mesmo existindo.
+    const eventId = emitRealEvent("lead.won", "lead", GOV_LEAD);
+    const row = baseRow({ id: eventId, event_type: "lead.won", entity_kind: "lead", entity_id: GOV_LEAD });
+
+    const result = await runAutomationForEvent(fakeAdminClient(), row);
+    expect(result).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok" });
+
+    const r7Runs = runsForRule(R7);
+    expect(r7Runs.length).toBe(1);
+    expect(r7Runs[0]!.status).toBe("success");
+
+    const r8Runs = runsForRule(R8);
+    expect(r8Runs.length).toBe(1);
+    expect(r8Runs[0]!.status).toBe("success");
   });
 });
