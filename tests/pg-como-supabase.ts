@@ -55,6 +55,31 @@ function erroDe(e: unknown): ErroPg {
   return { message: bruto?.message ?? String(e), code: bruto?.code };
 }
 
+/**
+ * `bytea` — nasceu porque `resolveMetaAdsCredentials` (lib/meta-ads/
+ * credentials.ts, via `decryptWebhookSecret`) ESTOUROU: `pg` devolve coluna
+ * `bytea` como `Buffer` (parser padrão do node-postgres), mas todo código
+ * do app espera o formato do PostgREST — string hex prefixada `"\x..."`
+ * (é isso que `fn_encrypt_oauth`/`encryptWebhookSecret` produzem e que
+ * `decryptWebhookSecret` consome). Sem esta normalização, todo SELECT de
+ * coluna `bytea` por este adaptador mentiria sobre o transporte que
+ * pretende emular. Aplica em toda linha que sai de uma query, não só na
+ * chamada que descobriu o problema — o próximo `bytea` a aparecer não pode
+ * tropeçar de novo.
+ */
+function normalizarLinha<T>(linha: T): T {
+  if (!linha || typeof linha !== "object") return linha;
+  const out: Record<string, unknown> = { ...(linha as Record<string, unknown>) };
+  for (const [k, v] of Object.entries(out)) {
+    if (Buffer.isBuffer(v)) out[k] = `\\x${v.toString("hex")}`;
+  }
+  return out as T;
+}
+
+function normalizarLinhas<T>(linhas: T[]): T[] {
+  return linhas.map(normalizarLinha);
+}
+
 /** Aspas em cada coluna: `slug`, `position` e afins são palavras vivas no SQL. */
 function colunasSql(colunas: string): string {
   if (colunas.trim() === "*") return "*";
@@ -161,7 +186,7 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     const { texto, valores } = this.montar();
     try {
       const r = await this.pool.query(texto, valores);
-      return { rows: r.rows as T[], error: null };
+      return { rows: normalizarLinhas(r.rows as T[]), error: null };
     } catch (e) {
       return { rows: [], error: erroDe(e) };
     }
@@ -235,7 +260,7 @@ class InsercaoPg<T> implements PromiseLike<RespostaFalsa<null>> {
     const { texto, valores } = this.montar();
     try {
       const r = await this.pool.query(texto, valores);
-      return { data: (r.rows[0] ?? null) as T, error: null };
+      return { data: normalizarLinha((r.rows[0] ?? null) as T), error: null };
     } catch (e) {
       return { data: null, error: erroDe(e) };
     }
@@ -315,7 +340,7 @@ class AtualizacaoPg<T> implements PromiseLike<RespostaFalsa<unknown>> {
       if (r.rows.length > 1) {
         return { data: null, error: { message: "multiple rows returned", code: "PGRST116" } };
       }
-      return { data: (r.rows[0] ?? null) as T, error: null };
+      return { data: normalizarLinha((r.rows[0] ?? null) as T), error: null };
     } catch (e) {
       return { data: null, error: erroDe(e) };
     }
@@ -352,7 +377,7 @@ class AtualizacaoPg<T> implements PromiseLike<RespostaFalsa<unknown>> {
       .query(texto, valores)
       .then(
         (r) =>
-          ({ data: pediuRetorno ? r.rows : null, error: null }) as RespostaFalsa<unknown>,
+          ({ data: pediuRetorno ? normalizarLinhas(r.rows) : null, error: null }) as RespostaFalsa<unknown>,
       )
       .catch((e: unknown) => ({ data: null, error: erroDe(e) }) as RespostaFalsa<unknown>)
       .then(aoResolver, aoRejeitar);
@@ -377,7 +402,8 @@ async function chamarRpc(
   const nomeados = chaves.map((k, i) => `${k} => $${i + 1}`).join(", ");
   try {
     const r = await pool.query(`select public."${nome}"(${nomeados}) as valor`, valores);
-    return { data: (r.rows[0] as { valor: unknown } | undefined)?.valor ?? null, error: null };
+    const valor = (r.rows[0] as { valor: unknown } | undefined)?.valor ?? null;
+    return { data: Buffer.isBuffer(valor) ? `\\x${valor.toString("hex")}` : valor, error: null };
   } catch (e) {
     return { data: null, error: erroDe(e) };
   }

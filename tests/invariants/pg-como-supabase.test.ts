@@ -30,6 +30,8 @@ const db = pgComoSupabase(pool);
 
 const ORG = "ada57e00-0000-4000-8000-000000000001";
 
+const GUC_KEY = "test-guc-key-0123456789abcdef0123456789abcdef";
+
 beforeAll(async () => {
   await pool.query(
     `insert into organizations (id, slug, legal_name, display_name)
@@ -43,6 +45,23 @@ beforeAll(async () => {
        ($1, 'Zulu',  'zulu',  false, 10),
        ($1, 'Alfa',  'alfa',  false, 30),
        ($1, 'Bravo', 'bravo', false, 20)
+     on conflict do nothing`,
+    [ORG],
+  );
+
+  // GUC no DATABASE (não só na sessão) — `pgComoSupabase` empresta conexões
+  // de um pool, e set_config(..., false) sozinho não sobreviveria a uma
+  // conexão nova puxada dele.
+  await pool.query(
+    `do $guc$ begin
+       execute format('alter database %I set app.nuvemshop_oauth_key = %L', current_database(), $1);
+     end $guc$;`,
+    [GUC_KEY],
+  );
+  await pool.query(`select set_config('app.nuvemshop_oauth_key', $1, false)`, [GUC_KEY]);
+  await pool.query(
+    `insert into channel_sessions (organization_id, provider, waha_session_name, webhook_secret_encrypted)
+       values ($1, 'waha', 'adaptador-bytea-session', public.fn_encrypt_oauth('segredo-bytea-123'))
      on conflict do nothing`,
     [ORG],
   );
@@ -361,5 +380,36 @@ describe("o que NÃO está implementado estoura", () => {
   it("método ausente lança em vez de devolver vazio — vazio silencioso é teste verde medindo nada", () => {
     expect(() => db.from("crm_pipelines").delete()).toThrow(/não está implementado/);
     expect(() => db.from("crm_pipelines").select("id").neq("id", "x")).toThrow(/não está implementado/);
+  });
+});
+
+describe("o adaptador normaliza `bytea` pro formato do PostgREST", () => {
+  // Nasceu porque `resolveMetaAdsCredentials` (lib/meta-ads/credentials.ts,
+  // via `decryptWebhookSecret`) ESTOUROU: `pg` devolve `bytea` como
+  // `Buffer`, mas todo código do app espera a string hex prefixada
+  // `"\x..."` que o PostgREST de verdade manda. Sem a normalização, um
+  // SELECT de coluna bytea por este adaptador mentiria sobre o transporte.
+  it("⭐ SELECT de bytea vem como string hex, não Buffer — decryptWebhookSecret consegue usar direto", async () => {
+    const { data, error } = await db
+      .from("channel_sessions")
+      .select("webhook_secret_encrypted")
+      .eq("organization_id", ORG)
+      .eq("waha_session_name", "adaptador-bytea-session")
+      .maybeSingle();
+    expect(error).toBeNull();
+    const valor = (data as { webhook_secret_encrypted: unknown } | null)?.webhook_secret_encrypted;
+    expect(typeof valor).toBe("string");
+    expect(valor).toMatch(/^\\x[0-9a-f]+$/);
+
+    // Round-trip: o valor normalizado ainda decifra certo pela RPC.
+    const dec = await db.rpc("fn_decrypt_oauth", { ciphertext: valor });
+    expect(dec.data).toBe("segredo-bytea-123");
+  });
+
+  it("RPC que retorna bytea escalar (fn_encrypt_oauth) também sai como string hex", async () => {
+    const { data, error } = await db.rpc("fn_encrypt_oauth", { plaintext: "outro-segredo" });
+    expect(error).toBeNull();
+    expect(typeof data).toBe("string");
+    expect(data as string).toMatch(/^\\x[0-9a-f]+$/);
   });
 });

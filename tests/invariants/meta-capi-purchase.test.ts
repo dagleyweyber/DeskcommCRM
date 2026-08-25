@@ -145,7 +145,7 @@ describe("sendMetaCapiEvent", () => {
   it("⭐ sem credencial: skipped, NÃO chama fetch nenhum", async () => {
     const fetchImpl = vi.fn();
     const result = await sendMetaCapiEvent(db, ORG_B, input, { fetchImpl });
-    expect(result).toEqual({ status: "skipped", reason: "no_credentials" } as never);
+    expect(result).toEqual({ status: "skipped", error: "no_credentials" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
