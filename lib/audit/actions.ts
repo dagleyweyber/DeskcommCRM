@@ -17,6 +17,8 @@ export type AuditAction =
   | "nuvemshop.oauth_failed"
   | "nuvemshop.webhook_received"
   | "nuvemshop.webhook_invalid_signature"
+  | "meta_ads.credential_connected"
+  | "meta_ads.credential_disconnected"
   | "lead.created"
   | "lead.updated"
   | "lead.deleted"
