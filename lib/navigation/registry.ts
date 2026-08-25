@@ -31,6 +31,7 @@ import {
   ShieldCheck,
   Signpost,
   Storefront,
+  Megaphone,
   UserCircle,
   Users,
   UsersThree,
@@ -353,6 +354,18 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     // A página não filtra por papel, mas as Server Actions de conectar e
     // desconectar exigem admin — mostrar a um viewer seria oferecer botão morto.
     minRole: "admin",
+    sidebar: true,
+  },
+  {
+    href: "/app/settings/integrations/meta-ads",
+    label: "Meta Ads",
+    description:
+      "Conecte o Meta Ads pra mandar vendas automaticamente pro Conversions API e saber qual anúncio vendeu.",
+    icon: Megaphone,
+    group: "canais",
+    // GET é manager+; POST/DELETE (conectar/desconectar) exigem admin na rota
+    // — mesmo raciocínio da entrada da Nuvemshop acima.
+    minRole: "manager",
     sidebar: true,
   },
   {
