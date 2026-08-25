@@ -42,6 +42,11 @@ const ALLOWED = [
   /^lib\/waha\//,
   // Saída de `supabase gen types`: os nomes são COLUNAS. Editar à mão é o defeito.
   /^lib\/database\.types\.ts$/,
+  // A doutrina é sobre CANAL DE MENSAGERIA (WAHA/Meta Cloud/Zernio
+  // intercambiáveis por trás de um adapter) — Meta Conversions API é
+  // integração de ANÚNCIOS, domínio diferente, sem abstração de provider
+  // nenhuma pra proteger: o destino É a Meta, por definição, sempre.
+  /^lib\/meta-ads\//,
 ];
 
 /**
