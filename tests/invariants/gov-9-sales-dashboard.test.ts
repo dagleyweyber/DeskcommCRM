@@ -49,6 +49,16 @@ const LEAD_E1 = "05050505-7777-4000-8000-000000000001"; // agendou, compareceu, 
 const LEAD_E2 = "05050505-7777-4000-8000-000000000002"; // agendou, compareceu, NÃO fechou
 const LEAD_E3 = "05050505-7777-4000-8000-000000000003"; // agendou, NÃO compareceu
 const LEAD_E4 = "05050505-7777-4000-8000-000000000004"; // agendou, ainda sem desfecho
+// ORG_F é exclusivo dos testes de Fase 4/D (receita por anúncio) — dataset
+// separado, mesma razão do ORG_D acima.
+const ORG_F = "05050505-0000-4000-8000-000000000006";
+const MANAGER_F = "05050505-1111-4000-8000-000000000006";
+const PIPELINE_F = "05050505-5555-4000-8000-00000000000d";
+const STAGE_F = "05050505-5555-4000-8000-00000000000e";
+const LEAD_F1 = "05050505-8888-4000-8000-000000000001"; // ad-1, com headline
+const LEAD_F2 = "05050505-8888-4000-8000-000000000002"; // ad-1, sem headline nesta linha
+const LEAD_F3 = "05050505-8888-4000-8000-000000000003"; // ad-2
+const LEAD_F4 = "05050505-8888-4000-8000-000000000004"; // sem ad_id (orgânico)
 
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
@@ -194,6 +204,37 @@ beforeAll(() => {
         ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
         ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_E}', 'Agendado FORA da janela', '{"scheduled_at":"${OLD}"}'::jsonb, '${OLD}'),
         ('${ORG_E}', '${LEAD_E4}', 'gov-invariant-test', 'note', 'user', '${MANAGER_E}', 'Anotação qualquer', '{}'::jsonb, '${D1}');
+
+    -- ORG_F: dataset exclusivo dos testes de Fase D (receita por anúncio).
+    -- F1+F2 no MESMO anúncio (ad-1, só F1 carrega o headline — prova que o
+    -- agrupamento é pelo ad_id e o headline vem de qualquer uma das linhas),
+    -- F3 em outro anúncio (ad-2), F4 SEM atribuição nenhuma (orgânico).
+    insert into auth.users (id, email) values ('${MANAGER_F}', 'm9-manager-f@invariant.test')
+      on conflict do nothing;
+    insert into public.organizations (id, slug, legal_name, display_name)
+      values ('${ORG_F}', 'gov-sales-f', 'Gov Sales Org F', 'Gov Sales F')
+      on conflict do nothing;
+    insert into public.user_organizations (user_id, organization_id, role, accepted_at)
+      values ('${MANAGER_F}', '${ORG_F}', 'manager', now())
+      on conflict do nothing;
+    insert into public.crm_pipelines (id, organization_id, name, slug)
+      values ('${PIPELINE_F}', '${ORG_F}', 'Gov Sales F', 'gov-sales-f')
+      on conflict do nothing;
+    insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position)
+      values ('${STAGE_F}', '${ORG_F}', '${PIPELINE_F}', 'Novo', 'novo', 1000)
+      on conflict do nothing;
+
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, source_metadata, created_at, closed_at)
+      values ('${LEAD_F1}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won ad-1 com headline', 'won', 'whatsapp', 100000,
+              '{"ad_id":"ad-1","ad_headline":"Promoção de Verão"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, source_metadata, created_at, closed_at)
+      values ('${LEAD_F2}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won ad-1 sem headline', 'won', 'whatsapp', 50000,
+              '{"ad_id":"ad-1"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, source_metadata, created_at, closed_at)
+      values ('${LEAD_F3}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won ad-2', 'won', 'whatsapp', 200000,
+              '{"ad_id":"ad-2","ad_headline":"Campanha Inverno"}'::jsonb, '${D1}', '${D1}');
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
+      values ('${LEAD_F4}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won organico sem anuncio', 'won', 'whatsapp', 999999, '${D1}', '${D1}');
   `);
 });
 
@@ -238,6 +279,13 @@ interface FunilAgendamento {
   compareceram_e_fecharam: number;
   taxa_comparecimento_pct: number | null;
 }
+interface AnuncioRow {
+  anuncio: string;
+  ad_id: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
 interface Dashboard {
   kpis: Kpis;
   leads_por_dia: DiaRow[];
@@ -245,6 +293,7 @@ interface Dashboard {
   receita_por_servico: ServicoRow[];
   principais_objecoes: ObjecaoRow[];
   funil_agendamento: FunilAgendamento;
+  receita_por_anuncio: AnuncioRow[];
 }
 
 function fetchDashboard(
@@ -419,5 +468,27 @@ describe("fn_sales_dashboard — Fase 3 (funil de agendamento, migration 0158)",
 
   it("taxa_comparecimento_pct=66.7 (2 de 3 desfechos registrados — E4 sem desfecho não entra no denominador)", () => {
     expect(dashboard().funil_agendamento.taxa_comparecimento_pct).toBe(66.7);
+  });
+});
+
+// ---- migration 0160: receita por anúncio (Meta Ads Fase D) ----
+
+describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)", () => {
+  const dashboard = () => fetchDashboard(MANAGER_F, ORG_F);
+
+  it("⭐ ad-2(200000) > ad-1(150000, F1+F2 somados) — ordenado por receita_cents desc", () => {
+    expect(dashboard().receita_por_anuncio).toEqual([
+      { anuncio: "Campanha Inverno", ad_id: "ad-2", leads: 1, vendas: 1, receita_cents: 200_000 },
+      { anuncio: "Promoção de Verão", ad_id: "ad-1", leads: 2, vendas: 2, receita_cents: 150_000 },
+    ]);
+  });
+
+  it("headline de ad-1 vem de QUALQUER linha do grupo (F1 tem headline, F2 não) — max() não gera duas linhas", () => {
+    const anuncios = dashboard().receita_por_anuncio;
+    expect(anuncios.filter((a) => a.ad_id === "ad-1")).toHaveLength(1);
+  });
+
+  it("F4 (sem ad_id, lead orgânico) NÃO aparece em receita_por_anuncio — só 2 grupos, não 3", () => {
+    expect(dashboard().receita_por_anuncio).toHaveLength(2);
   });
 });

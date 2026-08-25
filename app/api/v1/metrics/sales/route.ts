@@ -1,7 +1,8 @@
 /**
- * GET /api/v1/metrics/sales — Dashboard de Vendas (Fases 1+2+3: KPIs, gráficos
- * de período/origem/serviço, principais objeções e funil real de agendamento
- * → presença → conversão). Mesmo esqueleto de /api/v1/metrics/attendants.
+ * GET /api/v1/metrics/sales — Dashboard de Vendas (Fases 1+2+3+4: KPIs,
+ * gráficos de período/origem/serviço, principais objeções, funil real de
+ * agendamento → presença → conversão, e receita por anúncio). Mesmo
+ * esqueleto de /api/v1/metrics/attendants.
  *
  * Escopo = a PRÓPRIA RLS: `fn_sales_dashboard` (SECURITY INVOKER) roda com o
  * client user-scoped (cookie session), então crm_leads (fn_can_view_lead) já
@@ -70,6 +71,14 @@ interface FunilAgendamento {
   taxa_comparecimento_pct: number | null;
 }
 
+interface ReceitaPorAnuncio {
+  anuncio: string;
+  ad_id: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
+
 interface SalesDashboardPayload {
   kpis: SalesKpis;
   leads_por_dia: LeadsPorDia[];
@@ -77,6 +86,7 @@ interface SalesDashboardPayload {
   receita_por_servico: ReceitaPorServico[];
   principais_objecoes: PrincipalObjecao[];
   funil_agendamento: FunilAgendamento;
+  receita_por_anuncio: ReceitaPorAnuncio[];
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
@@ -140,6 +150,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       compareceram_e_fecharam: 0,
       taxa_comparecimento_pct: null,
     },
+    receita_por_anuncio: [],
   }) as unknown as SalesDashboardPayload;
 
   return ok(
@@ -153,6 +164,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       receita_por_servico: dashboard.receita_por_servico,
       principais_objecoes: dashboard.principais_objecoes,
       funil_agendamento: dashboard.funil_agendamento,
+      receita_por_anuncio: dashboard.receita_por_anuncio,
     },
     { requestId },
   );

@@ -44,6 +44,14 @@ export interface FunilAgendamento {
   taxa_comparecimento_pct: number | null;
 }
 
+export interface ReceitaPorAnuncio {
+  anuncio: string;
+  ad_id: string;
+  leads: number;
+  vendas: number;
+  receita_cents: number;
+}
+
 export interface SalesDashboard {
   window: { from: string; to: string };
   pipeline_id: string | null;
@@ -54,6 +62,7 @@ export interface SalesDashboard {
   receita_por_servico: ReceitaPorServico[];
   principais_objecoes: PrincipalObjecao[];
   funil_agendamento: FunilAgendamento;
+  receita_por_anuncio: ReceitaPorAnuncio[];
 }
 
 export interface SalesDashboardFiltros {

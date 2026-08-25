@@ -75,12 +75,14 @@ export function SalesDashboardPanel({ filtros }: Props) {
     receita_por_servico,
     principais_objecoes,
     funil_agendamento,
+    receita_por_anuncio,
   } = data.data;
   const hasLeadsPorDia = leads_por_dia.some((d) => d.criados > 0 || d.convertidos > 0);
   const hasOrigem = receita_por_origem.length > 0;
   const hasServico = receita_por_servico.length > 0;
   const hasObjecoes = principais_objecoes.length > 0;
   const hasFunil = funil_agendamento.agendados > 0;
+  const hasAnuncio = receita_por_anuncio.length > 0;
   const funilData = [
     { etapa: "Agendados", valor: funil_agendamento.agendados },
     { etapa: "Compareceram", valor: funil_agendamento.compareceram },
@@ -288,6 +290,46 @@ export function SalesDashboardPanel({ filtros }: Props) {
                 </span>
               </div>
             </>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Receita por Anúncio">
+          {!hasAnuncio ? (
+            <EmptyChart />
+          ) : (
+            <ResponsiveContainer width="100%" height={224}>
+              <BarChart
+                data={receita_por_anuncio}
+                layout="vertical"
+                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => (v / 100).toLocaleString("pt-BR", { notation: "compact" })}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="anuncio"
+                  tick={{ fontSize: 11 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={130}
+                />
+                <Tooltip
+                  formatter={(value) => [formatCurrency(Number(value)), "Receita"]}
+                  contentStyle={{
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    border: "1px solid var(--color-border)",
+                  }}
+                />
+                <Bar dataKey="receita_cents" fill="var(--color-accent)" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </ChartCard>
       </div>
