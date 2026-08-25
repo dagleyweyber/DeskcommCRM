@@ -51,14 +51,17 @@ beforeAll(async () => {
 
   // GUC no DATABASE (não só na sessão) — `pgComoSupabase` empresta conexões
   // de um pool, e set_config(..., false) sozinho não sobreviveria a uma
-  // conexão nova puxada dele.
-  await pool.query(
-    `do $guc$ begin
-       execute format('alter database %I set app.nuvemshop_oauth_key = %L', current_database(), $1);
-     end $guc$;`,
-    [GUC_KEY],
-  );
-  await pool.query(`select set_config('app.nuvemshop_oauth_key', $1, false)`, [GUC_KEY]);
+  // conexão nova puxada dele. `$1` não é reconhecido DENTRO de um bloco
+  // `DO $$...$$` (o corpo dollar-quoted não é escaneado por parâmetro) —
+  // por isso o valor entra direto no texto, não como bind (mesmo padrão já
+  // usado em webhooks-inbound.test.ts).
+  await pool.query(`
+    do $guc$ begin
+      execute format('alter database %I set app.nuvemshop_oauth_key = %L',
+                     current_database(), '${GUC_KEY}');
+    end $guc$;
+    select set_config('app.nuvemshop_oauth_key', '${GUC_KEY}', false);
+  `);
   await pool.query(
     `insert into channel_sessions (organization_id, provider, waha_session_name, webhook_secret_encrypted)
        values ($1, 'waha', 'adaptador-bytea-session', public.fn_encrypt_oauth('segredo-bytea-123'))
