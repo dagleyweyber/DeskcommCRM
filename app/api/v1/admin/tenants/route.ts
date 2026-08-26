@@ -200,7 +200,10 @@ export async function POST(req: NextRequest) {
     .insert({
       display_name,
       slug,
-      legal_name: legal_name ?? null,
+      // organizations.legal_name é NOT NULL; quando o admin não informa razão
+      // social separada, cai pro mesmo nome de exibição — mesma convenção do
+      // signup próprio (lib/auth/provision.ts), nunca null.
+      legal_name: legal_name ?? display_name,
       cnpj: cnpj ?? null,
       // A check constraint de organizations.status não tem 'onboarding' — o
       // marcador de onboarding é onboarded_at null (mesmo modelo do signup).
