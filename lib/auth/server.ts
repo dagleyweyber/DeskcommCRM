@@ -10,9 +10,42 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { logger } from "@/lib/logger";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { IMPERSONATE_COOKIE_NAME, verifyImpersonateCookie } from "@/lib/impersonate/cookie";
 import type { AuthUser, Role, UserOrgMembership, ActiveOrg } from "./types";
 
 const ACTIVE_ORG_COOKIE = "active_org";
+
+/**
+ * Impersonate (S-11.07) tinha o cookie assinado e o banner, mas nada lia o
+ * cookie pra decidir a org ativa de verdade — o admin de plataforma via o
+ * banner dizendo "atuando como Tenant X" enquanto toda tela e rota de API
+ * (ambas passam por resolveActiveOrg) continuavam na PRÓPRIA org dele, porque
+ * ele não é membro (`user_organizations`) do tenant do cliente. RLS já
+ * concede acesso total a `fn_is_platform_admin()` nas tabelas tenant-aware —
+ * o único pedaço faltando era este.
+ */
+async function resolveImpersonatedOrg(authUser: AuthUser): Promise<ActiveOrg | null> {
+  if (!authUser.is_platform_admin) return null;
+  const store = await cookies();
+  const token = store.get(IMPERSONATE_COOKIE_NAME)?.value;
+  if (!token) return null;
+
+  const result = verifyImpersonateCookie(token);
+  if (!result.valid || !result.payload || result.payload.platformAdminId !== authUser.id) {
+    return null;
+  }
+
+  const admin = createAdminClient();
+  const { data: org } = await admin
+    .from("organizations")
+    .select("id, display_name")
+    .eq("id", result.payload.tenantId)
+    .maybeSingle();
+  if (!org) return null;
+
+  return { orgId: org.id, name: org.display_name, role: "admin" };
+}
 
 interface RawMembershipRow {
   organization_id: string;
@@ -119,6 +152,9 @@ export async function loadAuthUser(): Promise<AuthUser | null> {
  * Returns null if user has zero memberships.
  */
 export async function resolveActiveOrg(authUser: AuthUser): Promise<ActiveOrg | null> {
+  const impersonated = await resolveImpersonatedOrg(authUser);
+  if (impersonated) return impersonated;
+
   if (authUser.organizations.length === 0) return null;
   const store = await cookies();
   const cookieOrg = store.get(ACTIVE_ORG_COOKIE)?.value;
