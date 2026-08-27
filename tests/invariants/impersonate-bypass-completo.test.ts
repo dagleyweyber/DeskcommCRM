@@ -87,6 +87,25 @@ describe("emit_event — admin de plataforma sem membership não é barrado", ()
   });
 });
 
+describe("fn_member_role_in_org — achada testando o fix de fn_conversation_assign", () => {
+  function roleAs(callerId: string, targetId: string): string {
+    const out = sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${callerId}"}', false);
+      select coalesce(public.fn_member_role_in_org('${targetId}'::uuid, '${GOV_ORG}'::uuid), 'null');
+    `);
+    return lastLine(out);
+  }
+
+  it("⭐ admin de plataforma (não-membro) VÊ o papel real do destinatário", () => {
+    expect(roleAs(IMPERSONATE_ADMIN, GOV_AGENT_A)).toBe("agent");
+  });
+
+  it("outsider (não-membro, não admin) continua sem ver — devolve null, não vaza membership", () => {
+    expect(roleAs(OUTSIDER, GOV_AGENT_A)).toBe("null");
+  });
+});
+
 describe("fn_conversation_assign — gate do CHAMADOR tem bypass, gate do DESTINATÁRIO não", () => {
   it("⭐ admin de plataforma (não-membro) atribui a um agent+ elegível com sucesso", () => {
     const r = assignAs(IMPERSONATE_ADMIN, GOV_AGENT_A);

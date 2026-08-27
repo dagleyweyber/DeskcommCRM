@@ -12882,12 +12882,16 @@ notify pgrst, 'reload schema';
 -- tem seu PRÓPRIO gate de autorização, separado da RLS, sem bypass nenhum
 -- pra admin de plataforma (ele nunca é membro real de `user_organizations`
 -- do tenant — impersonate é aditivo, não cria linha lá). Varredura completa
--- achou o mesmo anti-padrão em mais 2 funções `security definer` e em 7
+-- achou o mesmo anti-padrão em mais TRÊS funções `security definer` e em 7
 -- conjuntos de política de RLS que nunca tiveram o bypass (a 0150 só
 -- *preservava* `fn_is_platform_admin()` onde já existia, não adicionava
--- onde faltava). `fn_conversation_assign` mantém o gate do DESTINATÁRIO
--- (`assignee_not_eligible_member`) sem bypass de propósito — é sobre o
--- dado, não sobre quem pede.
+-- onde faltava). `fn_member_role_in_org` foi achada TESTANDO o fix de
+-- `fn_conversation_assign`: sem ela, o admin de plataforma atribuindo a um
+-- agent+ ELEGÍVEL DE VERDADE levava 'assignee_not_eligible_member' — mentira
+-- atrás da mentira (só responde o papel do destinatário se o CHAMADOR
+-- também for membro). `fn_conversation_assign` mantém o gate do
+-- DESTINATÁRIO (`assignee_not_eligible_member`) sem bypass de propósito —
+-- é sobre o dado, não sobre quem pede.
 create or replace function public.emit_event(
   p_event_type text,
   p_entity_kind text,
@@ -12932,6 +12936,29 @@ begin
 
   return v_event_id;
 end $$;
+
+create or replace function public.fn_member_role_in_org(p_user uuid, p_org uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select uo.role
+    from public.user_organizations uo
+   where uo.user_id = p_user
+     and uo.organization_id = p_org
+     and uo.revoked_at is null
+     and (
+       auth.uid() is null
+       or public.fn_is_platform_admin()
+       or exists (
+         select 1 from public.user_organizations me
+          where me.user_id = auth.uid()
+            and me.organization_id = p_org
+            and me.revoked_at is null
+       )
+     )
+   limit 1;
+$$;
 
 create or replace function public.retrieve_top_k_chunks(
   p_organization_id uuid,

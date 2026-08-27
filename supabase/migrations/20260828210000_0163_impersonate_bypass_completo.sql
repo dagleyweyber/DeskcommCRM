@@ -14,7 +14,7 @@
 -- um evento, essa função barra o próprio admin de plataforma.
 --
 -- Varredura completa (não só o caso reportado) achou o MESMO anti-padrão em
--- mais duas funções `security definer` e em sete conjuntos de política de
+-- mais TRÊS funções `security definer` e em sete conjuntos de política de
 -- RLS que nunca tiveram o bypass — a 0150 (comentário nas linhas em torno de
 -- "ai_agent_versions"/"ai_routers") só *preservava* `fn_is_platform_admin()`
 -- onde já existia, não o adicionava onde faltava.
@@ -23,6 +23,10 @@
 -- gate; corpo e demais assinaturas idênticas — `create or replace` puro):
 --   - `emit_event` — dezenas de chamadores (create/update/tag de lead,
 --     trigger de atribuição, mensagens); é a de maior impacto.
+--   - `fn_member_role_in_org` — achada TESTANDO o fix de baixo: sem ela, o
+--     admin de plataforma atribuindo a um agent+ ELEGÍVEL DE VERDADE levava
+--     'assignee_not_eligible_member' — mentira atrás da mentira (a função só
+--     responde o papel do DESTINATÁRIO se o CHAMADOR também for membro).
 --   - `retrieve_top_k_chunks` — RAG de agente de IA.
 --   - `fn_conversation_assign` — só o gate do CHAMADOR; o gate do
 --     DESTINATÁRIO (`assignee_not_eligible_member`) fica como está de
@@ -79,6 +83,38 @@ begin
 
   return v_event_id;
 end $$;
+
+-- Achado testando o fix acima: `fn_conversation_assign` recusava o admin de
+-- plataforma atribuindo a um agent+ ELEGÍVEL DE VERDADE, com
+-- 'assignee_not_eligible_member' — mentira por trás da mentira. Essa função
+-- chama `fn_member_role_in_org(p_to_user_id, p_org)` pra saber o papel do
+-- DESTINATÁRIO, e essa função tem SEU PRÓPRIO gate: só responde se quem
+-- CHAMA (`auth.uid()`) também for membro da mesma org — mesmo anti-padrão,
+-- uma camada mais fundo. Sem ser membro, o admin de plataforma recebe NULL
+-- do papel do destinatário (nunca vê a linha), e o `coalesce(..., 'none')`
+-- de `fn_conversation_assign` interpreta "não vi" como "não é elegível".
+create or replace function public.fn_member_role_in_org(p_user uuid, p_org uuid)
+returns text
+language sql stable security definer
+set search_path = public
+as $$
+  select uo.role
+    from public.user_organizations uo
+   where uo.user_id = p_user
+     and uo.organization_id = p_org
+     and uo.revoked_at is null
+     and (
+       auth.uid() is null
+       or public.fn_is_platform_admin()
+       or exists (
+         select 1 from public.user_organizations me
+          where me.user_id = auth.uid()
+            and me.organization_id = p_org
+            and me.revoked_at is null
+       )
+     )
+   limit 1;
+$$;
 
 create or replace function public.retrieve_top_k_chunks(
   p_organization_id uuid,
