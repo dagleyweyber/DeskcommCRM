@@ -235,6 +235,22 @@ beforeAll(() => {
               '{"ad_id":"ad-2","ad_headline":"Campanha Inverno"}'::jsonb, '${D1}', '${D1}');
     insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
       values ('${LEAD_F4}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won organico sem anuncio', 'won', 'whatsapp', 999999, '${D1}', '${D1}');
+
+    -- Fase E3: hierarquia cacheada (Fase E1/E2) pros dois anúncios de ORG_F.
+    insert into public.meta_ads_ad_metadata (organization_id, ad_id, campaign_id, campaign_name, adset_id, adset_name)
+      values
+        ('${ORG_F}', 'ad-1', 'cg-verao', 'CG Verão', 'adset-a', 'Conjunto A'),
+        ('${ORG_F}', 'ad-2', 'cg-inverno', 'CG Inverno', 'adset-b', 'Conjunto B')
+      on conflict (organization_id, ad_id) do nothing;
+
+    -- LEAD_F1 tem DOIS meeting_scheduled (remarcação) — prova que o EXISTS
+    -- correlacionado conta o LEAD uma vez só, não duplica leads/vendas nem
+    -- agendamentos do ad-1. LEAD_F3 (ad-2) tem um só.
+    insert into public.crm_lead_activities (organization_id, lead_id, source_module, type, actor_kind, performed_by_user_id, reason, payload, performed_at)
+      values
+        ('${ORG_F}', '${LEAD_F1}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_F}', '${LEAD_F1}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Remarcado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
+        ('${ORG_F}', '${LEAD_F3}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}');
   `);
 });
 
@@ -282,8 +298,13 @@ interface FunilAgendamento {
 interface AnuncioRow {
   anuncio: string;
   ad_id: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  adset_id: string | null;
+  adset_name: string | null;
   leads: number;
   vendas: number;
+  agendamentos: number;
   receita_cents: number;
 }
 interface Dashboard {
@@ -478,9 +499,41 @@ describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)",
 
   it("⭐ ad-2(200000) > ad-1(150000, F1+F2 somados) — ordenado por receita_cents desc", () => {
     expect(dashboard().receita_por_anuncio).toEqual([
-      { anuncio: "Campanha Inverno", ad_id: "ad-2", leads: 1, vendas: 1, receita_cents: 200_000 },
-      { anuncio: "Promoção de Verão", ad_id: "ad-1", leads: 2, vendas: 2, receita_cents: 150_000 },
+      {
+        anuncio: "Campanha Inverno",
+        ad_id: "ad-2",
+        campaign_id: "cg-inverno",
+        campaign_name: "CG Inverno",
+        adset_id: "adset-b",
+        adset_name: "Conjunto B",
+        leads: 1,
+        vendas: 1,
+        agendamentos: 1,
+        receita_cents: 200_000,
+      },
+      {
+        anuncio: "Promoção de Verão",
+        ad_id: "ad-1",
+        campaign_id: "cg-verao",
+        campaign_name: "CG Verão",
+        adset_id: "adset-a",
+        adset_name: "Conjunto A",
+        leads: 2,
+        vendas: 2,
+        agendamentos: 1,
+        receita_cents: 150_000,
+      },
     ]);
+  });
+
+  it("⭐ Fase E3: LEAD_F1 remarcado (2 meeting_scheduled) não duplica leads/vendas/agendamentos do ad-1", () => {
+    const ad1 = dashboard().receita_por_anuncio.find((a) => a.ad_id === "ad-1")!;
+    // F1+F2 = 2 leads, não 3 — a remarcação de F1 não vira um segundo lead.
+    expect(ad1.leads).toBe(2);
+    expect(ad1.vendas).toBe(2);
+    // agendamentos conta LEADS com pelo menos um meeting_scheduled, não
+    // ocorrências — F1 tem 2 e F2 tem 0 → agendamentos do ad-1 é 1, não 2.
+    expect(ad1.agendamentos).toBe(1);
   });
 
   it("headline de ad-1 vem de QUALQUER linha do grupo (F1 tem headline, F2 não) — max() não gera duas linhas", () => {

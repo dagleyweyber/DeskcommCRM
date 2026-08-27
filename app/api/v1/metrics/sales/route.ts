@@ -1,8 +1,9 @@
 /**
- * GET /api/v1/metrics/sales — Dashboard de Vendas (Fases 1+2+3+4: KPIs,
- * gráficos de período/origem/serviço, principais objeções, funil real de
- * agendamento → presença → conversão, e receita por anúncio). Mesmo
- * esqueleto de /api/v1/metrics/attendants.
+ * GET /api/v1/metrics/sales — Dashboard de Vendas (Fases 1+2+3+4 + Meta Ads
+ * Fase E3: KPIs, gráficos de período/origem/serviço, principais objeções,
+ * funil real de agendamento → presença → conversão, e receita por anúncio
+ * — agora com campanha/conjunto e agendamentos por anúncio). Mesmo esqueleto
+ * de /api/v1/metrics/attendants.
  *
  * Escopo = a PRÓPRIA RLS: `fn_sales_dashboard` (SECURITY INVOKER) roda com o
  * client user-scoped (cookie session), então crm_leads (fn_can_view_lead) já
@@ -74,8 +75,13 @@ interface FunilAgendamento {
 interface ReceitaPorAnuncio {
   anuncio: string;
   ad_id: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  adset_id: string | null;
+  adset_name: string | null;
   leads: number;
   vendas: number;
+  agendamentos: number;
   receita_cents: number;
 }
 

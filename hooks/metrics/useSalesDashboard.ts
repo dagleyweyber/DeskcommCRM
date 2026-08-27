@@ -47,8 +47,13 @@ export interface FunilAgendamento {
 export interface ReceitaPorAnuncio {
   anuncio: string;
   ad_id: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  adset_id: string | null;
+  adset_name: string | null;
   leads: number;
   vendas: number;
+  agendamentos: number;
   receita_cents: number;
 }
 
