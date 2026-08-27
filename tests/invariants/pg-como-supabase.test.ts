@@ -352,6 +352,70 @@ describe("UPDATE — implementado depois, e por pressão do próprio adaptador",
   });
 });
 
+describe("UPSERT — implementado por pressão de handleLeadCreatedForAdHierarchy (Meta Ads Fase E2)", () => {
+  // `upsert` não existia; o handler de hierarquia de anúncio o chamou e o
+  // adaptador ESTOUROU em vez de devolver vazio — o `naoImplementado` fazendo
+  // o trabalho dele de novo.
+  it("linha nova: insere normalmente", async () => {
+    const { error } = await db
+      .from("meta_ads_ad_metadata")
+      .upsert(
+        { organization_id: ORG, ad_id: "upsert-novo", ad_name: "Primeiro" },
+        { onConflict: "organization_id,ad_id" },
+      );
+    expect(error).toBeNull();
+
+    const { rows } = await pool.query<{ ad_name: string }>(
+      "select ad_name from meta_ads_ad_metadata where organization_id = $1 and ad_id = $2",
+      [ORG, "upsert-novo"],
+    );
+    expect(rows[0]!.ad_name).toBe("Primeiro");
+  });
+
+  it("⭐ conflito na chave composta: ATUALIZA a linha existente, não duplica", async () => {
+    await db
+      .from("meta_ads_ad_metadata")
+      .upsert(
+        { organization_id: ORG, ad_id: "upsert-conflito", ad_name: "Antes" },
+        { onConflict: "organization_id,ad_id" },
+      );
+    const { error } = await db
+      .from("meta_ads_ad_metadata")
+      .upsert(
+        { organization_id: ORG, ad_id: "upsert-conflito", ad_name: "Depois" },
+        { onConflict: "organization_id,ad_id" },
+      );
+    expect(error).toBeNull();
+
+    const { rows } = await pool.query<{ n: string; ad_name: string }>(
+      `select count(*) as n, max(ad_name) as ad_name from meta_ads_ad_metadata
+         where organization_id = $1 and ad_id = $2`,
+      [ORG, "upsert-conflito"],
+    );
+    expect(rows[0]!.n).toBe("1");
+    expect(rows[0]!.ad_name).toBe("Depois");
+  });
+
+  it("`.select().maybeSingle()` devolve a linha gravada", async () => {
+    const { data, error } = await db
+      .from("meta_ads_ad_metadata")
+      .upsert(
+        { organization_id: ORG, ad_id: "upsert-select", ad_name: "Com Select" },
+        { onConflict: "organization_id,ad_id" },
+      )
+      .select("ad_name")
+      .maybeSingle();
+    expect(error).toBeNull();
+    expect((data as { ad_name: string }).ad_name).toBe("Com Select");
+  });
+
+  it("sem `onConflict`, estoura em vez de fingir — não reproduz o upsert real sem saber o alvo", () => {
+    expect(() =>
+      db.from("meta_ads_ad_metadata").upsert({ organization_id: ORG, ad_id: "sem-conflict" }),
+    ).toThrow(/upsert/);
+  });
+});
+
 describe("rpc — argumentos NOMEADOS, como o PostgREST", () => {
   it("chama a função e devolve o valor", async () => {
     // `emit_event` é o que o handler de contatos usa; sem rpc, ele morria no

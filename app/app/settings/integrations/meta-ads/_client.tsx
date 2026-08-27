@@ -19,9 +19,11 @@ import { Megaphone } from "@/lib/ui/icons";
 import {
   useMetaAdsCredentials,
   useDisconnectMetaAds,
+  useDisconnectMetaAdsReadToken,
   type MetaAdsCredentialsRow,
 } from "@/hooks/integrations/useMetaAdsCredentials";
 import { ConnectMetaAdsDialog } from "./_components/ConnectMetaAdsDialog";
+import { ConnectAdsReadTokenDialog } from "./_components/ConnectAdsReadTokenDialog";
 
 const STATUS_LABELS: Record<MetaAdsCredentialsRow["status"], string> = {
   connecting: "Conectando…",
@@ -39,8 +41,20 @@ export function MetaAdsIntegrationClient({ initialData, canWrite }: Props) {
   const router = useRouter();
   const { data: credentials } = useMetaAdsCredentials({ initialData });
   const disconnect = useDisconnectMetaAds();
+  const disconnectReadToken = useDisconnectMetaAdsReadToken();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [readTokenDialogOpen, setReadTokenDialogOpen] = useState(false);
+
+  const handleDisconnectReadToken = async () => {
+    try {
+      await disconnectReadToken.mutateAsync();
+      toast.success("Leitura de campanha desconectada.");
+      router.refresh();
+    } catch {
+      // erro já mostrado pelo toast do hook
+    }
+  };
 
   const handleDisconnect = async () => {
     try {
@@ -71,39 +85,69 @@ export function MetaAdsIntegrationClient({ initialData, canWrite }: Props) {
   }
 
   return (
-    <Card className="flex flex-col items-start gap-4 p-6">
-      <div className="flex w-full items-start justify-between gap-4">
-        <div>
-          <h2 className="font-medium">Dataset {credentials.dataset_id}</h2>
-          <p className="text-sm text-muted-foreground">{STATUS_LABELS[credentials.status]}</p>
-          {credentials.last_error && (
-            <p className="mt-1 text-xs text-destructive">{credentials.last_error}</p>
+    <div className="flex flex-col gap-4">
+      <Card className="flex flex-col items-start gap-4 p-6">
+        <div className="flex w-full items-start justify-between gap-4">
+          <div>
+            <h2 className="font-medium">Dataset {credentials.dataset_id}</h2>
+            <p className="text-sm text-muted-foreground">{STATUS_LABELS[credentials.status]}</p>
+            {credentials.last_error && (
+              <p className="mt-1 text-xs text-destructive">{credentials.last_error}</p>
+            )}
+          </div>
+          {canWrite && (
+            <Button variant="outline" onClick={() => setConfirmOpen(true)}>
+              Desconectar
+            </Button>
           )}
         </div>
-        {canWrite && (
-          <Button variant="outline" onClick={() => setConfirmOpen(true)}>
-            Desconectar
-          </Button>
-        )}
-      </div>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Desconectar o Meta Ads?</AlertDialogTitle>
-            <AlertDialogDescription>
-              As vendas param de ser enviadas automaticamente pro Conversions API
-              até você conectar de novo.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={disconnect.isPending}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDisconnect} disabled={disconnect.isPending}>
-              {disconnect.isPending ? "Desconectando…" : "Desconectar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Desconectar o Meta Ads?</AlertDialogTitle>
+              <AlertDialogDescription>
+                As vendas param de ser enviadas automaticamente pro Conversions API
+                até você conectar de novo.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={disconnect.isPending}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDisconnect} disabled={disconnect.isPending}>
+                {disconnect.isPending ? "Desconectando…" : "Desconectar"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
+
+      <Card className="flex flex-col items-start gap-4 p-6">
+        <div className="flex w-full items-start justify-between gap-4">
+          <div>
+            <h2 className="font-medium">Leitura de campanha e anúncio</h2>
+            <p className="text-sm text-muted-foreground">
+              {credentials.ads_read_connected
+                ? "Conectado — leads de anúncio já trazem campanha e conjunto no relatório."
+                : "Opcional. Sem isso, o relatório mostra só o anúncio, sem campanha/conjunto."}
+            </p>
+          </div>
+          {canWrite &&
+            (credentials.ads_read_connected ? (
+              <Button
+                variant="outline"
+                onClick={handleDisconnectReadToken}
+                disabled={disconnectReadToken.isPending}
+              >
+                {disconnectReadToken.isPending ? "Desconectando…" : "Desconectar"}
+              </Button>
+            ) : (
+              <Button variant="outline" onClick={() => setReadTokenDialogOpen(true)}>
+                Conectar leitura
+              </Button>
+            ))}
+        </div>
+        <ConnectAdsReadTokenDialog open={readTokenDialogOpen} onOpenChange={setReadTokenDialogOpen} />
+      </Card>
+    </div>
   );
 }

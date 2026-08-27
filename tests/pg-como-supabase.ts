@@ -290,6 +290,81 @@ class InsercaoPg<T> implements PromiseLike<RespostaFalsa<null>> {
 
 
 /**
+ * `INSERT ... ON CONFLICT (...) DO UPDATE` — a forma
+ * `.upsert(obj, {onConflict}).select(cols).maybeSingle()`.
+ *
+ * Nasceu porque `handleLeadCreatedForAdHierarchy` (Meta Ads Fase E2) chama
+ * `.upsert(..., {onConflict: "organization_id,ad_id"})` pra cachear a
+ * hierarquia de um anúncio sem duplicar linha quando dois leads do mesmo
+ * anúncio chegam perto um do outro — sem isto o adaptador ESTOURAVA
+ * (`naoImplementado`) em vez de deixar o teste medir o comportamento real.
+ * `DO UPDATE SET` (não `DO NOTHING`) porque o caso de reprocessar um ad_id
+ * que antes falhou (grava com `last_error`) precisa poder trocar pra
+ * sucesso na tentativa seguinte — mesmo semântica do upsert real do
+ * PostgREST, que sempre atualiza no conflito por padrão.
+ */
+class UpsertPg<T> implements PromiseLike<RespostaFalsa<null>> {
+  private colunasDeVolta: string | null = null;
+
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly tabela: string,
+    private readonly linha: Record<string, unknown>,
+    private readonly onConflict: string,
+  ) {}
+
+  select(colunas = "*"): this {
+    this.colunasDeVolta = colunas;
+    return this;
+  }
+
+  private montar(): { texto: string; valores: unknown[] } {
+    const chaves = Object.keys(this.linha);
+    const valores = chaves.map((k) => {
+      const v = this.linha[k];
+      return v !== null && typeof v === "object" && !Array.isArray(v) ? JSON.stringify(v) : v;
+    });
+    const marcas = chaves.map((_, i) => `$${i + 1}`).join(", ");
+    const conflito = this.onConflict
+      .split(",")
+      .map((c) => `"${c.trim()}"`)
+      .join(", ");
+    const sets = chaves.map((k) => `"${k}" = excluded."${k}"`).join(", ");
+    const texto =
+      `insert into public."${this.tabela}" (${chaves.map((k) => `"${k}"`).join(", ")}) values (${marcas})` +
+      ` on conflict (${conflito}) do update set ${sets}` +
+      (this.colunasDeVolta ? ` returning ${colunasSql(this.colunasDeVolta)}` : "");
+    return { texto, valores };
+  }
+
+  async single(): Promise<RespostaFalsa<T>> {
+    const { texto, valores } = this.montar();
+    try {
+      const r = await this.pool.query(texto, valores);
+      return { data: normalizarLinha((r.rows[0] ?? null) as T), error: null };
+    } catch (e) {
+      return { data: null, error: erroDe(e) };
+    }
+  }
+
+  async maybeSingle(): Promise<RespostaFalsa<T>> {
+    return this.single();
+  }
+
+  then<R1 = RespostaFalsa<null>, R2 = never>(
+    aoResolver?: ((v: RespostaFalsa<null>) => R1 | PromiseLike<R1>) | null,
+    aoRejeitar?: ((r: unknown) => R2 | PromiseLike<R2>) | null,
+  ): PromiseLike<R1 | R2> {
+    const { texto, valores } = this.montar();
+    return this.pool
+      .query(texto, valores)
+      .then(() => ({ data: null, error: null }) as RespostaFalsa<null>)
+      .catch((e: unknown) => ({ data: null, error: erroDe(e) }) as RespostaFalsa<null>)
+      .then(aoResolver, aoRejeitar);
+  }
+}
+
+/**
  * UPDATE com filtros — a forma `.update(obj).eq(a,b).select(cols).maybeSingle()`.
  *
  * Nasceu porque `patchContactHandler` a usa, e o adaptador ESTOUROU ao ser
@@ -422,7 +497,10 @@ export function pgComoSupabase(pool: pg.Pool): SupabaseClient {
         insert: (linha: Record<string, unknown>) => new InsercaoPg(pool, tabela, linha),
         update: (patch: Record<string, unknown>) => new AtualizacaoPg(pool, tabela, patch),
         delete: () => naoImplementado("delete"),
-        upsert: () => naoImplementado("upsert"),
+        upsert: (linha: Record<string, unknown>, opts?: { onConflict?: string }) => {
+          if (!opts?.onConflict) return naoImplementado("upsert sem onConflict");
+          return new UpsertPg(pool, tabela, linha, opts.onConflict);
+        },
       };
     },
     rpc: (nome: string, args: Record<string, unknown> = {}) => chamarRpc(pool, nome, args),

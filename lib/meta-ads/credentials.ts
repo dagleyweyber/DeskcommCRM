@@ -30,3 +30,22 @@ export async function resolveMetaAdsCredentials(
 
   return { accessToken, datasetId: row.dataset_id as string };
 }
+
+/**
+ * Token de LEITURA de campanha/conjunto/anúncio (Fase E) — INDEPENDENTE do
+ * token de Purchase acima. `null` quando não configurado (recurso opcional,
+ * não é erro) ou quando a decifra falha.
+ */
+export async function resolveMetaAdsReadToken(
+  admin: SupabaseClient,
+  organizationId: string,
+): Promise<string | null> {
+  const { data: row } = await admin
+    .from("tenant_meta_ads_credentials")
+    .select("ads_read_token_encrypted")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (!row?.ads_read_token_encrypted) return null;
+
+  return decryptWebhookSecret(admin, row.ads_read_token_encrypted as string);
+}

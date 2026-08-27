@@ -19,6 +19,8 @@ export type AuditAction =
   | "nuvemshop.webhook_invalid_signature"
   | "meta_ads.credential_connected"
   | "meta_ads.credential_disconnected"
+  | "meta_ads.ads_read_token_connected"
+  | "meta_ads.ads_read_token_disconnected"
   | "lead.created"
   | "lead.updated"
   | "lead.deleted"

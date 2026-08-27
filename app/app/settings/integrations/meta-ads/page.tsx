@@ -8,7 +8,8 @@ import { MetaAdsIntegrationClient } from "./_client";
 
 export const dynamic = "force-dynamic";
 
-const SAFE_COLUMNS = "id, organization_id, dataset_id, status, last_error, created_at, updated_at";
+const SAFE_COLUMNS =
+  "id, organization_id, dataset_id, status, last_error, created_at, updated_at, ads_read_connected";
 
 export default async function MetaAdsIntegrationPage() {
   const user = await requireAuth();

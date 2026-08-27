@@ -23,7 +23,11 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const SAFE_COLUMNS = "id, organization_id, dataset_id, status, last_error, created_at, updated_at";
+// Só usada pelo GET, que lê da VIEW tenant_meta_ads_credentials_safe (onde
+// ads_read_connected já é computado) — o POST/DELETE leem a TABELA crua, sem
+// essa coluna, e tratam o booleano à parte.
+const SAFE_COLUMNS =
+  "id, organization_id, dataset_id, status, last_error, created_at, updated_at, ads_read_connected";
 
 const connectSchema = z.object({
   access_token: z.string().trim().min(8).max(2048),
@@ -87,6 +91,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   // real (venda marcada como ganha) já revela token/dataset_id inválido, e
   // fica registrado em meta_capi_send_log. 'healthy' otimista em vez de
   // 'connecting' preso pra sempre sem um passo que o resolva.
+  // Select explícito com o bytea cifrado (não SAFE_COLUMNS, que é da VIEW) —
+  // aqui é a tabela crua, e o próprio insert nunca sobrescreve o token de
+  // leitura da Fase E (não está no objeto do upsert), então precisa ler de
+  // volta pra saber o estado atual antes de virar o booleano seguro.
   const { data: upserted, error: upsertErr } = await admin
     .from("tenant_meta_ads_credentials")
     .upsert(
@@ -99,7 +107,9 @@ export async function POST(req: NextRequest): Promise<Response> {
       },
       { onConflict: "organization_id" },
     )
-    .select(SAFE_COLUMNS)
+    .select(
+      "id, organization_id, dataset_id, status, last_error, created_at, updated_at, ads_read_token_encrypted",
+    )
     .single();
 
   if (upsertErr || !upserted) {
@@ -116,7 +126,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     metadata: { dataset_id: input.dataset_id },
   });
 
-  return ok(upserted, { status: 201, requestId });
+  const { ads_read_token_encrypted, ...safeRow } = upserted;
+  return ok(
+    { ...safeRow, ads_read_connected: ads_read_token_encrypted != null },
+    { status: 201, requestId },
+  );
 }
 
 export async function DELETE(): Promise<Response> {
