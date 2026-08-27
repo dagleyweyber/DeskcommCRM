@@ -12873,6 +12873,296 @@ notify pgrst, 'reload schema';
 
 
 
+-- ---- impersonate (S-11.07): bypass faltando em 3 funções + 7 políticas de RLS (migration 0163) ----
+--
+-- Achado ao vivo: admin de plataforma impersonando um tenant tentou trocar o
+-- "Atendente" de um lead e levou "Erro interno". Causa raiz NÃO era RLS (a
+-- política de crm_leads já tem `fn_is_platform_admin()`) — era o TRIGGER
+-- `fn_emit_event_on_lead_change`, que chama `emit_event(...)`, e essa função
+-- tem seu PRÓPRIO gate de autorização, separado da RLS, sem bypass nenhum
+-- pra admin de plataforma (ele nunca é membro real de `user_organizations`
+-- do tenant — impersonate é aditivo, não cria linha lá). Varredura completa
+-- achou o mesmo anti-padrão em mais 2 funções `security definer` e em 7
+-- conjuntos de política de RLS que nunca tiveram o bypass (a 0150 só
+-- *preservava* `fn_is_platform_admin()` onde já existia, não adicionava
+-- onde faltava). `fn_conversation_assign` mantém o gate do DESTINATÁRIO
+-- (`assignee_not_eligible_member`) sem bypass de propósito — é sobre o
+-- dado, não sobre quem pede.
+create or replace function public.emit_event(
+  p_event_type text,
+  p_entity_kind text,
+  p_entity_id uuid,
+  p_payload jsonb default '{}'::jsonb,
+  p_metadata jsonb default '{}'::jsonb,
+  p_organization_id uuid default null
+) returns uuid
+  language plpgsql security definer
+  set search_path to 'public'
+as $$
+declare
+  v_org_id uuid;
+  v_event_id uuid;
+begin
+  v_org_id := p_organization_id;
+  if v_org_id is null then
+    select organization_id into v_org_id
+      from public.user_organizations
+      where user_id = auth.uid() and revoked_at is null
+      limit 1;
+  end if;
+  if v_org_id is null then
+    raise exception 'emit_event: organization_id obrigatorio';
+  end if;
+
+  if auth.uid() is not null
+     and not public.fn_is_platform_admin()
+     and not public.fn_role_at_least(v_org_id, 'viewer') then
+    raise exception 'caller_not_authorized_for_org'
+      using hint = 'emit_event: caller must be an active member of the organization';
+  end if;
+
+  insert into public.event_log
+    (organization_id, event_type, entity_kind, entity_id, payload, metadata)
+  values
+    (v_org_id, p_event_type, p_entity_kind, p_entity_id,
+     coalesce(p_payload, '{}'::jsonb),
+     coalesce(p_metadata, '{}'::jsonb)
+       || jsonb_build_object('emitted_at', extract(epoch from now())))
+  returning id into v_event_id;
+
+  return v_event_id;
+end $$;
+
+create or replace function public.retrieve_top_k_chunks(
+  p_organization_id uuid,
+  p_kb_version_id uuid,
+  p_embedding public.vector,
+  p_k integer default 5,
+  p_threshold real default 0.40
+) returns table (
+  chunk_id uuid,
+  knowledge_source_id uuid,
+  content text,
+  similarity real,
+  metadata jsonb
+)
+  language plpgsql stable security definer
+  set search_path to 'public'
+as $$
+begin
+  if auth.uid() is not null
+     and not public.fn_is_platform_admin()
+     and not public.fn_role_at_least(p_organization_id, 'viewer') then
+    raise exception 'caller_not_authorized_for_org'
+      using hint = 'retrieve_top_k_chunks: caller must be an active member of the organization';
+  end if;
+
+  return query
+  select
+    c.id as chunk_id,
+    c.knowledge_source_id,
+    c.content,
+    (1 - (c.embedding <=> p_embedding))::real as similarity,
+    c.metadata
+  from public.ai_chunks c
+  where c.organization_id = p_organization_id
+    and c.kb_version_id   = p_kb_version_id
+    and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  order by c.embedding <=> p_embedding asc
+  limit greatest(p_k, 0);
+end $$;
+
+create or replace function public.fn_conversation_assign(
+  p_organization_id uuid,
+  p_conversation_id uuid,
+  p_to_user_id uuid,
+  p_reason text,
+  p_expected_assignee uuid default null,
+  p_enforce_expected boolean default false
+) returns setof public.conversations
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  v_from uuid;
+  v_conv public.conversations%rowtype;
+begin
+  if auth.uid() is not null
+     and not public.fn_is_platform_admin()
+     and not public.fn_role_at_least(p_organization_id, 'agent') then
+    raise exception 'caller_not_authorized_for_org'
+      using hint = 'caller must be an active agent+ member of the organization';
+  end if;
+
+  -- Gate do DESTINATÁRIO, sem bypass de propósito: atribuir a alguém que não
+  -- é agent+ de verdade continua errado mesmo em impersonate — é sobre o
+  -- dado, não sobre quem pede.
+  if p_to_user_id is not null then
+    if coalesce(public.fn_member_role_in_org(p_to_user_id, p_organization_id), 'none')
+         not in ('agent','manager','admin') then
+      raise exception 'assignee_not_eligible_member'
+        using hint = 'target must be an active agent+ member of the organization';
+    end if;
+  end if;
+
+  select assigned_to_user_id into v_from
+    from public.conversations
+   where id = p_conversation_id
+     and organization_id = p_organization_id
+   for update;
+
+  if not found then
+    return;
+  end if;
+
+  if p_enforce_expected and v_from is distinct from p_expected_assignee then
+    return;
+  end if;
+
+  update public.conversations
+     set assigned_to_user_id = p_to_user_id,
+         assigned_at = case when p_to_user_id is null then null else now() end,
+         assignee_kind = case when p_to_user_id is null then null else 'user' end,
+         status = case when p_to_user_id is null then 'open' else 'claimed' end,
+         status_changed_at = now(),
+         unread_count_for_assignee = 0,
+         updated_at = now()
+   where id = p_conversation_id
+   returning * into v_conv;
+
+  insert into public.conversation_assignment_events
+    (organization_id, conversation_id, from_user_id, to_user_id, changed_by, reason)
+  values
+    (p_organization_id, p_conversation_id, v_from, p_to_user_id, auth.uid(), p_reason);
+
+  return next v_conv;
+end;
+$$;
+
+-- ---- políticas de RLS sem o bypass (nunca tiveram, não é regressão da 0150) ----
+
+drop policy if exists "message_templates_write" on message_templates;
+create policy "message_templates_write" on message_templates
+  for all using (
+    fn_is_platform_admin()
+    or (
+      organization_id in (select fn_user_org_ids())
+      and (
+        (owner_user_id = auth.uid() and fn_role_at_least(organization_id, 'agent'))
+        or (owner_user_id is null and fn_role_at_least(organization_id, 'manager'))
+      )
+    )
+  )
+  with check (
+    fn_is_platform_admin()
+    or (
+      organization_id in (select fn_user_org_ids())
+      and (
+        (owner_user_id = auth.uid() and fn_role_at_least(organization_id, 'agent'))
+        or (owner_user_id is null and fn_role_at_least(organization_id, 'manager'))
+      )
+    )
+  );
+
+drop policy if exists "conversation_notes_write" on conversation_notes;
+create policy "conversation_notes_write" on conversation_notes
+  for all using (
+    fn_is_platform_admin()
+    or (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, 'agent'))
+  )
+  with check (
+    fn_is_platform_admin()
+    or (organization_id in (select fn_user_org_ids()) and fn_role_at_least(organization_id, 'agent'))
+  );
+
+drop policy if exists tenant_isolation_ai_agent_versions_select on public.ai_agent_versions;
+create policy tenant_isolation_ai_agent_versions_select on public.ai_agent_versions
+  for select using (
+    organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists tenant_isolation_ai_agent_versions_write on public.ai_agent_versions;
+create policy tenant_isolation_ai_agent_versions_write on public.ai_agent_versions
+  for all using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  ) with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  );
+
+drop policy if exists tenant_isolation_ai_routers_select on public.ai_routers;
+create policy tenant_isolation_ai_routers_select on public.ai_routers
+  for select using (
+    organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists tenant_isolation_ai_routers_write on public.ai_routers;
+create policy tenant_isolation_ai_routers_write on public.ai_routers
+  for all using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  ) with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  );
+
+drop policy if exists tenant_isolation_ai_router_members_select on public.ai_router_members;
+create policy tenant_isolation_ai_router_members_select on public.ai_router_members
+  for select using (
+    organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists tenant_isolation_ai_router_members_write on public.ai_router_members;
+create policy tenant_isolation_ai_router_members_write on public.ai_router_members
+  for all using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  ) with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  );
+
+drop policy if exists tenant_isolation_ai_purpose_bindings_select on public.ai_purpose_bindings;
+create policy tenant_isolation_ai_purpose_bindings_select on public.ai_purpose_bindings
+  for select using (
+    organization_id in (select public.fn_user_org_ids()) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists tenant_isolation_ai_purpose_bindings_write on public.ai_purpose_bindings;
+create policy tenant_isolation_ai_purpose_bindings_write on public.ai_purpose_bindings
+  for all using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  ) with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  );
+
+drop policy if exists tenant_isolation_ai_provider_credentials_write on public.ai_provider_credentials;
+create policy tenant_isolation_ai_provider_credentials_write on public.ai_provider_credentials
+  for all using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  ) with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'admin'))
+  );
+
+notify pgrst, 'reload schema';
+
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
