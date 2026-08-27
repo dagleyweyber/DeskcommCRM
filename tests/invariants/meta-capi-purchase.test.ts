@@ -248,3 +248,59 @@ describe("RLS e anon — mesma doutrina de isolamento multi-tenant", () => {
     expect(lastLine(out)).toBe("0");
   });
 });
+
+/**
+ * Meta Ads, Fase E1 — schema pra hierarquia de campanha/conjunto/anúncio
+ * (migration 0161). Sem função nova, então só prova RLS + anon-revoke +
+ * a view segura nunca vazando o token cifrado (só o booleano derivado).
+ */
+describe("Fase E1 — meta_ads_ad_metadata + ads_read_token_encrypted (migration 0161)", () => {
+  const AD_ID_A = "120210000000000";
+
+  function asRole(actorId: string): string {
+    return `set role authenticated;
+      do $c$ begin perform set_config('request.jwt.claims', '{"sub":"${actorId}"}', false); end $c$;`;
+  }
+
+  it("⭐ tenant_meta_ads_credentials_safe.ads_read_connected é false sem o segundo token, true depois de gravá-lo", () => {
+    const antes = sql(`
+      select ads_read_connected from public.tenant_meta_ads_credentials_safe
+        where organization_id = '${ORG_A}';
+    `);
+    expect(lastLine(antes)).toBe("f");
+
+    sql(`
+      update public.tenant_meta_ads_credentials
+        set ads_read_token_encrypted = public.fn_encrypt_oauth('EAAG-token-leitura-ads')
+        where organization_id = '${ORG_A}';
+    `);
+
+    const depois = sql(`
+      select ads_read_connected from public.tenant_meta_ads_credentials_safe
+        where organization_id = '${ORG_A}';
+    `);
+    expect(lastLine(depois)).toBe("t");
+  });
+
+  it("⭐ manager de ORG_B não lê o cache de hierarquia de ORG_A (RLS)", () => {
+    sql(`
+      insert into public.meta_ads_ad_metadata
+        (organization_id, ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name)
+        values ('${ORG_A}', '${AD_ID_A}', 'Anúncio Teste', '999', 'Conjunto Teste', '888', 'Campanha Teste')
+        on conflict (organization_id, ad_id) do nothing;
+    `);
+    const out = sql(`
+      ${asRole(MANAGER_B)}
+      select count(*) from public.meta_ads_ad_metadata where organization_id = '${ORG_A}';
+    `);
+    expect(lastLine(out)).toBe("0");
+  });
+
+  it("⭐ anon não tem grant nenhum em meta_ads_ad_metadata (tabela nova nasce concedida — precisa revogar)", () => {
+    const out = sql(`
+      select count(*) from information_schema.role_table_grants
+        where grantee = 'anon' and table_name = 'meta_ads_ad_metadata';
+    `);
+    expect(lastLine(out)).toBe("0");
+  });
+});
