@@ -13,6 +13,7 @@ import {
 import { useSalesDashboard, type SalesDashboardFiltros } from "@/hooks/metrics/useSalesDashboard";
 import { OBJECTION_LABELS } from "@/lib/schemas/leads";
 import { KpiCard } from "./KpiCard";
+import { AnuncioPerformanceTable } from "./AnuncioPerformanceTable";
 
 function rotuloObjecao(motivo: string): string {
   return OBJECTION_LABELS[motivo as keyof typeof OBJECTION_LABELS] ?? motivo;
@@ -293,45 +294,12 @@ export function SalesDashboardPanel({ filtros }: Props) {
           )}
         </ChartCard>
 
-        <ChartCard title="Receita por Anúncio">
-          {!hasAnuncio ? (
-            <EmptyChart />
-          ) : (
-            <ResponsiveContainer width="100%" height={224}>
-              <BarChart
-                data={receita_por_anuncio}
-                layout="vertical"
-                margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => (v / 100).toLocaleString("pt-BR", { notation: "compact" })}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="anuncio"
-                  tick={{ fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={130}
-                />
-                <Tooltip
-                  formatter={(value) => [formatCurrency(Number(value)), "Receita"]}
-                  contentStyle={{
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    border: "1px solid var(--color-border)",
-                  }}
-                />
-                <Bar dataKey="receita_cents" fill="var(--color-accent)" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
+        <div className="rounded-lg border bg-card p-4 md:col-span-2">
+          <h3 className="mb-4 text-sm font-medium text-muted-foreground">
+            Desempenho por Campanha, Conjunto e Anúncio
+          </h3>
+          {!hasAnuncio ? <EmptyChart /> : <AnuncioPerformanceTable dados={receita_por_anuncio} />}
+        </div>
       </div>
     </div>
   );
