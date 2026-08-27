@@ -44,7 +44,7 @@ async function resolveImpersonatedOrg(authUser: AuthUser): Promise<ActiveOrg | n
     .maybeSingle();
   if (!org) return null;
 
-  return { orgId: org.id, name: org.display_name, role: "admin" };
+  return { orgId: org.id, name: org.display_name, role: "admin", viaImpersonate: true };
 }
 
 interface RawMembershipRow {

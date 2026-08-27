@@ -191,6 +191,46 @@ describe("requireRole — helper único (spec 13 §4)", () => {
     });
   });
 
+  // S-11.07: admin de plataforma impersonando um tenant nunca tem linha em
+  // user_organizations lá — fn_user_role_in_org devolveria null e barraria
+  // até o próprio admin de plataforma dentro do tenant que ele está dando
+  // suporte. requireRole precisa confiar no role já resolvido, sem rebuscar.
+  describe("org.viaImpersonate (impersonate, S-11.07)", () => {
+    function impersonateSession() {
+      vi.mocked(loadAuthUser).mockResolvedValue(authUserFixture(null, true));
+      vi.mocked(resolveActiveOrg).mockResolvedValue({
+        orgId: ORG_ID,
+        name: "Tenant do cliente",
+        role: "admin",
+        viaImpersonate: true,
+      });
+      vi.mocked(createClient).mockResolvedValue({
+        rpc: vi.fn(async () => {
+          throw new Error("não deveria consultar fn_user_role_in_org em impersonate");
+        }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+    }
+
+    it("confia no role 'admin' sintetizado, sem consultar fn_user_role_in_org", async () => {
+      impersonateSession();
+      const res = await requireRole("admin", { requestId: "req-imp" });
+      expect(res.ok).toBe(true);
+      if (!res.ok) throw new Error("unreachable");
+      expect(res.org.orgId).toBe(ORG_ID);
+      expect(res.org.role).toBe("admin");
+      expect(audit).not.toHaveBeenCalled();
+    });
+
+    it("cobre qualquer role mínimo pedido pela rota (viewer/manager/admin)", async () => {
+      for (const min of ["viewer", "manager", "admin"] as const) {
+        impersonateSession();
+        const res = await requireRole(min);
+        expect(res.ok).toBe(true);
+      }
+    });
+  });
+
   it("platform admin NÃO bypassa por default; bypassa com allowPlatformAdmin", async () => {
     session("viewer", { platformAdmin: true });
     const denied = await requireRole("admin");

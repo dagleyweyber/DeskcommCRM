@@ -72,7 +72,12 @@ describe("resolveActiveOrg — impersonate (S-11.07)", () => {
     const { resolveActiveOrg } = await import("./server");
     const org = await resolveActiveOrg(PLATFORM_ADMIN);
 
-    expect(org).toEqual({ orgId: TENANT_ID, name: "B'Laser Caruaru", role: "admin" });
+    expect(org).toEqual({
+      orgId: TENANT_ID,
+      name: "B'Laser Caruaru",
+      role: "admin",
+      viaImpersonate: true,
+    });
   });
 
   it("sem cookie de impersonate, cai pra própria org do admin (comportamento normal preservado)", async () => {

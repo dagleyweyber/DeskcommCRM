@@ -82,16 +82,28 @@ export async function requireRole(min: Role, opts: RequireRoleOpts = {}): Promis
     return { ok: true, user, org };
   }
 
-  // Role efetivo do banco (não do snapshot do cookie/membership em memória).
-  const supabase = await createClient();
-  const { data: effectiveRole, error } = await supabase.rpc("fn_user_role_in_org", {
-    p_org: org.orgId,
-  });
-  if (error) {
-    return { ok: false, response: fail("internal_error", error.message, 500, { requestId }) };
+  // Role efetivo do banco (não do snapshot do cookie/membership em memória) —
+  // EXCETO em impersonate: fn_user_role_in_org() olha user_organizations, e o
+  // admin de plataforma nunca tem linha lá pro tenant do cliente. Nesse caso
+  // o role já veio verificado de resolveActiveOrg() (cookie assinado +
+  // platformAdminId conferido), e é exatamente o que a RLS já concede sem
+  // condição via fn_is_platform_admin() — re-derivar do banco aqui só
+  // devolveria "sem papel nenhum" e quebraria a feature.
+  let effectiveRole: Role | null;
+  if (org.viaImpersonate) {
+    effectiveRole = org.role;
+  } else {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("fn_user_role_in_org", {
+      p_org: org.orgId,
+    });
+    if (error) {
+      return { ok: false, response: fail("internal_error", error.message, 500, { requestId }) };
+    }
+    effectiveRole = data as Role | null;
   }
 
-  const rank = effectiveRole ? (ROLE_RANK[effectiveRole as Role] ?? 0) : 0;
+  const rank = effectiveRole ? (ROLE_RANK[effectiveRole] ?? 0) : 0;
 
   // MFA como política de SESSÃO, não só de cadastro.
   //

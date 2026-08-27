@@ -78,4 +78,13 @@ export interface ActiveOrg {
    * de autorização — a RLS (fn_can_view_conversation) é quem garante o escopo.
    */
   visibility_mode?: VisibilityMode;
+  /**
+   * true quando esta org veio do cookie de impersonate (S-11.07), não de uma
+   * linha real em user_organizations. requireRole() precisa saber disso:
+   * fn_user_role_in_org() nunca acha o admin de plataforma como membro do
+   * tenant do cliente, então re-derivar o role do banco sempre devolveria
+   * "sem papel nenhum" — o oposto do que a RLS (fn_is_platform_admin())
+   * já concede a ele sem condição nenhuma.
+   */
+  viaImpersonate?: boolean;
 }
