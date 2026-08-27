@@ -221,7 +221,14 @@ export async function garantirLeadDaConversa(
       stage_id: destino.stageId,
       contact_id: contactId,
       title: titulo,
-      source: "whatsapp",
+      // `temSourceMetadata` só é truthy quando `parseAdReferral`/`adReferralDe`
+      // já confirmaram um clique de anúncio de verdade (clickId ou sourceId
+      // presente) — mesmo critério usado pelo dashboard e pelo Meta Ads Fase
+      // A. "meta_ads" é valor existente no vocabulário aberto de `source`
+      // (`lib/leads/lead-form-shared.ts`), o mesmo que um humano escolheria
+      // manualmente pra um lead vindo de anúncio; sem isso, todo lead pago
+      // ficava indistinguível de tráfego orgânico do WhatsApp nos relatórios.
+      source: temSourceMetadata ? "meta_ads" : "whatsapp",
       ...(temSourceMetadata ? { source_metadata: sourceMetadata } : {}),
     })
     .select("id")

@@ -438,6 +438,25 @@ describe("adReferral — atribuição de anúncio (Fase A do Meta Ads)", () => {
     });
   });
 
+  it("⭐ lead com clique de anúncio nasce com source='meta_ads', não 'whatsapp' — senão some do relatório de tráfego pago", async () => {
+    const contato = await criarContato(ORG_VIVA, "Anúncio Pago Nunes");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Anúncio Pago Nunes",
+      adReferral: { clickId: "clique-1", sourceId: "111" },
+    });
+    expect(r.criado).toBe(true);
+    if (!r.criado) return;
+
+    const { rows } = await pool.query<{ source: string }>(
+      "select source from crm_leads where id = $1",
+      [r.leadId],
+    );
+    expect(rows[0]!.source).toBe("meta_ads");
+  });
+
   it("sem adReferral, source_metadata continua vazio — zero mudança pra quem não anuncia", async () => {
     const contato = await criarContato(ORG_VIVA, "Sem Anúncio Rocha");
     const r = await garantirLeadDaConversa(db, {
@@ -449,11 +468,12 @@ describe("adReferral — atribuição de anúncio (Fase A do Meta Ads)", () => {
     expect(r.criado).toBe(true);
     if (!r.criado) return;
 
-    const { rows } = await pool.query<{ source_metadata: Record<string, unknown> }>(
-      "select source_metadata from crm_leads where id = $1",
+    const { rows } = await pool.query<{ source_metadata: Record<string, unknown>; source: string }>(
+      "select source_metadata, source from crm_leads where id = $1",
       [r.leadId],
     );
     expect(rows[0]!.source_metadata).toEqual({});
+    expect(rows[0]!.source).toBe("whatsapp");
   });
 
   it("adReferral com só sourceId (sem clickId) grava o que houver, sem inventar o click_id", async () => {
