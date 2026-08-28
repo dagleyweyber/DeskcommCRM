@@ -92,7 +92,7 @@ describe("adReferralDe — o clique em anúncio (Fase A da atribuição pro Meta
       body: "oi",
       _data: {
         message: {
-          [messageKey]: { contextInfo: { externalAdReplyInfo: info } },
+          [messageKey]: { contextInfo: { externalAdReply: info } },
         },
       },
     };
@@ -127,8 +127,48 @@ describe("adReferralDe — o clique em anúncio (Fase A da atribuição pro Meta
     expect(adReferralDe({ id: "x", body: "oi" })).toBeNull();
   });
 
-  it("externalAdReplyInfo sem ctwaClid nem sourceId vira null — objeto vazio não é atribuição", () => {
+  it("externalAdReply sem ctwaClid nem sourceId vira null — objeto vazio não é atribuição", () => {
     const p = withExternalAdReply("extendedTextMessage", { title: "algo" });
     expect(adReferralDe(p)).toBeNull();
+  });
+
+  // Regressão do bug real de produção (2026-08-28, B'Laser Caruaru): o campo
+  // saiu batizado `externalAdReplyInfo` sem nunca conferir um payload de
+  // verdade. Todo CTWA de WAHA/NOWEB virou tráfego orgânico no dashboard até
+  // esse dia, porque o parser procurava uma chave que não existe — só
+  // `externalAdReply` (sem "Info"). Shape abaixo é o subconjunto relevante do
+  // payload real capturado em `webhook_events_log` (mesma origem: Instagram
+  // ad, "Click to WhatsApp", clique em anúncio).
+  it("⭐ formato real de produção — contextInfo.externalAdReply (sem sufixo Info)", () => {
+    const p: WahaPayload = {
+      id: "false_558100000000@s.whatsapp.net_ABC",
+      from: "558100000000@s.whatsapp.net",
+      fromMe: false,
+      body: "Vim do anúncio patrocinado e quero mais detalhes desta oferta",
+      _data: {
+        message: {
+          extendedTextMessage: {
+            text: "Vim do anúncio patrocinado e quero mais detalhes desta oferta",
+            contextInfo: {
+              ctwaPayload: "base64...",
+              externalAdReply: {
+                title: "*Virilha + Axilas por 12x R$ 29,90",
+                ctwaClid: "AfiRRtA3sseXE06UFg9dvr38aqByx55coXnReSVeudmKX",
+                sourceId: "120252472348170472",
+                sourceApp: "instagram",
+                sourceUrl: "https://www.instagram.com/p/DcgahdvgkoW/",
+                sourceType: "ad",
+              },
+            },
+          },
+        },
+      },
+    };
+    expect(adReferralDe(p)).toEqual({
+      clickId: "AfiRRtA3sseXE06UFg9dvr38aqByx55coXnReSVeudmKX",
+      sourceId: "120252472348170472",
+      headline: "*Virilha + Axilas por 12x R$ 29,90",
+      sourceUrl: "https://www.instagram.com/p/DcgahdvgkoW/",
+    });
   });
 });

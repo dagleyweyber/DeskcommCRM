@@ -101,7 +101,7 @@ export interface EntradaDeMensagem {
    * O clique em anúncio que originou esta mensagem, quando houver — genérico
    * de propósito (a doutrina de restrição de canal proíbe este arquivo e
    * `nascimento-do-lead.ts` de saberem o nome do provider; quem sabe que é
-   * `ctwa_clid`/`externalAdReplyInfo` é cada `lib/channels/<provider>/`).
+   * `ctwa_clid`/`externalAdReply` é cada `lib/channels/<provider>/`).
    * Só entra em `crm_leads.source_metadata` no NASCIMENTO do lead — mensagem
    * de conversa já aberta não reescreve a atribuição original.
    */

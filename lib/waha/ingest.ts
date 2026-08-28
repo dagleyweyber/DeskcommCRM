@@ -264,10 +264,13 @@ function str(v: unknown): string | null {
 /**
  * O clique em anúncio que originou esta mensagem, quando ela veio de um
  * "Clique para o WhatsApp" — o Baileys/WAHA entrega isso em `contextInfo.
- * externalAdReplyInfo`, dentro da chave do TIPO da mensagem
- * (`extendedTextMessage`, `imageMessage`...), não num lugar fixo. Por isso
- * varre todas as chaves de `_data.message` em vez de ler um caminho só —
- * mesma limitação que `resolveMessageType` já documenta pra NOWEB.
+ * externalAdReply` (sem sufixo "Info" — nome batizado antes de existir um
+ * payload real pra conferir, e o pgar de produção que corrigiu isso está em
+ * `webhook_events_log`, org B'Laser Caruaru, 2026-08-28 16:40 UTC), dentro da
+ * chave do TIPO da mensagem (`extendedTextMessage`, `imageMessage`...), não
+ * num lugar fixo. Por isso varre todas as chaves de `_data.message` em vez de
+ * ler um caminho só — mesma limitação que `resolveMessageType` já documenta
+ * pra NOWEB.
  */
 export function adReferralDe(
   p: WahaPayload,
@@ -277,9 +280,9 @@ export function adReferralDe(
 
   for (const value of Object.values(msg)) {
     const contextInfo = (value as { contextInfo?: unknown } | undefined)?.contextInfo as
-      | { externalAdReplyInfo?: unknown }
+      | { externalAdReply?: unknown }
       | undefined;
-    const info = contextInfo?.externalAdReplyInfo as Record<string, unknown> | undefined;
+    const info = contextInfo?.externalAdReply as Record<string, unknown> | undefined;
     if (!info) continue;
 
     const clickId = str(info.ctwaClid);
