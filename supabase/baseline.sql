@@ -13190,6 +13190,48 @@ notify pgrst, 'reload schema';
 
 
 
+-- ---- "cliente já existente" — lifecycle stage no contato (migration 0164) ----
+--
+-- Problema real: toda mensagem nova no WhatsApp cria um lead, mesmo quando o
+-- contato já é cliente (de antes do CRM, ou por já ter comprado antes DENTRO
+-- do CRM) — infla "quantos leads foram gerados no mês" com quem já era base,
+-- não aquisição nova. Padrão Lifecycle Stage (HubSpot/Close.com): a marca de
+-- "é cliente" vive no CONTATO, não no card.
+--
+-- `contacts.became_customer_at` (timestamptz, nulo até a 1ª venda/
+-- reconhecimento) — UM campo, não booleano + data separada: o valor já
+-- responde "é cliente?" (`is not null`) e "desde quando?" (LTV e coorte de
+-- recompra precisam disso). Preenchido automático quando um lead fecha
+-- `won` pela primeira vez (Fase 2), ou manual quando a comercial reconhece
+-- alguém que já é cliente de antes do CRM (Fase 3, "Marcar como cliente
+-- existente" no menu do card).
+--
+-- `crm_leads.status` ganha `existing_customer` — MESMO slot conceitual que
+-- `won`/`lost` (desfecho TERMINAL do card, só que o motivo é "já era
+-- cliente", não venda nem perda) — por isso entra nas MESMAS duas
+-- constraints que já modelam esse conceito, não numa coluna nova. Esta é a
+-- PRIMEIRA vez que este vocabulário cresce; a próxima adição edita ESTE
+-- bloco (regra "constraint reconstruída", issue #159), não cria um segundo.
+alter table public.contacts
+  add column if not exists became_customer_at timestamptz;
+
+alter table public.crm_leads
+  drop constraint if exists crm_leads_status_enum;
+alter table public.crm_leads
+  add constraint crm_leads_status_enum
+  check (status = any (array['open', 'won', 'lost', 'existing_customer']));
+
+alter table public.crm_leads
+  drop constraint if exists crm_leads_closed_at_consistency;
+alter table public.crm_leads
+  add constraint crm_leads_closed_at_consistency
+  check (
+    (status = 'open' and closed_at is null)
+    or (status = any (array['won', 'lost', 'existing_customer']) and closed_at is not null)
+  );
+
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

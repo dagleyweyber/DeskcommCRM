@@ -6,7 +6,7 @@ import type { ScoreBand } from "@/lib/kanban/score-band";
  * the DB trigger `fn_crm_lead_close_on_stage` — the API never sets `status`
  * directly (P-02).
  */
-export type LeadStatus = "open" | "won" | "lost";
+export type LeadStatus = "open" | "won" | "lost" | "existing_customer";
 
 /**
  * 0070 — o dono do negócio é humano ou agente de IA (mesmo padrão de
