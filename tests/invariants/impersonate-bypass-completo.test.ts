@@ -30,7 +30,7 @@ function assignAs(userId: string, toUserId: string | null): { ok: true; rows: nu
       set role authenticated;
       select set_config('request.jwt.claims', '{"sub":"${userId}"}', false);
       select count(*) from public.fn_conversation_assign(
-        '${GOV_ORG}'::uuid, '${IB_CONV}'::uuid, ${toUserId ? `'${toUserId}'::uuid` : "null::uuid"}, 'test', null::uuid, false);
+        '${GOV_ORG}'::uuid, '${IB_CONV}'::uuid, ${toUserId ? `'${toUserId}'::uuid` : "null::uuid"}, 'claim', null::uuid, false);
     `);
     return { ok: true, rows: Number(lastLine(out)) };
   } catch (err) {
