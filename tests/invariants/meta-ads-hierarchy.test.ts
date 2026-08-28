@@ -177,13 +177,14 @@ describe("handleLeadCreatedForAdHierarchy", () => {
     }
   });
 
-  it("⭐ ad_id novo + token configurado: resolve e grava campanha/conjunto no cache", async () => {
+  it("⭐ ad_id novo + token configurado: resolve e grava campanha/conjunto/page_id no cache", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           name: "Anúncio Novo",
           adset: { id: "555", name: "Conjunto Novo" },
           campaign: { id: "666", name: "Campanha Nova" },
+          creative: { object_story_spec: { page_id: "113751265048315" } },
         }),
         { status: 200 },
       ),
@@ -198,14 +199,15 @@ describe("handleLeadCreatedForAdHierarchy", () => {
       expect(url).toContain("access_token=EAAG-read-token");
 
       const out = sql(`
-        select ad_name, adset_name, campaign_name, last_error
+        select ad_name, adset_name, campaign_name, page_id, last_error
           from public.meta_ads_ad_metadata
           where organization_id = '${ORG_COM_TOKEN}' and ad_id = '111';
       `);
-      const [adName, adsetName, campaignName, lastError] = lastLine(out).split("|");
+      const [adName, adsetName, campaignName, pageId, lastError] = lastLine(out).split("|");
       expect(adName).toBe("Anúncio Novo");
       expect(adsetName).toBe("Conjunto Novo");
       expect(campaignName).toBe("Campanha Nova");
+      expect(pageId).toBe("113751265048315");
       expect(lastError).toBe("");
     } finally {
       vi.unstubAllGlobals();

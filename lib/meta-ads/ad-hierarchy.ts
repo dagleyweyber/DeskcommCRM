@@ -17,6 +17,13 @@ export interface AdHierarchy {
   adsetName: string | null;
   campaignId: string | null;
   campaignName: string | null;
+  /**
+   * Facebook Page ID do criativo — sem ele a Meta rejeita (HTTP 400,
+   * subcode 2804116) todo Purchase de CTWA (`action_source:
+   * business_messaging`), confirmado ao vivo em produção. Vem de
+   * `creative.object_story_spec.page_id`, não do anúncio em si.
+   */
+  pageId: string | null;
 }
 
 export interface ResolveAdHierarchyResult {
@@ -29,6 +36,7 @@ interface GraphAdResponse {
   name?: string;
   adset?: { id?: string; name?: string };
   campaign?: { id?: string; name?: string };
+  creative?: { object_story_spec?: { page_id?: string } };
   error?: { message?: string };
 }
 
@@ -40,7 +48,7 @@ export async function resolveAdHierarchy(
   const fetchFn = opts.fetchImpl ?? fetch;
   const url =
     `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(adId)}` +
-    `?fields=${encodeURIComponent("name,adset{id,name},campaign{id,name}")}` +
+    `?fields=${encodeURIComponent("name,adset{id,name},campaign{id,name},creative{object_story_spec}")}` +
     `&access_token=${encodeURIComponent(accessToken)}`;
 
   try {
@@ -69,6 +77,7 @@ export async function resolveAdHierarchy(
         adsetName: body.adset?.name ?? null,
         campaignId: body.campaign?.id ?? null,
         campaignName: body.campaign?.name ?? null,
+        pageId: body.creative?.object_story_spec?.page_id ?? null,
       },
     };
   } catch (err) {

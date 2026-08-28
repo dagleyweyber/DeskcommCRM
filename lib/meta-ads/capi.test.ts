@@ -22,6 +22,32 @@ describe("buildCapiPayload", () => {
     expect(p.user_data.ctwa_clid).toBe("AbCdEf123");
   });
 
+  it("⭐ ctwa_clid + pageId cacheado → user_data.page_id preenchido (sem ele a Meta rejeita business_messaging, subcode 2804116)", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { ad_click_id: "AbCdEf123", ad_click_id_type: "ctwa_clid" },
+      pageId: "113751265048315",
+    });
+    expect(p.user_data.page_id).toBe("113751265048315");
+  });
+
+  it("ctwa_clid sem pageId cacheado (anúncio ainda não resolvido) → user_data.page_id ausente, não quebra", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { ad_click_id: "AbCdEf123", ad_click_id_type: "ctwa_clid" },
+    });
+    expect(p.user_data.page_id).toBeUndefined();
+  });
+
+  it("pageId presente mas SEM ctwa_clid (action_source website) não vaza pra user_data — page_id é só do ramo business_messaging", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { fbc: "fb.1.111.222" },
+      pageId: "113751265048315",
+    });
+    expect(p.user_data.page_id).toBeUndefined();
+  });
+
   it("⭐ sem ctwa_clid mas com fbc/fbp → action_source website, campos passam direto", () => {
     const p = buildCapiPayload({
       ...BASE,

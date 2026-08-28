@@ -12612,6 +12612,19 @@ notify pgrst, 'reload schema';
 
 
 
+-- ---- Meta Ads: Page ID do anúncio, pro Conversions API (migration 0165) ----
+--
+-- A Meta rejeita (HTTP 400, subcode 2804116) todo Purchase de CTWA
+-- (`action_source: business_messaging`) sem o Facebook Page ID do anúncio —
+-- confirmado ao vivo em produção. `page_id` é atributo do ANÚNCIO (mesmo
+-- criativo, mesma página), por isso entra em `meta_ads_ad_metadata`
+-- (resolvido junto com campanha/conjunto pela Fase E2), não numa tabela
+-- nova nem no lead.
+alter table public.meta_ads_ad_metadata
+  add column if not exists page_id text;
+
+
+
 -- ---- Meta Ads, Fase E3: campanha/conjunto/agendamentos por anúncio (migration 0162) ----
 --
 -- A Fase E1/E2 já resolve e cacheia a hierarquia (meta_ads_ad_metadata) em

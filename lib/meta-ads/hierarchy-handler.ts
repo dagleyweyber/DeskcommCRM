@@ -64,6 +64,7 @@ export async function handleLeadCreatedForAdHierarchy(
       adset_name: result.hierarchy?.adsetName ?? null,
       campaign_id: result.hierarchy?.campaignId ?? null,
       campaign_name: result.hierarchy?.campaignName ?? null,
+      page_id: result.hierarchy?.pageId ?? null,
       last_error: result.status === "failed" ? (result.error ?? "erro desconhecido") : null,
     },
     { onConflict: "organization_id,ad_id" },

@@ -30,7 +30,23 @@ export async function sendMetaCapiEvent(
   const creds = await resolveMetaAdsCredentials(admin, organizationId);
   if (!creds) return { status: "skipped", error: "no_credentials" };
 
-  const payload = buildCapiPayload(input);
+  // Page ID do criativo (cache da Fase E2, `lib/meta-ads/ad-hierarchy.ts`) —
+  // sem ele a Meta rejeita todo evento `business_messaging` (subcode
+  // 2804116). Só consulta quando há `ad_id`: a maioria dos envios (website/
+  // system_generated) nem usa esse campo.
+  const adId = (input.sourceMetadata as Record<string, unknown> | null | undefined)?.ad_id;
+  let pageId: string | null = null;
+  if (typeof adId === "string" && adId) {
+    const { data } = await admin
+      .from("meta_ads_ad_metadata")
+      .select("page_id")
+      .eq("organization_id", organizationId)
+      .eq("ad_id", adId)
+      .maybeSingle();
+    pageId = (data?.page_id as string | null) ?? null;
+  }
+
+  const payload = buildCapiPayload({ ...input, pageId });
   const fetchFn = opts.fetchImpl ?? fetch;
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(creds.datasetId)}/events?access_token=${encodeURIComponent(creds.accessToken)}`;
 

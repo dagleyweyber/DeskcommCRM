@@ -27,6 +27,14 @@ export interface CapiPayloadInput {
   phone?: string | null;
   /** `crm_leads.source_metadata`, como veio do banco. */
   sourceMetadata?: Record<string, unknown> | null;
+  /**
+   * Facebook Page ID do criativo — resolvido e cacheado em
+   * `meta_ads_ad_metadata` (`lib/meta-ads/ad-hierarchy.ts`). Sem ele a Meta
+   * rejeita todo evento `business_messaging` (HTTP 400, subcode 2804116).
+   * `null` quando o ad_id ainda não foi resolvido — o evento sai mesmo
+   * assim (a Meta que recuse; melhor tentar do que não mandar nada).
+   */
+  pageId?: string | null;
 }
 
 export interface CapiEventPayload {
@@ -38,6 +46,7 @@ export interface CapiEventPayload {
   user_data: {
     ph?: [string];
     ctwa_clid?: string;
+    page_id?: string;
     fbc?: string;
     fbp?: string;
   };
@@ -73,6 +82,7 @@ export function buildCapiPayload(input: CapiPayloadInput): CapiEventPayload {
     actionSource = "business_messaging";
     messagingChannel = "whatsapp";
     userData.ctwa_clid = ctwaClid;
+    if (input.pageId) userData.page_id = input.pageId;
   } else if (fbc || fbp || fbclid) {
     actionSource = "website";
     // `fbclid` sozinho (sem cookie do Pixel) ainda serve de match — a Meta

@@ -111,6 +111,12 @@ beforeAll(() => {
     insert into public.tenant_meta_ads_credentials (organization_id, access_token_encrypted, dataset_id, status)
       values ('${ORG_A}', public.fn_encrypt_oauth('EAAG-token-de-teste'), 'dataset-123', 'healthy')
       on conflict (organization_id) do update set access_token_encrypted = excluded.access_token_encrypted;
+
+    -- Cache de hierarquia (Fase E2) com page_id já resolvido — pro teste do
+    -- Purchase que leva user_data.page_id no corpo (migration 0165).
+    insert into public.meta_ads_ad_metadata (organization_id, ad_id, page_id)
+      values ('${ORG_A}', 'ad-com-page-cacheado', 'page-999')
+      on conflict (organization_id, ad_id) do update set page_id = excluded.page_id;
   `);
 });
 
@@ -172,6 +178,44 @@ describe("sendMetaCapiEvent", () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("network down"));
     const result = await sendMetaCapiEvent(db, ORG_A, input, { fetchImpl });
     expect(result).toEqual({ status: "failed", error: "network down" });
+  });
+
+  // Migration 0165 — a Meta rejeitava (HTTP 400, subcode 2804116) todo
+  // Purchase de CTWA por faltar o Page ID do anúncio; achado ao vivo na
+  // primeira venda real de um cliente. page_id vem do cache de hierarquia
+  // (meta_ads_ad_metadata, Fase E2), não do lead.
+  it("⭐ ad_id com page_id cacheado → o corpo do POST leva user_data.page_id", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    const comAdId = {
+      ...input,
+      sourceMetadata: {
+        ad_click_id: "AbCdEf123",
+        ad_click_id_type: "ctwa_clid",
+        ad_id: "ad-com-page-cacheado",
+      },
+    };
+    const result = await sendMetaCapiEvent(db, ORG_A, comAdId, { fetchImpl });
+    expect(result).toEqual({ status: "sent" });
+    const [, options] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      data: [{ user_data: { page_id?: string } }];
+    };
+    expect(body.data[0]!.user_data.page_id).toBe("page-999");
+  });
+
+  it("ad_id SEM cache (hierarquia ainda não resolvida) → envia mesmo assim, sem page_id no corpo", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse());
+    const semCache = {
+      ...input,
+      sourceMetadata: { ad_click_id: "XyZ789", ad_click_id_type: "ctwa_clid", ad_id: "ad-nunca-resolvido" },
+    };
+    const result = await sendMetaCapiEvent(db, ORG_A, semCache, { fetchImpl });
+    expect(result).toEqual({ status: "sent" });
+    const [, options] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse((options as RequestInit).body as string) as {
+      data: [{ user_data: { page_id?: string } }];
+    };
+    expect(body.data[0]!.user_data.page_id).toBeUndefined();
   });
 });
 

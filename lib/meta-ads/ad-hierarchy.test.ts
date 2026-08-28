@@ -6,12 +6,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("resolveAdHierarchy", () => {
-  it("⭐ resposta OK com campanha e conjunto completos", async () => {
+  it("⭐ resposta OK com campanha, conjunto e page_id completos", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({
         name: "Anúncio Botox",
         adset: { id: "999", name: "Conjunto Verão" },
         campaign: { id: "888", name: "Campanha Botox 2026" },
+        creative: { object_story_spec: { page_id: "113751265048315" } },
       }),
     );
     const result = await resolveAdHierarchy("token-123", "120210000000000", { fetchImpl });
@@ -23,15 +24,17 @@ describe("resolveAdHierarchy", () => {
         adsetName: "Conjunto Verão",
         campaignId: "888",
         campaignName: "Campanha Botox 2026",
+        pageId: "113751265048315",
       },
     });
     const [url] = fetchImpl.mock.calls[0]!;
     expect(url).toContain("graph.facebook.com");
     expect(url).toContain("120210000000000");
     expect(url).toContain("access_token=token-123");
+    expect(url).toContain("creative");
   });
 
-  it("campo faltando (ex: anúncio sem adset) vira null, não quebra", async () => {
+  it("campo faltando (ex: anúncio sem adset nem creative) vira null, não quebra", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ name: "Anúncio Solto" }));
     const result = await resolveAdHierarchy("token-123", "1", { fetchImpl });
     expect(result).toEqual({
@@ -42,6 +45,7 @@ describe("resolveAdHierarchy", () => {
         adsetName: null,
         campaignId: null,
         campaignName: null,
+        pageId: null,
       },
     });
   });
