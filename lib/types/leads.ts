@@ -88,6 +88,13 @@ export interface Lead {
     factors: Array<{ pontos: number; frase: string; ancora?: { kind: string; id: string } }>;
     at: string | null;
   } | null;
+  /**
+   * Derivado (não é coluna): a data/hora da visita/reunião agendada mais
+   * recente, só enquanto ainda não tem desfecho registrado (`meeting_outcome`
+   * mais novo que ela zera isto). `undefined`/ausente é o estado comum — a
+   * maioria dos leads nunca agendou nada, ou já registrou presença/ausência.
+   */
+  next_meeting_at?: string | null;
   assigned_at: string | null;
   last_activity_at: string | null;
   expected_close_date: string | null;

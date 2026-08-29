@@ -22,6 +22,7 @@ import {
   type PropostaAmbigua,
 } from "@/lib/leads/next-action";
 import type { LeadCandidate } from "@/lib/leads/active-lead";
+import { proximasReunioesPorLead, type AtividadeDeReuniao } from "@/lib/leads/next-meeting";
 import { createClient } from "@/lib/supabase/server";
 import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
 import type { Lead } from "@/lib/types/leads";
@@ -286,6 +287,47 @@ async function withConversas(
   };
 }
 
+/**
+ * Anexa a data/hora da PRÓXIMA visita/reunião agendada — só enquanto pendente.
+ *
+ * Mesmo padrão de `withConversas` (LEFT, "primeira vista vence" na ordenação
+ * por mais recente): `crm_lead_activities` não tem `status`, então "ainda
+ * pendente" é inferido pela ORDEM — `meeting_scheduled`/`meeting_outcome`
+ * são dois tipos no MESMO fluxo (reagendar é emitir de novo, registrar
+ * presença é emitir depois), e o evento mais recente de qualquer um dos dois
+ * dá a resposta: se for `meeting_outcome`, o agendamento mais novo já foi
+ * resolvido — não há visita pendente pra mostrar no card.
+ */
+async function withNextMeetings(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  leads: Lead[],
+): Promise<{ leads: Lead[]; error: string | null }> {
+  if (leads.length === 0) return { leads, error: null };
+
+  const { data, error } = await supabase
+    .from("crm_lead_activities")
+    .select("lead_id, type, payload")
+    .eq("organization_id", organizationId)
+    .in("type", ["meeting_scheduled", "meeting_outcome"])
+    .in(
+      "lead_id",
+      leads.map((l) => l.id),
+    )
+    .order("performed_at", { ascending: false });
+  if (error) return { leads, error: error.message };
+
+  const porLead = proximasReunioesPorLead((data ?? []) as AtividadeDeReuniao[]);
+
+  return {
+    leads: leads.map((lead) => {
+      const nextMeetingAt = porLead.get(lead.id);
+      return nextMeetingAt ? { ...lead, next_meeting_at: nextMeetingAt } : lead;
+    }),
+    error: null,
+  };
+}
+
 async function withNextActions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
@@ -430,10 +472,19 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     return fail("internal_error", leadsComConversa.error, 500, { requestId });
   }
 
+  const leadsComReuniao = await withNextMeetings(
+    supabase,
+    (pipeline as Pipeline).organization_id,
+    leadsComConversa.leads,
+  );
+  if (leadsComReuniao.error) {
+    return fail("internal_error", leadsComReuniao.error, 500, { requestId });
+  }
+
   const board: BoardData = {
     pipeline: pipeline as Pipeline,
     stages: (stages ?? []) as Stage[],
-    leads: leadsComConversa.leads,
+    leads: leadsComReuniao.leads,
   };
 
   return ok(board, { requestId });

@@ -8,6 +8,7 @@ import { KanbanCardActions } from "./KanbanCardActions";
 import { NextActionSlot } from "./NextActionSlot";
 import { ReactivationSlot } from "./ReactivationSlot";
 import { ConversaSlot } from "./ConversaSlot";
+import { NextMeetingSlot } from "./NextMeetingSlot";
 import { ScoreSlot } from "./ScoreSlot";
 import { OwnerBadge } from "./OwnerBadge";
 
@@ -222,6 +223,11 @@ export function KanbanCard({
               />
             )}
           </div>
+
+          {/* Próxima visita/reunião agendada — some por inteiro quando não há
+              agendamento pendente. Antes da conversa: uma visita marcada é
+              mais urgente de ver do que a última mensagem trocada. */}
+          <NextMeetingSlot nextMeetingAt={lead.next_meeting_at} />
 
           {/* A última mensagem, com atalho para o inbox. Fica ANTES do rodapé
               de dono/tempo porque é conteúdo do negócio, não metadado do card —

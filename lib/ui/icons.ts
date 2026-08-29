@@ -114,6 +114,7 @@ export {
   ClockCounterClockwise,
   // funil real (Fase 3 do dashboard): agendar visita/reunião, registrar presença
   CalendarPlus,
+  Calendar,
   UserCheck,
   // integração de anúncios (Meta Ads)
   Megaphone,
