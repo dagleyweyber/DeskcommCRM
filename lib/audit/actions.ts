@@ -252,4 +252,6 @@ export type AuditAction =
   // de código próprio para não somar duas grandezas no mesmo relatório.
   | "followup.scheduled"
   | "followup.cancelled"
-  | "lead.reactivation_proposed";
+  | "lead.reactivation_proposed"
+  // "Cliente já existente" (lifecycle stage, padrão HubSpot/Close.com) — Fase 3.
+  | "lead.marked_existing_customer";

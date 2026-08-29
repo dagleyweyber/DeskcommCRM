@@ -14,6 +14,7 @@ import { lgpdRedactHandler } from "@/workers/lgpd-redact-worker.handler";
 import { automationRulesHandler } from "@/lib/automation/engine.handler";
 import { metaCapiPurchaseHandler } from "@/lib/meta-ads/won-handler";
 import { metaAdsHierarchyHandler } from "@/lib/meta-ads/hierarchy-handler";
+import { clienteExistenteWonHandler } from "@/lib/leads/cliente-existente-won-handler";
 import { followupReactivityHandler } from "@/lib/followup/reactivity.handler";
 import { followupGatilhoEtapaHandler } from "@/lib/followup/gatilho-etapa.handler";
 import { followupGatilhoCasoHandler } from "@/lib/followup/gatilho-caso.handler";
@@ -34,6 +35,7 @@ export function ensureHandlersRegistered(): void {
   registerHandler(automationRulesHandler);
   registerHandler(metaCapiPurchaseHandler);
   registerHandler(metaAdsHierarchyHandler);
+  registerHandler(clienteExistenteWonHandler);
   registerHandler(followupReactivityHandler);
   registerHandler(followupGatilhoEtapaHandler);
   registerHandler(followupGatilhoCasoHandler);

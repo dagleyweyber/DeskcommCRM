@@ -373,6 +373,11 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .select("*")
       .eq("pipeline_id", pipelineId)
       .neq("status", "archived")
+      // "Cliente já existente" (Fase 4) sai do board de vez, diferente de
+      // won/lost — que continuam visíveis na coluna terminal do funil. Não é
+      // aquisição nova nem demanda pra acompanhar aqui; a conversa segue
+      // normal no Inbox, só o card some.
+      .neq("status", "existing_customer")
       .order("position_in_stage"),
   ]);
 

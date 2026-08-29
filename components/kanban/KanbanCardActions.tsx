@@ -17,6 +17,7 @@ import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
 import { usePermission } from "@/hooks/auth/AuthProvider";
 import { LoseLeadDialog } from "./LoseLeadDialog";
+import { MarkExistingCustomerDialog } from "./MarkExistingCustomerDialog";
 import { EditLeadDialog } from "./EditLeadDialog";
 import { ObjectionDialog } from "./ObjectionDialog";
 import { ScheduleMeetingDialog } from "./ScheduleMeetingDialog";
@@ -30,6 +31,7 @@ interface KanbanCardActionsProps {
 
 export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) {
   const [loseOpen, setLoseOpen] = useState(false);
+  const [existingCustomerOpen, setExistingCustomerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [objectionOpen, setObjectionOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -167,12 +169,27 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
           >
             Marcar como perdido
           </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!lead.contact_id}
+            title={!lead.contact_id ? "Este negócio não tem contato vinculado" : undefined}
+            onSelect={() => {
+              setExistingCustomerOpen(true);
+            }}
+          >
+            Marcar como cliente já existente
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <LoseLeadDialog
         open={loseOpen}
         onOpenChange={setLoseOpen}
+        leadId={lead.id}
+        pipelineId={pipelineId}
+      />
+      <MarkExistingCustomerDialog
+        open={existingCustomerOpen}
+        onOpenChange={setExistingCustomerOpen}
         leadId={lead.id}
         pipelineId={pipelineId}
       />

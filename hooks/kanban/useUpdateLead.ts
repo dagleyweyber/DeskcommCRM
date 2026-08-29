@@ -46,6 +46,25 @@ export function useLoseLead(pipelineId: string) {
   });
 }
 
+interface MarkExistingCustomerArgs {
+  leadId: string;
+}
+
+export function useMarkExistingCustomer(pipelineId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ leadId }: MarkExistingCustomerArgs) => {
+      marcarEcoLocal(leadId);
+      return apiClient.post<{ data: Lead }>(`/api/v1/leads/${leadId}/mark-existing-customer`, {});
+    },
+    onError: showApiError,
+    onSettled: (_data, _err, { leadId }) => {
+      liberarEcoLocal(leadId);
+      qc.invalidateQueries({ queryKey: ["board", pipelineId] });
+    },
+  });
+}
+
 interface EditArgs {
   leadId: string;
   patch: UpdateLeadInput;
