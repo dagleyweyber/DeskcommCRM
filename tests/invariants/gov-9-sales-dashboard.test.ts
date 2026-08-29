@@ -59,6 +59,19 @@ const LEAD_F1 = "05050505-8888-4000-8000-000000000001"; // ad-1, com headline
 const LEAD_F2 = "05050505-8888-4000-8000-000000000002"; // ad-1, sem headline nesta linha
 const LEAD_F3 = "05050505-8888-4000-8000-000000000003"; // ad-2
 const LEAD_F4 = "05050505-8888-4000-8000-000000000004"; // sem ad_id (orgânico)
+// ORG_G é exclusivo dos testes de Fase 5 ("cliente já existente": leads_total
+// exclui existing_customer + LTV/recompra), dataset separado, mesma razão do
+// ORG_D acima.
+const ORG_G = "05050505-0000-4000-8000-000000000007";
+const MANAGER_G = "05050505-1111-4000-8000-000000000007";
+const PIPELINE_G = "05050505-5555-4000-8000-00000000000f";
+const STAGE_G = "05050505-5555-4000-8000-000000000010";
+const CONTACT_G1 = "05050505-9999-4000-8000-000000000001"; // recompra: 2 wins
+const CONTACT_G2 = "05050505-9999-4000-8000-000000000002"; // 1 win só
+const LEAD_G1 = "05050505-8888-4000-8000-000000000005"; // G1, won, DENTRO da janela
+const LEAD_G2 = "05050505-8888-4000-8000-000000000006"; // G1, won, FORA da janela (prova LTV é lifetime)
+const LEAD_G3 = "05050505-8888-4000-8000-000000000007"; // G2, won, dentro da janela
+const LEAD_G4 = "05050505-8888-4000-8000-000000000008"; // existing_customer, dentro da janela
 
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
@@ -251,6 +264,43 @@ beforeAll(() => {
         ('${ORG_F}', '${LEAD_F1}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
         ('${ORG_F}', '${LEAD_F1}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Remarcado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}'),
         ('${ORG_F}', '${LEAD_F3}', 'gov-invariant-test', 'meeting_scheduled', 'user', '${MANAGER_F}', 'Agendado', '{"scheduled_at":"${D1}"}'::jsonb, '${D1}');
+
+    -- ORG_G: dataset exclusivo dos testes de Fase 5 ("cliente já existente").
+    -- CONTACT_G1 compra 2x (uma DENTRO da janela, outra FORA — prova que
+    -- LTV/recompra são LIFETIME, não presos a from/to); CONTACT_G2 compra 1x.
+    -- LEAD_G4 é existing_customer, criado DENTRO da janela — prova que
+    -- leads_total não conta (seria 3, não 2, se contasse).
+    insert into auth.users (id, email) values ('${MANAGER_G}', 'm9-manager-g@invariant.test')
+      on conflict do nothing;
+    insert into public.organizations (id, slug, legal_name, display_name)
+      values ('${ORG_G}', 'gov-sales-g', 'Gov Sales Org G', 'Gov Sales G')
+      on conflict do nothing;
+    insert into public.user_organizations (user_id, organization_id, role, accepted_at)
+      values ('${MANAGER_G}', '${ORG_G}', 'manager', now())
+      on conflict do nothing;
+    insert into public.crm_pipelines (id, organization_id, name, slug)
+      values ('${PIPELINE_G}', '${ORG_G}', 'Gov Sales G', 'gov-sales-g')
+      on conflict do nothing;
+    insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position)
+      values ('${STAGE_G}', '${ORG_G}', '${PIPELINE_G}', 'Novo', 'novo', 1000)
+      on conflict do nothing;
+    insert into public.contacts (id, organization_id, display_name, phone_number)
+      values
+        ('${CONTACT_G1}', '${ORG_G}', 'Cliente Recompra', '+5531900000101'),
+        ('${CONTACT_G2}', '${ORG_G}', 'Cliente Única Compra', '+5531900000102')
+      on conflict (id) do nothing;
+
+    insert into public.crm_leads
+      (id, organization_id, pipeline_id, stage_id, contact_id, title, status, source, value_cents, created_at, closed_at)
+      values
+        ('${LEAD_G1}', '${ORG_G}', '${PIPELINE_G}', '${STAGE_G}', '${CONTACT_G1}', 'G1 1ª compra (na janela)',
+         'won', 'whatsapp', 100000, '${D1}', '${D1}'),
+        ('${LEAD_G2}', '${ORG_G}', '${PIPELINE_G}', '${STAGE_G}', '${CONTACT_G1}', 'G1 2ª compra (FORA da janela)',
+         'won', 'whatsapp', 50000, '${OLD}', '${OLD}'),
+        ('${LEAD_G3}', '${ORG_G}', '${PIPELINE_G}', '${STAGE_G}', '${CONTACT_G2}', 'G2 compra única',
+         'won', 'whatsapp', 200000, '${D1}', '${D1}'),
+        ('${LEAD_G4}', '${ORG_G}', '${PIPELINE_G}', '${STAGE_G}', '${CONTACT_G1}', 'G1 reconhecido cliente já existente',
+         'existing_customer', 'whatsapp', null, '${D1}', '${D1}');
   `);
 });
 
@@ -266,6 +316,8 @@ interface Kpis {
   valor_medio_cents: number | null;
   conversao_pct: number | null;
   tempo_conversao_medio_dias: number | null;
+  ltv_medio_cents: number | null;
+  taxa_recompra_pct: number | null;
 }
 interface DiaRow {
   dia: string;
@@ -399,6 +451,10 @@ describe("Dashboard de Vendas, Fase 1 — fn_sales_dashboard (números exatos)",
       valor_medio_cents: 99_999_900,
       conversao_pct: 100,
       tempo_conversao_medio_dias: 0,
+      // O lead de ORG_B não tem contact_id (linha 122) — `clientes` (Fase 5)
+      // só conta quem tem contato, então fica vazio: null, não zero.
+      ltv_medio_cents: null,
+      taxa_recompra_pct: null,
     });
   });
 
@@ -543,5 +599,30 @@ describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)",
 
   it("F4 (sem ad_id, lead orgânico) NÃO aparece em receita_por_anuncio — só 2 grupos, não 3", () => {
     expect(dashboard().receita_por_anuncio).toHaveLength(2);
+  });
+});
+
+// ---- migration 0166: "cliente já existente" Fase 5 (leads_total exclui existing_customer + LTV/recompra) ----
+
+describe("fn_sales_dashboard — Fase 5 (cliente já existente, migration 0166)", () => {
+  const dashboard = () => fetchDashboard(MANAGER_G, ORG_G);
+
+  it("⭐ leads_total=2, não 3 — LEAD_G4 (existing_customer) não conta, mesmo criado na janela", () => {
+    expect(dashboard().kpis.leads_total).toBe(2);
+  });
+
+  it("vendas=2, receita_total_cents=300000 — só os won FECHADOS na janela (LEAD_G2 fechou FORA, não entra aqui)", () => {
+    const k = dashboard().kpis;
+    expect(k.vendas).toBe(2);
+    expect(k.receita_total_cents).toBe(300_000);
+  });
+
+  it("⭐ ltv_medio_cents=175000 — LIFETIME: soma as 2 compras de G1 (100000+50000) mesmo a 2ª sendo FORA da janela", () => {
+    // clientes: G1 (150000, 2 vendas) + G2 (200000, 1 venda) → média (150000+200000)/2 = 175000.
+    expect(dashboard().kpis.ltv_medio_cents).toBe(175_000);
+  });
+
+  it("⭐ taxa_recompra_pct=50 — 1 de 2 clientes (G1) tem mais de uma venda, contando a de FORA da janela", () => {
+    expect(dashboard().kpis.taxa_recompra_pct).toBe(50);
   });
 });

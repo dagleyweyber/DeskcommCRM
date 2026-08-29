@@ -9,6 +9,9 @@ export interface SalesKpis {
   valor_medio_cents: number | null;
   conversao_pct: number | null;
   tempo_conversao_medio_dias: number | null;
+  /** LIFETIME — não filtrado pelo período do dashboard (Fase 5 de "cliente já existente"). */
+  ltv_medio_cents: number | null;
+  taxa_recompra_pct: number | null;
 }
 
 export interface LeadsPorDia {

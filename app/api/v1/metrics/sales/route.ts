@@ -37,6 +37,9 @@ interface SalesKpis {
   valor_medio_cents: number | null;
   conversao_pct: number | null;
   tempo_conversao_medio_dias: number | null;
+  /** LIFETIME — não filtrado por from/to (Fase 5 de "cliente já existente"). */
+  ltv_medio_cents: number | null;
+  taxa_recompra_pct: number | null;
 }
 
 interface LeadsPorDia {
@@ -144,6 +147,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       valor_medio_cents: null,
       conversao_pct: null,
       tempo_conversao_medio_dias: null,
+      ltv_medio_cents: null,
+      taxa_recompra_pct: null,
     },
     leads_por_dia: [],
     receita_por_origem: [],

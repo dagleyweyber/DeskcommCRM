@@ -92,7 +92,7 @@ export function SalesDashboardPanel({ filtros }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
         <KpiCard title="Vendas" value={formatInt(kpis.vendas)} />
         <KpiCard title="Receita Total" value={formatCurrency(kpis.receita_total_cents)} />
         <KpiCard title="Leads Totais" value={formatInt(kpis.leads_total)} />
@@ -102,6 +102,16 @@ export function SalesDashboardPanel({ filtros }: Props) {
           value={kpis.valor_medio_cents == null ? "—" : formatCurrency(kpis.valor_medio_cents)}
         />
         <KpiCard title="Tempo de Conversão" value={formatDias(kpis.tempo_conversao_medio_dias)} />
+        <KpiCard
+          title="LTV Médio"
+          value={kpis.ltv_medio_cents == null ? "—" : formatCurrency(kpis.ltv_medio_cents)}
+          subtitle="Todo período"
+        />
+        <KpiCard
+          title="Taxa de Recompra"
+          value={formatPercent(kpis.taxa_recompra_pct)}
+          subtitle="Todo período"
+        />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
