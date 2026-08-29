@@ -350,6 +350,47 @@ describe("UPDATE — implementado depois, e por pressão do próprio adaptador",
     expect(error).toBeNull();
     expect(data).toBeNull();
   });
+
+  // `.is()` no UPDATE — nasceu porque `marcarClienteExistente`/
+  // `handleLeadWonForClienteExistente` ("cliente já existente", Fase 2/3)
+  // usam `.update(...).eq(...).is("became_customer_at", null)` como o
+  // `coalesce` do PostgREST, e o adaptador ESTOUROU (`.is is not a
+  // function`) — só existia em `ConsultaPg` (SELECT), faltava no UPDATE.
+  it("⭐ `.is(coluna, null)` só atualiza quando a coluna já é null — coalesce sem SQL bruto", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into contacts (organization_id, display_name, phone_number, became_customer_at)
+       values ($1, 'Sem data', '+5531900000010', null) returning id`,
+      [ORG],
+    );
+    const contatoId = rows[0]!.id;
+
+    const { error: e1 } = await db
+      .from("contacts")
+      .update({ became_customer_at: "2026-08-20T15:00:00+00" })
+      .eq("id", contatoId)
+      .is("became_customer_at", null);
+    expect(e1).toBeNull();
+
+    const depois1 = await pool.query<{ became_customer_at: string }>(
+      "select became_customer_at from contacts where id = $1",
+      [contatoId],
+    );
+    expect(depois1.rows[0]!.became_customer_at).not.toBeNull();
+
+    // Já tem data — uma 2ª chamada NÃO reescreve (o filtro `is null` não casa mais).
+    const { error: e2 } = await db
+      .from("contacts")
+      .update({ became_customer_at: "2099-01-01T00:00:00+00" })
+      .eq("id", contatoId)
+      .is("became_customer_at", null);
+    expect(e2).toBeNull();
+
+    const depois2 = await pool.query<{ became_customer_at: string }>(
+      "select became_customer_at from contacts where id = $1",
+      [contatoId],
+    );
+    expect(depois2.rows[0]!.became_customer_at).toEqual(depois1.rows[0]!.became_customer_at);
+  });
 });
 
 describe("UPSERT — implementado por pressão de handleLeadCreatedForAdHierarchy (Meta Ads Fase E2)", () => {
