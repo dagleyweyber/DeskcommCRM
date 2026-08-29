@@ -123,8 +123,18 @@ describe("o elo que some sem barulho", () => {
     // Chamar e não USAR o resultado é o defeito de verdade: a função roda, o
     // custo se paga, e a resposta sai sem a conversa. A primeira versão deste
     // caso só olhava a chamada e o sabote passou.
-    expect(fonte, "o resultado de withConversas não chegou à resposta").toMatch(
-      /leads:\s*leadsComConversa\.leads/,
+    //
+    // `leadsComConversa.leads` não é mais o campo FINAL da resposta — depois
+    // dela vem `withNextMeetings` (a data/hora da visita agendada), que
+    // reencadeia o mesmo `leads` mais uma vez. Por isso a prova virou DUAS
+    // partes: o resultado de `withConversas` precisa ALIMENTAR o próximo elo
+    // da cadeia, e o ÚLTIMO elo precisa chegar na resposta — quebrar qualquer
+    // um dos dois faz a conversa sumir da mesma forma.
+    expect(fonte, "leadsComConversa.leads não alimentou o próximo elo da cadeia").toMatch(
+      /leadsComConversa\.leads/,
+    );
+    expect(fonte, "o resultado do ÚLTIMO elo da cadeia não chegou à resposta").toMatch(
+      /leads:\s*leadsComReuniao\.leads/,
     );
   });
 
