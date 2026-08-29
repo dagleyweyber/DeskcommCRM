@@ -25,6 +25,12 @@ export interface LeadFilters {
   valueCentsMin?: number | null;
   valueCentsMax?: number | null;
   overdueOnly?: boolean;
+  /**
+   * Filtro rápido por `created_at` — "quando o lead entrou", não quando teve a
+   * última atividade (`last_activity_at` conta outra pergunta: engajamento,
+   * não aquisição). `undefined` = todo período, mesmo comportamento de hoje.
+   */
+  dateRange?: "hoje" | "7d" | "30d";
 }
 
 /**
@@ -38,6 +44,7 @@ export function filtersFromParams(
   const status = sp.get("status");
   const tag = sp.get("tag");
   const search = sp.get("q");
+  const dateRange = sp.get("date");
   return {
     owner: owner ?? undefined,
     status:
@@ -47,6 +54,8 @@ export function filtersFromParams(
     tag: tag ?? undefined,
     search: search ?? undefined,
     overdueOnly: sp.get("overdue") === "1" || undefined,
+    dateRange:
+      dateRange === "hoje" || dateRange === "7d" || dateRange === "30d" ? dateRange : undefined,
   };
 }
 
@@ -57,7 +66,17 @@ export function filtersToParams(f: LeadFilters): string {
   if (f.tag) p.set("tag", f.tag);
   if (f.search?.trim()) p.set("q", f.search.trim());
   if (f.overdueOnly) p.set("overdue", "1");
+  if (f.dateRange) p.set("date", f.dateRange);
   return p.toString();
+}
+
+/** Início do corte de cada preset, em epoch ms — extraída para ser testável sem mockar `Date`. */
+export function dateRangeCutoff(range: NonNullable<LeadFilters["dateRange"]>, now = new Date()): number {
+  if (range === "hoje") {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  }
+  const days = range === "7d" ? 7 : 30;
+  return now.getTime() - days * 24 * 60 * 60 * 1000;
 }
 
 export function applyFilters(leads: Lead[], f: LeadFilters): Lead[] {
@@ -94,6 +113,7 @@ export function applyFilters(leads: Lead[], f: LeadFilters): Lead[] {
       if (l.status !== "open") return false;
       if (!l.expected_close_date || l.expected_close_date >= today) return false;
     }
+    if (f.dateRange && new Date(l.created_at).getTime() < dateRangeCutoff(f.dateRange)) return false;
     return true;
   });
 }

@@ -20,6 +20,13 @@ import {
   parseAgentOwnerFilter,
   type LeadFilters,
 } from "@/lib/kanban/filters";
+
+const DATE_RANGE_OPTIONS: Array<{ value: LeadFilters["dateRange"]; label: string }> = [
+  { value: undefined, label: "Todo período" },
+  { value: "hoje", label: "Hoje" },
+  { value: "7d", label: "Últimos 7 dias" },
+  { value: "30d", label: "Últimos 30 dias" },
+];
 import { cn } from "@/lib/utils";
 
 interface FilterBarProps {
@@ -110,6 +117,9 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
 
   const tagLabel = filters.tag ?? "Tag: todas";
 
+  const dateRangeLabel =
+    DATE_RANGE_OPTIONS.find((o) => o.value === filters.dateRange)?.label ?? "Todo período";
+
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-2">
       <Input
@@ -181,6 +191,22 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm">Criado: {dateRangeLabel}</Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {DATE_RANGE_OPTIONS.map((o) => (
+            <DropdownMenuItem
+              key={o.label}
+              onClick={() => onChange({ ...filters, dateRange: o.value })}
+            >
+              {o.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" disabled={tagOptions.length === 0}>
             {tagLabel}
           </Button>
@@ -216,6 +242,7 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
         filters.owner ||
         filters.tag ||
         filters.overdueOnly ||
+        filters.dateRange ||
         (filters.status && filters.status !== "all")) && (
         <Button
           variant="ghost"
