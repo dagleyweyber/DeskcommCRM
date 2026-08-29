@@ -92,7 +92,7 @@ export function SalesDashboardPanel({ filtros }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard title="Vendas" value={formatInt(kpis.vendas)} />
         <KpiCard title="Receita Total" value={formatCurrency(kpis.receita_total_cents)} />
         <KpiCard title="Leads Totais" value={formatInt(kpis.leads_total)} />
