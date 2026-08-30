@@ -32,6 +32,7 @@ import {
   Signpost,
   Storefront,
   Megaphone,
+  UserCheck,
   UserCircle,
   Users,
   UsersThree,
@@ -177,6 +178,17 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     label: "Contatos",
     description: "As pessoas do outro lado da conversa e seu histórico.",
     icon: Users,
+    group: "crm",
+    sidebar: true,
+  },
+  {
+    // "Cliente" = became_customer_at preenchido (migration 0164): já comprou
+    // (won automático) ou foi reconhecido na mão. Pedido do dono da agência
+    // pra separar quem já é cliente de quem ainda é só contato/lead.
+    href: "/app/customers",
+    label: "Clientes",
+    description: "Quem já comprou ou foi reconhecido como cliente já existente — desde quando, quantas compras e LTV.",
+    icon: UserCheck,
     group: "crm",
     sidebar: true,
   },

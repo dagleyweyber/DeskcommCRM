@@ -25,6 +25,12 @@ export interface Contact {
   created_at: string;
   updated_at: string;
   last_activity_at: string | null;
+  /**
+   * "Cliente já existente" (migration 0164) — `null` até a 1ª venda `won`
+   * (automático) ou até alguém reconhecer manualmente (`marcar-cliente-
+   * existente.ts`). O próprio valor responde "é cliente?" e "desde quando?".
+   */
+  became_customer_at: string | null;
 }
 
 /**
