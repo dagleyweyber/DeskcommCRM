@@ -187,7 +187,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     // pra separar quem já é cliente de quem ainda é só contato/lead.
     href: "/app/customers",
     label: "Clientes",
-    description: "Quem já comprou ou foi reconhecido como cliente já existente — desde quando, quantas compras e LTV.",
+    description: "Quem já comprou, ou foi marcado como cliente já existente — desde quando, quantas compras e LTV.",
     icon: UserCheck,
     group: "crm",
     sidebar: true,
