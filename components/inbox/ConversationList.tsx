@@ -3,6 +3,7 @@ import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useChannelSessions } from "@/hooks/channels/useChannelSessions";
+import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 
 import { ConversationListItem } from "./ConversationListItem";
 import { EmptyInbox } from "@/components/empty";
@@ -39,6 +40,16 @@ export function ConversationList({
   // NÃO mostrar. Mostrar e sumir depois é pior que aparecer um instante tarde.
   const canais = useChannelSessions().data ?? [];
   const maisDeUmCanal = canais.length > 1;
+
+  // Nome de quem assumiu — pedido do dono da agência: admin e outros
+  // atendentes verem QUEM está conduzindo cada conversa sem abrir uma a uma.
+  // Mesmo mapa já usado em ReassignDialog/Kanban (uma fonte só pra uuid→nome).
+  const membros = useAssignableMembers(true).data ?? [];
+  const nomePorUserId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const membro of membros) if (membro.full_name) m.set(membro.user_id, membro.full_name);
+    return m;
+  }, [membros]);
 
   const q = useConversationsRealtime(filters, orgId);
 
@@ -105,6 +116,11 @@ export function ConversationList({
             onSelect={onSelect}
             queuePosition={isQueue ? i + 1 : undefined}
             mostrarCanal={maisDeUmCanal}
+            assigneeName={
+              c.assignee_kind === "user" && c.assigned_to_user_id
+                ? (nomePorUserId.get(c.assigned_to_user_id) ?? null)
+                : null
+            }
           />
         ))}
         {q.hasNextPage && (

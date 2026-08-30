@@ -1,7 +1,7 @@
 "use client";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Phone, Robot } from "@/lib/ui/icons";
+import { Phone, Robot, UserCheck } from "@/lib/ui/icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,13 @@ interface Props {
    * onde vivem os avisos que importam (bloqueado, tags).
    */
   mostrarCanal?: boolean;
+  /**
+   * Nome de quem assumiu — `null` quando ninguém assumiu ou quem está
+   * atendendo é a IA (`assignee_kind !== 'user'`). Resolvido pelo pai
+   * (`ConversationList`) a partir do mesmo mapa uuid→nome do Kanban/
+   * ReassignDialog — um card sozinho não vale uma consulta própria.
+   */
+  assigneeName?: string | null;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -67,6 +74,7 @@ export function ConversationListItem({
   onSelect,
   queuePosition,
   mostrarCanal,
+  assigneeName,
 }: Props) {
   const c = conversation.contacts ?? null;
   const displayName = rotuloDoContato(c);
@@ -173,6 +181,16 @@ export function ConversationListItem({
             >
               <Phone size={9} weight="regular" aria-hidden />
               {rotuloCanal}
+            </Badge>
+          )}
+          {assigneeName && (
+            <Badge
+              variant="outline"
+              className="h-4 max-w-24 gap-1 px-1.5 text-[10px] font-normal text-muted-foreground"
+              title={`Assumida por ${assigneeName}`}
+            >
+              <UserCheck size={9} weight="regular" aria-hidden className="shrink-0" />
+              <span className="truncate">{assigneeName}</span>
             </Badge>
           )}
           {c?.is_blocked && (
