@@ -238,6 +238,40 @@ export async function garantirLeadDaConversa(
     return { criado: false, motivo: "erro", detalhe: error?.message.slice(0, 120) };
   }
 
+  // 4.5 · avisa o resto do sistema que um lead nasceu.
+  //
+  // A criação MANUAL (`app/api/v1/leads/_handler.ts`) já emite `lead.created`
+  // desde sempre; este caminho — o que cria a imensa maioria dos leads, um por
+  // conversa de WhatsApp — nunca emitia. Handlers que dependem deste evento
+  // (resolução de campanha do Meta Ads, regras de automação em "lead criado")
+  // rodavam só para o punhado de leads criados à mão, e todo lead orgânico
+  // ficava com anúncio capturado mas campanha jamais resolvida — achado ao
+  // vivo num cliente real, não suposição.
+  //
+  // O trigger `fn_emit_event_on_lead_change` (migration 0043) deliberadamente
+  // NÃO emite em INSERT — a duplicata era o bug que aquela migration corrigiu.
+  // A responsabilidade é de quem insere, e este é o segundo (e último) lugar
+  // que insere em `crm_leads` fora daquela rota.
+  const evento = await db.rpc("emit_event", {
+    p_event_type: "lead.created",
+    p_entity_kind: "crm_lead",
+    p_entity_id: lead.id as string,
+    p_payload: {
+      pipeline_id: destino.pipelineId,
+      stage_id: destino.stageId,
+      title: titulo,
+    },
+    p_metadata: { source: "canal.ingest", conversation_id: conversationId },
+    p_organization_id: organizationId,
+  });
+  if (evento.error) {
+    logger.warn("nascimento-do-lead: emit_event lead.created falhou", {
+      organization_id: organizationId,
+      lead_id: lead.id as string,
+      error: evento.error.message.slice(0, 160),
+    });
+  }
+
   // 5 · o registro, pelo EMISSOR CANÔNICO — não por insert cru.
   //
   // `emitLeadActivity` existe porque há vários escritores da timeline e o tipo

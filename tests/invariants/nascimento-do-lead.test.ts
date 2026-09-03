@@ -476,6 +476,41 @@ describe("adReferral — atribuição de anúncio (Fase A do Meta Ads)", () => {
     expect(rows[0]!.source).toBe("whatsapp");
   });
 
+  it("⭐ emite lead.created em event_log — sem isso, resolução de campanha e automações nunca disparam para lead orgânico", async () => {
+    // Achado ao vivo: 3 leads de um cliente real tinham `ad_id` capturado mas
+    // campanha jamais resolvida, porque este caminho (o que cria a imensa
+    // maioria dos leads) nunca emitia `lead.created` — só a rota de criação
+    // MANUAL emitia. O handler de hierarquia do Meta Ads e as regras de
+    // automação escutam este evento; sem ele, rodam só para o punhado de
+    // leads criados à mão no Kanban.
+    const contato = await criarContato(ORG_VIVA, "Evento Barros");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Evento Barros",
+      adReferral: { clickId: "clique-evento", sourceId: "222" },
+    });
+    expect(r.criado).toBe(true);
+    if (!r.criado) return;
+
+    const { rows } = await pool.query<{
+      event_type: string;
+      entity_kind: string;
+      entity_id: string;
+      organization_id: string;
+    }>(
+      `select event_type, entity_kind, entity_id, organization_id
+         from event_log where entity_id = $1 and event_type = 'lead.created'`,
+      [r.leadId],
+    );
+    expect(rows, "exatamente um lead.created para este lead").toHaveLength(1);
+    expect(rows[0]!.entity_kind, "mesmo entity_kind da rota manual — senão o motor de automação ignora por entity_kind_mismatch").toBe(
+      "crm_lead",
+    );
+    expect(rows[0]!.organization_id).toBe(ORG_VIVA);
+  });
+
   it("adReferral com só sourceId (sem clickId) grava o que houver, sem inventar o click_id", async () => {
     const contato = await criarContato(ORG_VIVA, "Post Orgânico Melo");
     const r = await garantirLeadDaConversa(db, {
