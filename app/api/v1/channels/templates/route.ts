@@ -12,9 +12,13 @@
 import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 
+import { audit } from "@/lib/audit";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { getAdapter } from "@/lib/channels";
+import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
+import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
 import { metaSessionForOrg } from "@/lib/channels/meta/session";
 import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
@@ -152,30 +156,82 @@ export async function GET(): Promise<NextResponse> {
   });
 }
 
-export async function POST(_req: NextRequest): Promise<NextResponse> {
+/**
+ * Sincroniza com a Meta, ou CRIA uma definição nova antes de sincronizar.
+ *
+ * Achado ao vivo (RevitaFio Mossoró): esta rota lia `META_SYSTEM_USER_TOKEN`
+ * do ambiente direto — o mesmo bug corrigido em `adapters/meta-cloud.ts`. Uma
+ * instalação que conecta pela tela ("Conectar canal oficial") guarda a
+ * credencial na SESSÃO, não no `.env`, e "Sincronizar com a Meta" falhava com
+ * `missing_meta_token` para todo canal conectado assim — silenciosamente,
+ * porque a tela não distinguia "sem canal" de "canal sem token no ambiente".
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
   const r = await orgOrFail(requestId);
   if (!r.autorizado) return r.resposta;
 
   const sessao = await metaSessionForOrg(r.orgId);
-  if (!sessao?.wabaId) {
+  if (!sessao?.wabaId || !sessao.phoneNumberId) {
     return fail("invalid_request", "no_meta_channel", 400, { requestId });
   }
 
-  const token = process.env.META_SYSTEM_USER_TOKEN ?? "";
-  if (!token) return fail("invalid_request", "missing_meta_token", 400, { requestId });
+  const admin = createAdminClient();
+  const creds = await resolveMetaCreds(admin, sessao.phoneNumberId);
+  if (!creds) return fail("invalid_request", "missing_meta_token", 400, { requestId });
+
+  const corpo = (await req.json().catch(() => ({}))) as {
+    acao?: string;
+    name?: string;
+    language?: string;
+    category?: string;
+    components?: unknown[];
+  };
 
   try {
+    if (corpo.acao === "criar") {
+      if (!corpo.name || !corpo.language || !Array.isArray(corpo.components)) {
+        return fail("invalid_request", "Faltam nome, idioma ou conteúdo.", 400, { requestId });
+      }
+      const adapter = getAdapter(CHANNEL_PROVIDER_META);
+      if (!adapter.templates) {
+        return fail("not_implemented", "Este canal não gerencia definições.", 501, { requestId });
+      }
+      // A plataforma valida formato do nome e conteúdo — a recusa dela chega
+      // inteira ao operador. Não duplicamos a regra: regra copiada envelhece
+      // separada da fonte.
+      await adapter.templates.create({
+        sessionRef: sessao.phoneNumberId,
+        draft: {
+          name: corpo.name,
+          language: corpo.language,
+          category: (corpo.category ?? "UTILITY") as "AUTHENTICATION" | "MARKETING" | "UTILITY",
+          components: corpo.components,
+        },
+      });
+      await audit({
+        action: "template.created",
+        organizationId: r.orgId,
+        resourceType: "channel_session",
+        resourceId: sessao.id,
+        requestId,
+        metadata: { name: corpo.name, language: corpo.language },
+      });
+    }
+
+    // Sincroniza sempre — inclusive depois de criar: a definição nasce em
+    // revisão, e o operador precisa VER que ela existe e está pendente.
     const counts = await syncTemplates({
       organizationId: r.orgId,
       wabaId: sessao.wabaId,
-      token,
-      graphVersion: process.env.META_GRAPH_VERSION ?? "v22.0",
+      token: creds.token,
+      graphVersion: creds.graphVersion,
     });
     return ok(counts);
   } catch (err) {
     // A falha da Graph API vira mensagem legível na tela, não 500 mudo — o
-    // operador precisa saber se é token vencido, WABA errada ou rede.
+    // operador precisa saber se é token vencido, WABA errada, nome inválido
+    // ou rede.
     return fail("internal_error", err instanceof Error ? err.message : "sync_failed", 502, {
       requestId,
     });

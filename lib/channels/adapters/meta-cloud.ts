@@ -21,6 +21,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveMetaCreds } from "../meta/credentials";
+import { metaTemplateOps } from "../meta/template-ops";
 import type { ChannelAdapter, ChannelHealth, OutboundEnvelope, RecipientInput } from "../types";
 
 /** Só dígitos. `+55 (31) 99896-6398` → `5531998966398`. */
@@ -146,6 +147,9 @@ export const metaCloudAdapter: ChannelAdapter = {
     sendFailed: "meta_error",
     unknownError: "meta_unknown",
   },
+
+  /** Criar/editar/apagar definição direto na WABA — ver `../meta/template-ops.ts`. */
+  templates: metaTemplateOps,
 
   async send(envelope: OutboundEnvelope): Promise<{ externalId: string | null }> {
     // Sessão primeiro, env como fallback. O `sessionRef` do canal oficial É o

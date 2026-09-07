@@ -63,3 +63,29 @@ export function useSyncTemplates() {
     },
   });
 }
+
+export interface CreateTemplateInput {
+  name: string;
+  language: string;
+  category: string;
+  components: unknown[];
+}
+
+/**
+ * Cria a definição direto na WABA e já sincroniza — a mesma rota faz as duas
+ * coisas, porque separar obrigaria a tela a saber que criar também sincroniza.
+ */
+export function useCreateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CreateTemplateInput) =>
+      apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", {
+        acao: "criar",
+        ...input,
+      }),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channel-templates"] });
+    },
+  });
+}
