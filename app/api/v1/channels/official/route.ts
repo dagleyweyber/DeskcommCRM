@@ -29,6 +29,8 @@ import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
+import { logger } from "@/lib/logger";
+import { registerMetaPhoneNumber } from "@/lib/channels/meta/register-number";
 import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
 import { reactivateChannelSession } from "@/lib/channels/reactivate";
 import { env } from "@/lib/env";
@@ -137,6 +139,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail("invalid_request", validacao.motivo, 422, { requestId });
   }
 
+  // Achado ao vivo: número conectado por aqui (em vez do assistente "Início
+  // rápido" da Meta, que chama isto por trás) fica com `status: PENDING` e
+  // toda mensagem enviada volta `133010 Account not registered` — mesmo com
+  // credencial válida e WABA aprovada. Chamar de novo num número já
+  // registrado é seguro (idempotente do lado da Meta); por isso não bloqueia
+  // a conexão se falhar — a credencial já provou que é válida.
+  const registro = await registerMetaPhoneNumber({ phoneNumberId: phone_number_id, token });
+  if (!registro.ok) {
+    logger.warn("canal-oficial: registro do número na Cloud API falhou", {
+      request_id: requestId,
+      phone_number_id,
+      motivo: registro.motivo,
+    });
+  }
+
   const admin = createAdminClient();
   const cifrado = await encryptWebhookSecret(admin, token);
   if (!cifrado) {
@@ -218,5 +235,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     connected: true,
     displayName: linha.display_name,
     phoneNumber: linha.phone_number,
+    numberRegistered: registro.ok,
   });
 }
