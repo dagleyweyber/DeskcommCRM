@@ -30,6 +30,8 @@ export interface TemplateView {
   /** DERIVADOS do template pela API — nunca digitados, nunca contados à mão. */
   slots: TemplateSlotView[];
   previews: TemplatePreview[];
+  /** A definição crua — a tela de campanhas deriva o próprio contrato dela. */
+  components: unknown[];
 }
 
 export interface TemplatesPayload {
