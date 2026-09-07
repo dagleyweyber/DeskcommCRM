@@ -96,4 +96,8 @@ export const ACTION_CODES: string[] = [
   "platform_admin.audit_listed",
   "platform_admin.audit_entry_viewed",
   "lead.marked_existing_customer",
+  "campaign.created",
+  "campaign.started",
+  "campaign.paused",
+  "campaign.cancelled",
 ];

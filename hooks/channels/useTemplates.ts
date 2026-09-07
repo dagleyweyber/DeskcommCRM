@@ -35,6 +35,8 @@ export interface TemplateView {
 export interface TemplatesPayload {
   /** `null` = canal oficial não conectado. Distinto de "conectado e sem template". */
   waba: string | null;
+  /** Id da sessão (`channel_sessions.id`) — o que a tela de campanhas grava. */
+  channelSessionId: string | null;
   templates: TemplateView[];
 }
 

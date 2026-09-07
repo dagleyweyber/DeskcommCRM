@@ -49,6 +49,17 @@ beforeAll(async () => {
     [ORG],
   );
 
+  // Contatos com tag — o único uso de `.contains()` no repo hoje
+  // (`lib/campaigns/audience.ts`, filtro de campanha por tag).
+  await pool.query(
+    `insert into contacts (organization_id, display_name, phone_number, source, tags) values
+       ($1, 'Com VIP',    '+550001', 'whatsapp', array['vip','antigo']),
+       ($1, 'Sem VIP',    '+550002', 'whatsapp', array['antigo']),
+       ($1, 'Sem tag',    '+550003', 'whatsapp', array[]::text[])
+     on conflict do nothing`,
+    [ORG],
+  );
+
   // GUC no DATABASE (não só na sessão) — `pgComoSupabase` empresta conexões
   // de um pool, e set_config(..., false) sozinho não sobreviveria a uma
   // conexão nova puxada dele. `$1` não é reconhecido DENTRO de um bloco
@@ -156,6 +167,29 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
       .in("slug", []);
     expect(vazio.error).toBeNull();
     expect(vazio.data).toEqual([]);
+  });
+
+  it("⭐ `contains` casa só quem TEM a tag — `text[] @>`, não substring", async () => {
+    // Nasceu por pressão de `lib/campaigns/audience.ts` (público de campanha
+    // por tag): `.contains("tags", [tag])` e o adaptador ESTOUROU.
+    const { data } = await db
+      .from("contacts")
+      .select("display_name")
+      .eq("organization_id", ORG)
+      .contains("tags", ["vip"]);
+    expect((data as Array<{ display_name: string }>).map((x) => x.display_name)).toEqual([
+      "Com VIP",
+    ]);
+
+    // Tag que ninguém tem: vazio, sem erro — não "tudo", que seria o filtro
+    // ignorado em silêncio.
+    const nenhum = await db
+      .from("contacts")
+      .select("display_name")
+      .eq("organization_id", ORG)
+      .contains("tags", ["nao-existe"]);
+    expect(nenhum.error).toBeNull();
+    expect(nenhum.data).toEqual([]);
   });
 
   it("`gt` é o espelho — e os dois convivem com `eq` na mesma consulta", async () => {

@@ -254,4 +254,12 @@ export type AuditAction =
   | "followup.cancelled"
   | "lead.reactivation_proposed"
   // "Cliente já existente" (lifecycle stage, padrão HubSpot/Close.com) — Fase 3.
-  | "lead.marked_existing_customer";
+  | "lead.marked_existing_customer"
+  // Campanhas — disparo de template aprovado pra uma lista de leads/contatos.
+  // `created` grava o público materializado; as três de ciclo de vida
+  // (`started`/`paused`/`cancelled`) são as únicas mutações depois disso —
+  // o despachante em si é service role e não passa por rota autenticada.
+  | "campaign.created"
+  | "campaign.started"
+  | "campaign.paused"
+  | "campaign.cancelled";

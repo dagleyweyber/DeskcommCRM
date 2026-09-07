@@ -29,6 +29,7 @@ import {
   Robot,
   ScalesSimple,
   ShieldCheck,
+  PaperPlaneTilt,
   Signpost,
   Storefront,
   Megaphone,
@@ -377,6 +378,20 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: "canais",
     // GET é manager+; POST/DELETE (conectar/desconectar) exigem admin na rota
     // — mesmo raciocínio da entrada da Nuvemshop acima.
+    minRole: "manager",
+    sidebar: true,
+  },
+  {
+    // Pedido do dono da agência depois de criar seu primeiro template
+    // aprovado: mandar pra uma lista de leads/contatos, não um de cada vez
+    // abrindo conversa por conversa no Inbox.
+    href: "/app/campaigns",
+    label: "Campanhas",
+    description: "Dispare um template aprovado pra uma tag ou etapa do funil inteira, com segurança contra banimento.",
+    icon: PaperPlaneTilt,
+    group: "canais",
+    // Mesmo piso da RLS de escrita das tabelas — disparo em massa é ação de
+    // gestor, mesmo raciocínio do `assign` em lote de leads.
     minRole: "manager",
     sidebar: true,
   },

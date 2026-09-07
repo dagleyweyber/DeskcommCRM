@@ -62,6 +62,17 @@ export async function checkDailyLimit(
 
 export const AUTOMATED_SEND_SPACING_MS = 1200;
 
+/**
+ * Espaçamento entre envios de CAMPANHA (disparo em massa) — o número que o
+ * `CLAUDE.md` já prometia ("Campanha 1 msg/5s") desde antes de existir
+ * campanha nenhuma no produto. Mais lento que `AUTOMATED_SEND_SPACING_MS`
+ * de propósito: uma campanha manda a MESMA mensagem (ou quase) pra dezenas
+ * de números em sequência, e é exatamente o padrão que detecção de banimento
+ * mais pune — o envio automatizado de regra/IA responde a eventos
+ * espalhados no tempo, campanha não.
+ */
+export const CAMPAIGN_SEND_SPACING_MS = 5000;
+
 export function jitterMs(): number {
   return Math.floor(Math.random() * 801);
 }

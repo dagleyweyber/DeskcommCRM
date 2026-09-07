@@ -152,6 +152,10 @@ export async function GET(): Promise<NextResponse> {
     // nunca conectou, ou conectou e excluiu —, e a tela precisa distingui-lo de
     // "conectado, porém sem template".
     waba: sessao?.wabaId ?? null,
+    // A tela de campanhas precisa do id da SESSÃO (não só da WABA) pra gravar
+    // em `whatsapp_campaigns.channel_session_id` — sem isto ela teria que
+    // adivinhar qual sessão bate com esta WABA.
+    channelSessionId: sessao?.id ?? null,
     templates,
   });
 }

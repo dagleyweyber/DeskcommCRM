@@ -152,6 +152,20 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     this.filtros.push(["in", coluna, valores]);
     return this;
   }
+
+  /**
+   * `@>` (contains) — nasceu porque `lib/campaigns/audience.ts` filtra
+   * `contacts.tags` (o `text[]` da doutrina) por
+   * `.contains("tags",[tag])`, e o adaptador ESTOURAVA ao ser chamado. Só o
+   * caso ARRAY: `tags text[]` é o único uso de `.contains()` no repo hoje —
+   * `jsonb @>` teria outra representação de parâmetro e nasce quando alguém
+   * precisar, não antes.
+   */
+  contains(coluna: string, valores: unknown[]): this {
+    this.filtros.push(["@>", coluna, valores]);
+    return this;
+  }
+
   /** Presente para ESTOURAR: o código que o usar precisa de implementação real. */
   neq(): never {
     return naoImplementado("neq");
@@ -171,6 +185,10 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
           return `$${valores.length}`;
         });
         return `"${c}" in (${placeholders.join(", ")})`;
+      }
+      if (op === "@>") {
+        valores.push(v);
+        return `"${c}" @> $${valores.length}::text[]`;
       }
       valores.push(v);
       return `"${c}" ${op} $${valores.length}`;
