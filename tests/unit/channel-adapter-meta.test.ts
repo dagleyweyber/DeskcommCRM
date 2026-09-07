@@ -73,23 +73,26 @@ describe("adapter meta_cloud — endereçamento", () => {
 });
 
 describe("adapter meta_cloud — configuração", () => {
-  it("sem credencial NÃO está configurado", () => {
+  it("isConfigured é SEMPRE true — a credencial vive na sessão, e isto é síncrono", () => {
+    // Achado ao vivo (RevitaFio Mossoró): olhar só o env respondia "não
+    // configurado" para toda instalação que conectou pela tela, e o handler
+    // gravava `queued` sem nunca chamar `send`. A mensagem ficava parada, sem
+    // erro, com o canal ligado e o webhook recebendo mensagem normalmente.
     vi.stubEnv("META_PHONE_NUMBER_ID", "");
     vi.stubEnv("META_SYSTEM_USER_TOKEN", "");
-    expect(a().isConfigured()).toBe(false);
-  });
-
-  it("com credencial está configurado", () => {
+    expect(a().isConfigured()).toBe(true);
     configurar();
     expect(a().isConfigured()).toBe(true);
   });
 
-  it("não configurado é NOOP no envio, nunca exceção", async () => {
-    // Mesmo contrato do outro canal: a UI mostra banner, o handler grava `queued`.
+  it("sem credencial (nem sessão, nem env) o envio LANÇA — nunca `sent` sem id", async () => {
+    // `{externalId: null}` faria o handler gravar `status:'sent'` sem id,
+    // dizendo "enviado" para algo que nunca saiu. Quem desiste agora é `send`.
     vi.stubEnv("META_PHONE_NUMBER_ID", "");
     vi.stubEnv("META_SYSTEM_USER_TOKEN", "");
-    const r = await a().send({ sessionRef: "x", to: "5531999", kind: "text", body: "oi" });
-    expect(r).toEqual({ externalId: null });
+    await expect(
+      a().send({ sessionRef: "sem-sessao-nem-env", to: "5531999", kind: "text", body: "oi" }),
+    ).rejects.toThrow(/meta_not_configured/);
   });
 
   it("os códigos carregam o nome do provider — por isso vivem no adapter", () => {
