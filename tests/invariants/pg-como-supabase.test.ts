@@ -53,9 +53,9 @@ beforeAll(async () => {
   // (`lib/campaigns/audience.ts`, filtro de campanha por tag).
   await pool.query(
     `insert into contacts (organization_id, display_name, phone_number, source, tags) values
-       ($1, 'Com VIP',    '+550001', 'whatsapp', array['vip','antigo']),
-       ($1, 'Sem VIP',    '+550002', 'whatsapp', array['antigo']),
-       ($1, 'Sem tag',    '+550003', 'whatsapp', array[]::text[])
+       ($1, 'Com VIP',    '+5511900000001', 'whatsapp', array['vip','antigo']),
+       ($1, 'Sem VIP',    '+5511900000002', 'whatsapp', array['antigo']),
+       ($1, 'Sem tag',    '+5511900000003', 'whatsapp', array[]::text[])
      on conflict do nothing`,
     [ORG],
   );
