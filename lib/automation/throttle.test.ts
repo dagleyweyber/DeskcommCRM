@@ -23,9 +23,9 @@ describe("withinSendWindow — hora de parede em America/Sao_Paulo, não do serv
 
 describe("nextWindowStart — sempre 7h em America/Sao_Paulo, como instante UTC", () => {
   it("às 23h BRT retorna 7h BRT de AMANHÃ (10h UTC)", () => {
-    // 23h BRT = 02:00 UTC do dia seguinte.
+    // 23h BRT do dia 17 = 02:00 UTC do dia 18 — "amanhã" é dia 18.
     const next = nextWindowStart(new Date("2026-07-18T02:00:00Z"));
-    expect(next).toBe(new Date("2026-07-19T10:00:00.000Z").toISOString());
+    expect(next).toBe(new Date("2026-07-18T10:00:00.000Z").toISOString());
   });
   it("às 5h BRT retorna 7h BRT de HOJE (10h UTC do mesmo dia)", () => {
     // 5h BRT = 08:00 UTC do mesmo dia.
