@@ -205,6 +205,15 @@ export function planSync(rows: MetaTemplateRow[], existing: LocalTemplate[]): Sy
 export interface SyncInput {
   organizationId: string;
   wabaId: string;
+  /**
+   * `channel_sessions.id` desta conexão — migration 0154 deu a `meta_templates`
+   * uma coluna pra isto (uma WABA por conexão, não por provider), mas esta
+   * função nunca a preenchia: toda linha nascia com `channel_session_id` nulo,
+   * e qualquer leitura futura que endereçasse "o template DESTA conexão" (não
+   * só desta WABA) achava zero linha. Achado ao vivo pela campanha em massa,
+   * que é a primeira leitura a depender da coluna.
+   */
+  channelSessionId: string;
   /** Token da Graph API. Resolvido de fonte confiável pelo chamador, nunca do body. */
   token: string;
   /** Ex.: `v22.0`. Explícito de propósito — ver o comentário de `fetchAllTemplates`. */
@@ -270,7 +279,12 @@ export async function syncTemplates(input: SyncInput): Promise<SyncCounts> {
     const { error } = await db
       .from("meta_templates")
       .upsert(
-        rows.map((r) => ({ ...r, synced_at: now, updated_at: now })),
+        rows.map((r) => ({
+          ...r,
+          channel_session_id: input.channelSessionId,
+          synced_at: now,
+          updated_at: now,
+        })),
         { onConflict: "organization_id,waba_id,name,language" },
       );
     if (error) throw new Error(`syncTemplates: upsert falhou — ${error.message}`);

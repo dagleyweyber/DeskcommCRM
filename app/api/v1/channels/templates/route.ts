@@ -228,6 +228,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const counts = await syncTemplates({
       organizationId: r.orgId,
       wabaId: sessao.wabaId,
+      channelSessionId: sessao.id,
       token: creds.token,
       graphVersion: creds.graphVersion,
     });

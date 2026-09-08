@@ -13773,4 +13773,14 @@ create policy whatsapp_campaign_recipients_write
 
 revoke all on public.whatsapp_campaign_recipients from anon;
 
+-- ---- meta_templates.channel_session_id backfill (migration 0168) ----
+-- Ver o cabeçalho da migration 0168: coluna existe desde 0154, mas o sync
+-- nunca a preenchia. Idempotente — só toca linha órfã.
+update public.meta_templates mt
+set channel_session_id = cs.id
+from public.channel_sessions cs
+where mt.channel_session_id is null
+  and cs.organization_id = mt.organization_id
+  and cs.meta_waba_id = mt.waba_id;
+
 notify pgrst, 'reload schema';
