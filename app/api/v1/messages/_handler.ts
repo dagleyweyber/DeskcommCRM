@@ -475,6 +475,7 @@ export async function sendMessageHandler(
             ).externalId
           : await sendTemplateForSession(supabase, {
               organizationId: ctx.organization_id,
+              phoneNumberId: resolveSessionRef(c.channel_sessions),
               to: chatId,
               name: input.template_name ?? "",
               language: input.template_language ?? "",

@@ -15,10 +15,23 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveMetaCreds } from "./credentials";
 import { sendTemplate } from "./send-template";
 
 export interface SendTemplateForSessionInput {
   organizationId: string;
+  /**
+   * `channel_sessions.meta_phone_number_id` desta conexão — chave que
+   * `resolveMetaCreds` usa pra achar o token da SESSÃO antes de cair no env.
+   * Achado ao vivo (campanha em massa): esta função lia `META_PHONE_NUMBER_ID`
+   * e `META_SYSTEM_USER_TOKEN` direto do `process.env`, sem essa credencial
+   * setada em NENHUMA instalação desta VPS — todo template mandado pra um
+   * cliente de verdade (campanha, follow-up do agente, `JanelaFechadaAviso`
+   * quando o adapter não implementa `sendTemplate` próprio) saía com
+   * `phoneNumberId`/`token` vazios, e a Meta devolvia `100: Unsupported post
+   * request` porque a URL nascia sem o segmento do número.
+   */
+  phoneNumberId: string;
   /** Destinatário em dígitos E.164, já resolvido pelo adapter. */
   to: string;
   name: string;
@@ -52,10 +65,15 @@ export async function sendTemplateForSession(
 
   if (error) throw new Error(`template_lookup_failed: ${error.message}`);
 
+  // Sessão primeiro, env como fallback — o mesmo resolvedor que o resto do
+  // canal oficial já usa (`resolveMetaCreds`), nunca o `process.env` cru.
+  const creds = await resolveMetaCreds(db, input.phoneNumberId);
+  if (!creds) throw new Error("meta_not_configured: nenhuma credencial para esta conexão");
+
   const resultado = await sendTemplate({
-    phoneNumberId: process.env.META_PHONE_NUMBER_ID ?? "",
-    token: process.env.META_SYSTEM_USER_TOKEN ?? "",
-    graphVersion: process.env.META_GRAPH_VERSION ?? "v22.0",
+    phoneNumberId: creds.phoneNumberId,
+    token: creds.token,
+    graphVersion: creds.graphVersion,
     to: input.to,
     binding: {
       name: input.name,
