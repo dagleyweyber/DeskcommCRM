@@ -368,21 +368,25 @@ describe("send_whatsapp_message — execute (Task 11)", () => {
 });
 
 describe("send_whatsapp_message — postponeUntil (Task 11)", () => {
-  it("3. fora da janela (23h): adia pra 7h de amanhã", async () => {
-    vi.setSystemTime(new Date("2026-07-17T23:00:00"));
+  it("3. fora da janela (23h em América/São_Paulo): adia pra 7h de amanhã", async () => {
+    // A janela é medida em America/Sao_Paulo (UTC-3): 23h BRT do dia 17 é
+    // 02:00 UTC do dia 18 — literal explícito, não depende do fuso de quem
+    // roda o teste (achado ao vivo: o literal sem `Z` antigo dependia disso).
+    vi.setSystemTime(new Date("2026-07-18T02:00:00Z"));
     const executor = getAction("send_whatsapp_message")!;
     const until = await executor.postponeUntil!(baseCtx(), {
       channel_session_id: SESSION_ID,
       template: "x",
     });
     expect(until).not.toBeNull();
-    const next = new Date(until!);
-    expect(next.getHours()).toBe(7);
-    expect(next.getDate()).toBe(18);
+    // 7h BRT de amanhã (dia 18) = 10h UTC do dia 18.
+    expect(new Date(until!).toISOString()).toBe(new Date("2026-07-18T10:00:00.000Z").toISOString());
   });
 
   it("4. limite diário atingido: adia pra 7h de amanhã (daily_limit)", async () => {
-    vi.setSystemTime(new Date("2026-07-17T10:00:00"));
+    // 10h BRT do dia 17 = 13h UTC do dia 17 — dentro da janela, pra cair no
+    // teto diário (não no veto de janela).
+    vi.setSystemTime(new Date("2026-07-17T13:00:00Z"));
     sql(`
       insert into public.channel_session_warmup (channel_session_id, organization_id, day, messages_sent)
         values ('${SESSION_ID}', '${GOV_ORG}', '2026-07-17', 300)
@@ -394,9 +398,8 @@ describe("send_whatsapp_message — postponeUntil (Task 11)", () => {
       template: "x",
     });
     expect(until).not.toBeNull();
-    const next = new Date(until!);
-    expect(next.getHours()).toBe(7);
-    expect(next.getDate()).toBe(18);
+    // 7h BRT de amanhã (dia 18) = 10h UTC do dia 18.
+    expect(new Date(until!).toISOString()).toBe(new Date("2026-07-18T10:00:00.000Z").toISOString());
   });
 });
 
