@@ -25,6 +25,7 @@ import { ApiError } from "@/lib/api/types";
 import { audit } from "@/lib/audit";
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
 import { registraFalhaDeAtividade } from "@/lib/leads/activity-write-failure";
+import { formatLostReason } from "@/lib/schemas/leads";
 
 /** Como a demanda terminou. Não há terceira: encerrar é ganhar ou perder. */
 export type DesfechoDaDemanda = "won" | "lost";
@@ -133,11 +134,34 @@ export async function encerraDemanda(
   };
   if (input.desfecho === "lost") patch.lost_reason = input.motivo;
 
-  const { error: updErr } = await supabase
+  let { error: updErr } = await supabase
     .from("crm_leads")
     .update(patch)
     .eq("id", input.leadId)
     .eq("organization_id", ctx.organization_id);
+
+  // `lost_reason` só aceita um código canônico ou uma extensão CURADA por
+  // pipeline (`settings.lost_reasons`) — é a trigger `fn_validate_lost_reason_
+  // required` quem decide, de propósito (fonte única, ver `lib/schemas/leads.ts`).
+  // O diálogo humano ("Outros" + descrição livre) e a ferramenta da IA
+  // (`crm_close_demand`, `reason` sem enum) mandam texto livre pra esta coluna
+  // sem checar a lista antes — achado ao vivo: B'Laser Caruaru descrevia o
+  // motivo e o encerramento nunca confirmava, sempre com erro genérico.
+  // Em vez de duplicar a lista canônica/por-pipeline aqui (duas fontes da
+  // mesma regra divergem cedo ou tarde), cai pra `other` só quando a trigger
+  // já recusou — o texto original nunca é perdido: vira o DETALHE da linha na
+  // timeline (`reason` abaixo), só não é mais o valor gravado na coluna.
+  let motivoGravado = input.motivo;
+  let detalheOriginal: string | null = null;
+  if (updErr && input.desfecho === "lost" && updErr.message.includes("lost_reason_invalid")) {
+    detalheOriginal = input.motivo ?? null;
+    motivoGravado = "other";
+    ({ error: updErr } = await supabase
+      .from("crm_leads")
+      .update({ ...patch, lost_reason: motivoGravado })
+      .eq("id", input.leadId)
+      .eq("organization_id", ctx.organization_id));
+  }
 
   if (updErr) {
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, updErr.message);
@@ -163,7 +187,10 @@ export async function encerraDemanda(
         from_stage_id: (lead as { stage_id: string }).stage_id,
         to_stage_id: (stage as { id: string }).id,
         ...(input.desfecho === "lost"
-          ? { lost_reason: input.motivo }
+          ? {
+              lost_reason: motivoGravado,
+              ...(detalheOriginal ? { lost_reason_detail: detalheOriginal } : {}),
+            }
           : { value_cents: finalLead.value_cents, currency: finalLead.currency }),
       },
       p_metadata: { request_id: ctx.requestId, ...a.metadataActor },
@@ -187,7 +214,10 @@ export async function encerraDemanda(
     // O rótulo do tipo já diz "Demanda encerrada" na tela; o reason acrescenta o
     // DESFECHO e, na perda, o motivo — repetir o rótulo aqui deixaria a linha
     // com a mesma frase duas vezes (ver `motivoLegivel` em retorno-crm.ts).
-    reason: input.desfecho === "won" ? "Ganho" : `Perdido — ${input.motivo}`,
+    reason:
+      input.desfecho === "won"
+        ? "Ganho"
+        : `Perdido — ${formatLostReason(motivoGravado ?? "")}${detalheOriginal ? `: ${detalheOriginal}` : ""}`,
     payload: {
       desfecho: input.desfecho,
       from_stage_id: (lead as { stage_id: string }).stage_id,
@@ -218,7 +248,12 @@ export async function encerraDemanda(
       ...a.metadataActor,
       from_stage_id: (lead as { stage_id: string }).stage_id,
       to_stage_id: (stage as { id: string }).id,
-      ...(input.desfecho === "lost" ? { lost_reason: input.motivo } : {}),
+      ...(input.desfecho === "lost"
+        ? {
+            lost_reason: motivoGravado,
+            ...(detalheOriginal ? { lost_reason_detail: detalheOriginal } : {}),
+          }
+        : {}),
     },
   });
 

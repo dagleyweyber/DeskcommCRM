@@ -311,6 +311,46 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
     );
     expect(rows[0]!.n).toBe("2");
   });
+
+  it("⭐ QUEM JÁ É CLIENTE (became_customer_at) não abre demanda nova sozinho", async () => {
+    // Achado ao vivo (B'Laser Caruaru): um lead fecha `won` com um atendimento
+    // agendado pra dias depois, a cliente escreve de novo só pra CONFIRMAR
+    // aquele mesmo atendimento — e virava card novo de "lead", igual a quem
+    // nunca comprou nada. `became_customer_at` é o MESMO sinal que
+    // `cliente-existente-won-handler.ts` grava automaticamente em todo `won`
+    // — não é um campo novo pra este teste simular à parte.
+    const contato = await criarContato(ORG_VIVA, "Cliente Fiel");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Cliente Fiel",
+    };
+
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    await pool.query(
+      "update crm_leads set status = 'won', closed_at = now() where id = $1",
+      [primeira.leadId],
+    );
+    await pool.query("update contacts set became_customer_at = now() where id = $1", [contato]);
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado, "cliente reconhecido não gera card sozinho").toBe(false);
+    if (segunda.criado) return;
+    expect(segunda.motivo).toBe("cliente_existente");
+
+    // A conversa não fica travada por isto — só o card automático não nasce.
+    // Abrir negociação nova continua um clique de distância (botão "Lead" do
+    // painel do Inbox), decisão de quem atende, não do sistema.
+    const { rows } = await pool.query<{ n: string }>(
+      "select count(*) as n from crm_leads where contact_id = $1",
+      [contato],
+    );
+    expect(rows[0]!.n, "continua só o lead original, fechado").toBe("1");
+  });
 });
 
 describe("quando o lead NÃO nasce — e cada recusa diz por quê", () => {

@@ -53,6 +53,7 @@ import { emitLeadActivity } from "./activity-emitter";
  */
 export type MotivoSemLead =
   | "ja_existe" // o contato já tem lead aberto: um por demanda, não um por mensagem
+  | "cliente_existente" // já foi cliente (became_customer_at) e não tem demanda aberta — reabrir negociação é ação humana, não automática (ver o cabeçalho da função)
   | "contato_bloqueado" // pediu para sair; criar oportunidade seria desrespeito registrado
   | "sem_funil_de_entrada" // a organização não tem funil padrão — falha de configuração, visível
   | "sem_etapa" // o funil existe e não tem etapa utilizável
@@ -129,10 +130,16 @@ export async function funilDeEntrada(
  * Garante que a conversa tenha um lead. Idempotente por contato: chamar de novo
  * não cria um segundo card.
  *
- * **Um lead por DEMANDA, não por mensagem.** Enquanto houver lead aberto para o
- * contato, novas mensagens alimentam o que já existe. Quando ele fecha (ganho ou
- * perdido) e a pessoa volta a escrever, nasce outro — que é o comportamento
- * certo: é uma demanda nova.
+ * **Um lead por DEMANDA, não por mensagem — com uma exceção deliberada.**
+ * Enquanto houver lead aberto para o contato, novas mensagens alimentam o que
+ * já existe. Quando fecha `lost` (ou some sem nunca ter comprado) e a pessoa
+ * volta a escrever, nasce outro automaticamente — é demanda nova de verdade,
+ * ninguém comprou nada ainda.
+ *
+ * **Mas quando fecha porque a pessoa JÁ É CLIENTE** (`won`, ou reconhecida à
+ * mão em `marcar-cliente-existente.ts` — o mesmo sinal, `contacts.
+ * became_customer_at`), a próxima mensagem NÃO nasce card sozinha. Ver o
+ * comentário no passo 2.5 abaixo para o porquê.
  */
 export async function garantirLeadDaConversa(
   db: SupabaseClient,
@@ -145,7 +152,7 @@ export async function garantirLeadDaConversa(
   // lugar onde ninguém olharia.
   const { data: contato } = await db
     .from("contacts")
-    .select("is_blocked,display_name,name,phone_number")
+    .select("is_blocked,display_name,name,phone_number,became_customer_at")
     .eq("organization_id", organizationId)
     .eq("id", contactId)
     .maybeSingle();
@@ -163,6 +170,25 @@ export async function garantirLeadDaConversa(
     .maybeSingle();
 
   if (existente) return { criado: false, motivo: "ja_existe" };
+
+  // 2.5 · já é cliente (`became_customer_at`, gravado por `lead.won` — ver
+  // cliente-existente-won-handler.ts — ou pelo reconhecimento manual em
+  // marcar-cliente-existente.ts) e não tem demanda aberta?
+  //
+  // Não nasce card sozinho. O caso que expôs isto (B'Laser Caruaru): um lead
+  // fecha `won` com um atendimento AGENDADO pra dias depois, a cliente escreve
+  // de novo só pra CONFIRMAR aquele mesmo atendimento — e cada confirmação
+  // virava um card novo de "lead", indistinguível de gente que nunca comprou
+  // nada. Criar automaticamente aqui não tem como distinguir "está confirmando
+  // o que já comprou" de "quer comprar de novo" — e nenhum CRM comercial
+  // maduro tenta adivinhar isso da conversa: HubSpot/Close/Pipedrive nunca
+  // recriam Deal sozinhos pra quem já é cliente, é sempre ação deliberada de
+  // quem atende. A conversa continua viva no Inbox de qualquer jeito (lead e
+  // conversa são desacoplados); o botão "Lead" do painel lateral (sempre
+  // visível, `components/inbox/CRMSidePanel.tsx`) já é o caminho de UM clique
+  // pra abrir negociação nova quando o atendente identificar interesse de
+  // verdade — não precisa de tela nova.
+  if (contato?.became_customer_at) return { criado: false, motivo: "cliente_existente" };
 
   // 3 · onde entra
   const destino = await funilDeEntrada(db, organizationId);

@@ -15,6 +15,7 @@ import { TimelineView } from "@/components/contacts/TimelineView";
 import { EditContactDialog } from "@/components/contacts/EditContactDialog";
 import { AnonymizeDialog } from "@/components/contacts/AnonymizeDialog";
 import { PropostasDeDado } from "@/components/contacts/PropostasDeDado";
+import { PurchaseHistory } from "@/components/contacts/PurchaseHistory";
 import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 
 interface Props {
@@ -167,6 +168,10 @@ export function ContactDetailClient({ contactId }: Props) {
               </div>
             </dl>
           </Card>
+
+          <div className="mt-4">
+            <PurchaseHistory contactId={contactId} />
+          </div>
         </TabsContent>
 
         <TabsContent value="timeline" className="mt-4">
