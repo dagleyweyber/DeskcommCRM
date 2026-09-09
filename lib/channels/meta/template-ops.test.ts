@@ -129,6 +129,31 @@ describe("criar — manda o rascunho direto pro endpoint da WABA", () => {
       }),
     ).rejects.toThrow(/nome já existe/);
   });
+
+  it("⭐ sem error_data.details, usa error_user_msg — achado ao vivo: 'Invalid parameter' sozinho não diz nada", async () => {
+    // RevitaFio Mossoró: a Meta devolveu só "400 Invalid parameter" na tela
+    // porque `error_data.details` vinha vazio e o código nem olhava
+    // `error_user_msg` — o campo que a Meta documenta como o texto pronto
+    // pra mostrar ao operador, e que tinha o motivo de verdade.
+    sessaoNoBanco.wabaId = "999";
+    stubFetch(
+      {
+        error: {
+          message: "Invalid parameter",
+          error_user_title: "Modelo de mensagem inválido",
+          error_user_msg: "O texto do botão não pode ultrapassar 25 caracteres.",
+        },
+      },
+      false,
+    );
+
+    await expect(
+      (await ops()).create({
+        sessionRef: "x",
+        draft: { name: "x", language: "pt_BR", category: "UTILITY", components: [] },
+      }),
+    ).rejects.toThrow(/O texto do botão não pode ultrapassar 25 caracteres/);
+  });
 });
 
 describe("apagar — por nome, como o resto do canal endereça", () => {

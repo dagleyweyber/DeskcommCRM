@@ -100,6 +100,16 @@ const FIELDS = "id,name,language,status,category,parameter_format,rejected_reaso
  * A chamada com o erro da Graph API preservado — `error_data.details` é o
  * que distingue "nome já usado" de "categoria inválida" de "faltou exemplo",
  * e sem ele a tela mostra só "falhou".
+ *
+ * `error.message` sozinho costuma ser só um rótulo genérico ("Invalid
+ * parameter") — achado ao vivo (RevitaFio Mossoró): criar template
+ * devolvia exatamente isso, sem pista nenhuma do que estava errado no
+ * conteúdo. `error_user_msg`/`error_user_title` são os campos que a Meta
+ * documenta como "texto pronto pra mostrar à pessoa que está usando o
+ * app" — geralmente têm o motivo específico que falta no `message` cru.
+ * Concatena os DOIS (em vez de escolher um só) porque não dá pra saber de
+ * antemão qual endpoint/erro popula qual campo — perder qualquer um deles
+ * é voltar a "falhou" sem explicação.
  */
 async function call<T>(
   creds: WabaCreds,
@@ -117,11 +127,26 @@ async function call<T>(
   });
 
   const json = (await res.json().catch(() => null)) as
-    | (Record<string, unknown> & { error?: { message?: string; error_data?: { details?: string } } })
+    | (Record<string, unknown> & {
+        error?: {
+          message?: string;
+          error_data?: { details?: string };
+          error_user_title?: string;
+          error_user_msg?: string;
+        };
+      })
     | null;
 
   if (!res.ok || json?.error) {
-    const detalhe = json?.error?.error_data?.details ?? json?.error?.message ?? res.statusText;
+    const erro = json?.error;
+    const partes = [
+      erro?.message,
+      erro?.error_data?.details,
+      erro?.error_user_title,
+      erro?.error_user_msg,
+    ].filter((p): p is string => Boolean(p && p.trim()));
+    // Dedup preserva ordem — os campos da Meta às vezes repetem o mesmo texto.
+    const detalhe = Array.from(new Set(partes)).join(" — ") || res.statusText;
     throw new Error(`meta_template_failed: ${res.status} ${detalhe}`.trim());
   }
   return json as T;
