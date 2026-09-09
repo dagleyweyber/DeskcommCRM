@@ -23,6 +23,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { logger } from "@/lib/logger";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { phoneLookupVariants } from "../phone-variants";
@@ -77,6 +78,35 @@ async function findContactByVariants(
     .limit(1)
     .maybeSingle();
   return data ?? null;
+}
+
+/**
+ * Acorda `media-persist-worker.ts` — sem isto a mensagem tem `media_url`
+ * gravado e ninguém nunca chama o worker pra usá-lo. Mesmo evento, mesmo
+ * payload de `lib/channels/zernio/ingest.ts` (`pedirPersistenciaDaMidia`) e
+ * `lib/waha/ingest.ts`: o consumidor é um só, e payload diferente por canal
+ * faria ele adivinhar de quem veio.
+ */
+async function pedirPersistenciaDaMidia(
+  admin: Admin,
+  organizationId: string,
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  const { error } = await admin.rpc("emit_event" as never, {
+    p_event_type: "media.persist_requested",
+    p_entity_kind: "message",
+    p_entity_id: messageId,
+    p_payload: { message_id: messageId, conversation_id: conversationId },
+    p_metadata: { source: "meta_cloud_webhook" },
+    p_organization_id: organizationId,
+  } as never);
+  if (error) {
+    logger.warn("[meta.ingest] emit media.persist_requested falhou", {
+      message_id: messageId,
+      detail: error.message,
+    });
+  }
 }
 
 /** Prévia curta para a lista de conversas. Mídia vira rótulo, nunca URL. */
@@ -143,6 +173,16 @@ export async function ingestMetaInbound(
       type: e.type === "text" ? "text" : e.type,
       body: e.text,
       external_id: e.externalId,
+      // O worker de persistência (`workers/media-persist-worker.ts`) pula
+      // TODA mensagem sem `media_url` — e a Meta nunca manda uma URL no
+      // webhook, só este `id`. Sem gravá-lo aqui, mídia recebida pelo canal
+      // oficial virava linha "recebida" pra sempre sem um byte salvo:
+      // achado ao vivo (RevitaFio Mossoró), áudio/imagem/documento chegando
+      // e nunca aparecendo no inbox. `meta-cloud.ts`'s `fetchInboundMedia`
+      // é quem sabe que, PRA ESTE canal, `url` é na verdade um `media_id` —
+      // resolve pra URL de verdade só na hora de baixar (dois passos, a
+      // Cloud API não devolve link pronto).
+      media_url: e.media?.id ?? null,
       media_mime: e.media?.mime ?? null,
       sent_at: e.sentAt.toISOString(),
       metadata: e.media ? { meta_media_id: e.media.id, voice: e.media.voice } : {},
@@ -168,6 +208,10 @@ export async function ingestMetaInbound(
   } as never);
 
   const messageId = (inserida as { id: string } | null)?.id ?? "";
+
+  if (messageId && e.media) {
+    await pedirPersistenciaDaMidia(admin, orgId, conversationId as string, messageId);
+  }
 
   // Os TRÊS efeitos de negócio (opt-out, nascimento do lead, despacho do
   // agente) — mesmo passo que o canal por QR e o canal intermediado já

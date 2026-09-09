@@ -20,6 +20,9 @@
  *    o outro canal converte por nós, este não.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
+import { assertDestinoResolvidoSeguro } from "@/lib/automation/outbound-ip";
+import { assertSafeOutboundUrl } from "@/lib/automation/outbound-url";
+import type { FetchedMedia } from "@/lib/messaging/media/types";
 import { resolveMetaCreds } from "../meta/credentials";
 import { metaTemplateOps } from "../meta/template-ops";
 import type { ChannelAdapter, ChannelHealth, OutboundEnvelope, RecipientInput } from "../types";
@@ -146,6 +149,76 @@ export const metaCloudAdapter: ChannelAdapter = {
     notConfigured: "meta_not_configured",
     sendFailed: "meta_error",
     unknownError: "meta_unknown",
+  },
+
+  /**
+   * Baixa a mídia de uma mensagem RECEBIDA — a metade que faltava desde que
+   * o canal oficial existe.
+   *
+   * Achado ao vivo (RevitaFio Mossoró): áudio, imagem e documento chegavam e
+   * viravam linha em `messages` (a mensagem existe, aparece na lista), mas
+   * `media_persist-worker.ts` pula toda mensagem sem `media_url` — e a Meta
+   * NUNCA manda uma URL de mídia no corpo do webhook, só um `id` (diferente
+   * do canal intermediado, que já vem com link pronto). Sem este método, o
+   * worker nem tenta: `423 persistências no canal por QR, ZERO no
+   * intermediado` já documentava o outro buraco; este canal nunca apareceu
+   * nessa conta porque nunca teve o método pra contar.
+   *
+   * A Cloud API baixa mídia em DOIS passos, não um: o `id` primeiro resolve
+   * pra uma URL assinada e temporária (`GET /{media-id}`), só então essa URL
+   * é buscada — e o MESMO Bearer token vai nas duas chamadas (a segunda
+   * exige, mesmo sendo o CDN da Meta). Por isso `url` aqui carrega o
+   * `media_id` que `ingest.ts` grava em `messages.media_url` — não é URL
+   * nenhuma até o primeiro passo terminar. `fetchInboundMedia` é o contrato
+   * genérico (ver o comentário do tipo: "cada canal sabe o que fazer com
+   * ela"); este é o que este canal faz.
+   */
+  async fetchInboundMedia(input: {
+    sessionRef: string;
+    url: string;
+    hintMime?: string | null;
+  }): Promise<FetchedMedia> {
+    const creds = await resolveMetaCreds(createAdminClient(), input.sessionRef);
+    if (!creds) throw new Error("meta_not_configured: sem credencial para baixar a mídia.");
+
+    const mediaId = input.url;
+    const lookupRes = await fetch(`https://graph.facebook.com/${creds.graphVersion}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${creds.token}` },
+    });
+    const lookupBody = (await lookupRes.json().catch(() => ({}))) as {
+      url?: string;
+      mime_type?: string;
+      error?: { message?: string };
+    };
+    if (!lookupRes.ok || !lookupBody.url) {
+      // 400/404 aqui é normal pra mídia velha: a Meta descarta o `id` depois
+      // de um tempo (não documentado, medido em horas). Falha permanente do
+      // worker cobre esse caso — não tem retry que resolva mídia que sumiu.
+      throw new Error(
+        `meta_media_lookup_failed: ${lookupBody.error?.message ?? `http_${lookupRes.status}`}`,
+      );
+    }
+
+    // A URL devolvida é da própria Meta (CDN assinado), não do payload do
+    // webhook — bem mais confiável que o link cru do canal intermediado. Mas
+    // o mesmo par de guardas roda aqui, pela mesma razão que já vale lá:
+    // defesa em profundidade não deveria depender de qual provider está do
+    // outro lado.
+    assertSafeOutboundUrl(lookupBody.url);
+    await assertDestinoResolvidoSeguro(new URL(lookupBody.url).hostname);
+
+    const res = await fetch(lookupBody.url, { headers: { Authorization: `Bearer ${creds.token}` } });
+    if (!res.ok) {
+      throw new Error(`meta_media_download_failed: ${res.status} ${res.statusText}`.trim());
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const mime =
+      res.headers.get("content-type")?.split(";")[0]?.trim() ||
+      lookupBody.mime_type ||
+      input.hintMime ||
+      "application/octet-stream";
+    return { buffer, mime };
   },
 
   /** Criar/editar/apagar definição direto na WABA — ver `../meta/template-ops.ts`. */

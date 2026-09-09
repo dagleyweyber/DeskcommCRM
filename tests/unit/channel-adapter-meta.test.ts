@@ -200,3 +200,88 @@ describe("credencial por sessão — o que destrava multi-tenant", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
 });
+
+/**
+ * BAIXAR MÍDIA RECEBIDA — a metade que faltava desde que o canal existe.
+ *
+ * Achado ao vivo (RevitaFio Mossoró): áudio/imagem/documento chegavam,
+ * viravam linha em `messages`, e nunca ganhavam bytes — o adapter não tinha
+ * `fetchInboundMedia`. Diferente do canal intermediado (URL pronta no
+ * payload), a Cloud API só manda um `id`: é preciso resolver esse `id` pra
+ * uma URL assinada (`GET /{media-id}`) ANTES de buscar os bytes — dois
+ * fetches, não um, e o MESMO Bearer nos dois (a segunda chamada também
+ * exige, mesmo batendo no CDN da Meta).
+ */
+describe("adapter meta_cloud — baixar mídia recebida (dois passos)", () => {
+  it("resolve o media_id pra URL, depois baixa os bytes — Bearer nas duas chamadas", async () => {
+    configurar();
+    const chamadas: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        chamadas.push(url);
+        expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+        if (url.includes("graph.facebook.com")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ url: "https://scontent.xx.fbcdn.net/media/abc123", mime_type: "audio/ogg" }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "audio/ogg" }),
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        };
+      }),
+    );
+
+    const r = await a().fetchInboundMedia!({ sessionRef: "1103328999528818", url: "meta-media-id-123" });
+
+    expect(chamadas[0]).toContain("/v22.0/meta-media-id-123");
+    expect(chamadas[1]).toBe("https://scontent.xx.fbcdn.net/media/abc123");
+    expect(r.mime).toBe("audio/ogg");
+    expect(Buffer.from(r.buffer)).toEqual(Buffer.from([1, 2, 3]));
+  });
+
+  it("id vencido/inválido: o lookup falha e NUNCA chega a tentar baixar", async () => {
+    // A Meta descarta o media_id depois de um tempo — 400/404 aqui é normal
+    // pra mídia velha, não uma falha de rede pra tentar de novo.
+    configurar();
+    const spy = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: { message: "Unsupported get request." } }),
+    }));
+    vi.stubGlobal("fetch", spy);
+
+    await expect(
+      a().fetchInboundMedia!({ sessionRef: "1103328999528818", url: "id-expirado" }),
+    ).rejects.toThrow(/meta_media_lookup_failed/);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("URL de download maliciosa (SSRF) é recusada ANTES de sair a credencial", async () => {
+    // A URL do 2º passo vem da RESPOSTA da Meta, não do payload do webhook —
+    // mais confiável que o canal intermediado, mas a defesa em profundidade
+    // não deveria depender de qual provider está do outro lado.
+    configurar();
+    const spy = vi.fn(async (url: string) => {
+      if (url.includes("graph.facebook.com")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ url: "http://169.254.169.254/latest/meta-data/", mime_type: "audio/ogg" }),
+        };
+      }
+      throw new Error("não deveria chegar aqui");
+    });
+    vi.stubGlobal("fetch", spy);
+
+    await expect(
+      a().fetchInboundMedia!({ sessionRef: "1103328999528818", url: "meta-media-id-123" }),
+    ).rejects.toThrow();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
