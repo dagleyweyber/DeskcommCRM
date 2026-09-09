@@ -24,6 +24,7 @@ import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { syncTemplates } from "@/lib/channels/meta/template-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -236,8 +237,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     // A falha da Graph API vira mensagem legível na tela, não 500 mudo — o
     // operador precisa saber se é token vencido, WABA errada, nome inválido
-    // ou rede.
-    return fail("internal_error", err instanceof Error ? err.message : "sync_failed", 502, {
+    // ou rede. Loga também: achado ao vivo que esta rota devolvia o motivo
+    // pro CLIENTE mas não escrevia nada no servidor — sem o navegador aberto
+    // na hora, o motivo real não tinha como ser investigado depois.
+    const mensagem = err instanceof Error ? err.message : "sync_failed";
+    logger.error("channels/templates: criar/sincronizar falhou", {
+      organization_id: r.orgId,
+      acao: corpo.acao ?? "sync",
+      request_id: requestId,
+      error: mensagem,
+    });
+    return fail("internal_error", mensagem, 502, {
       requestId,
     });
   }

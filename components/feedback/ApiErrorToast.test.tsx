@@ -82,4 +82,32 @@ describe("ApiErrorToast", () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith("Erro inesperado. Tente novamente.");
   });
+
+  describe("internal_error — mensagem do SERVIDOR vale mais que o texto fixo", () => {
+    it("⭐ mostra a mensagem real do erro (ex.: motivo da Graph API), não o texto genérico", () => {
+      // Achado ao vivo: criar template de canal oficial falhava e a tela
+      // sempre mostrava "Erro interno. Tente de novo em instantes." — sem
+      // nenhuma pista do que a Meta realmente recusou. A rota já mandava o
+      // motivo certo (`err.message`); só a tela jogava fora.
+      showApiError(
+        new ApiError(502, "internal_error", undefined, "req-4", "meta_400: nome já existe"),
+      );
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith(
+        "meta_400: nome já existe",
+        expect.objectContaining({ description: "ID: req-4" }),
+      );
+    });
+
+    it("sem mensagem real (fail() chamado sem detalhe), cai pro texto fixo — nunca mostra o código cru", () => {
+      // ApiError sem `message` usa o próprio `code` como Error.message —
+      // sem esta guarda, o usuário leria "internal_error" na tela.
+      showApiError(new ApiError(500, "internal_error", undefined, "req-5"));
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith(
+        "Erro interno. Tente de novo em instantes.",
+        expect.objectContaining({ description: "ID: req-5" }),
+      );
+    });
+  });
 });

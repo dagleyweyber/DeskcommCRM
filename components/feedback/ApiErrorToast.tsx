@@ -56,6 +56,13 @@ const COPY: Record<string, { variant: Variant; msg: string }> = {
   },
   internal_error: {
     variant: "error",
+    // Fallback só — `internal_error` é o balde genérico de VÁRIAS rotas
+    // diferentes, cada uma escrevendo a própria mensagem específica (ex.:
+    // "token vencido", o erro cru da Graph API). Sobrescrever por um texto
+    // fixo aqui jogaria fora exatamente o que o operador precisa ler —
+    // achado ao vivo: o erro real da Meta virava "tente de novo" na tela,
+    // e nem o servidor logava, então o motivo verdadeiro ficava invisível
+    // dos dois lados.
     msg: "Erro interno. Tente de novo em instantes.",
   },
 };
@@ -71,7 +78,16 @@ export function showApiError(err: unknown): void {
           : entry.variant === "info"
             ? toast.info
             : toast.error;
-      fn(entry.msg, { description });
+      // `internal_error` é o único código genérico o bastante pra a mensagem
+      // do SERVIDOR valer mais que o texto fixo — os outros códigos (sessão
+      // expirada, sem permissão etc.) já são específicos por natureza, e o
+      // texto fixo deles é a rejeição INTENCIONAL do jargão técnico do server.
+      // `err.message === err.code` é o caso de `fail()` sem `message` real
+      // (o construtor do ApiError cai pro código como texto) — aí o fixo
+      // ainda vale, senão a tela mostraria o código cru "internal_error".
+      const temMensagemReal = err.message && err.message !== err.code;
+      const texto = err.code === "internal_error" && temMensagemReal ? err.message : entry.msg;
+      fn(texto, { description });
       return;
     }
     toast.error(err.message || err.code, { description });
