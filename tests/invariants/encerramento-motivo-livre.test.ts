@@ -33,6 +33,7 @@ const STAGE_ABERTO = "e1c1e1c1-5555-4000-8000-000000000002";
 const STAGE_PERDIDO = "e1c1e1c1-5555-4000-8000-000000000003";
 const PIPELINE_COM_EXTRA = "e1c1e1c1-5555-4000-8000-000000000004";
 const STAGE_PERDIDO_EXTRA = "e1c1e1c1-5555-4000-8000-000000000005";
+const STAGE_ABERTO_EXTRA = "e1c1e1c1-5555-4000-8000-000000000006";
 
 async function novoLead(id: string, pipelineId: string, stageId: string, contactId: string): Promise<void> {
   await pool.query(
@@ -59,9 +60,18 @@ beforeAll(async () => {
     `insert into crm_stages (id, organization_id, pipeline_id, name, slug, position, is_lost) values
        ($1, $2, $3, 'Aberto', 'aberto', 1000, false),
        ($4, $2, $3, 'Perdido', 'perdido', 2000, true),
-       ($5, $2, $6, 'Perdido', 'perdido', 1000, true)
+       ($5, $2, $6, 'Aberto', 'aberto', 1000, false),
+       ($7, $2, $6, 'Perdido', 'perdido', 2000, true)
      on conflict (id) do nothing`,
-    [STAGE_ABERTO, ORG, PIPELINE, STAGE_PERDIDO, STAGE_PERDIDO_EXTRA, PIPELINE_COM_EXTRA],
+    [
+      STAGE_ABERTO,
+      ORG,
+      PIPELINE,
+      STAGE_PERDIDO,
+      STAGE_ABERTO_EXTRA,
+      PIPELINE_COM_EXTRA,
+      STAGE_PERDIDO_EXTRA,
+    ],
   );
   // Pipeline com uma extensão CURADA — este texto exato deve ser aceito como está.
   await pool.query(
@@ -122,9 +132,7 @@ describe("encerraDemanda — motivo livre em 'Outros' não trava mais o encerram
 
   it("extensão curada do pipeline (settings.lost_reasons) é aceita como está, sem cair pra 'other'", async () => {
     const leadId = "e1c1e1c1-7777-4000-8000-000000000003";
-    await novoLead(leadId, PIPELINE_COM_EXTRA, STAGE_PERDIDO_EXTRA, CONTACT);
-    // O stage de perda deste pipeline já É o 'perdido' — muda de stage_id mesmo
-    // assim (o mesmo), só provando que o motivo passa direto.
+    await novoLead(leadId, PIPELINE_COM_EXTRA, STAGE_ABERTO_EXTRA, CONTACT);
 
     const { lead } = await encerraDemanda(db, ctx, {
       leadId,
