@@ -202,7 +202,9 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           phone_number: phoneE164 ?? undefined,
           source: values.source,
         });
-        patch.contact_id = res.data.id;
+        // `data` é `{ contact, action }` — ver o comentário em
+        // `useCreateContact.ts`. `res.data.id` sempre foi `undefined` aqui.
+        patch.contact_id = res.data.contact.id;
       } catch {
         // erro já mostrado pelo toast do hook; segue sem vincular contato
       }

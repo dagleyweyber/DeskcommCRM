@@ -126,7 +126,10 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
           phone_number: phoneE164 ?? undefined,
           source: values.source,
         });
-        resolvedContactId = res.data.id;
+        // `data` é `{ contact, action }`, não o Contact direto — ver o
+        // comentário em `useCreateContact.ts`. `res.data.id` sempre foi
+        // `undefined` aqui, e o lead nascia sem telefone vinculado.
+        resolvedContactId = res.data.contact.id;
       } catch {
         // erro já mostrado pelo toast do hook; aborta sem criar lead órfão de intenção
         return;
