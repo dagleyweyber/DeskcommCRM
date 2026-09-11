@@ -115,6 +115,24 @@ describe("os elos que somem sem barulho", () => {
   });
 });
 
+describe("recusa da plataforma não pode virar página de infra muda", () => {
+  // Mesmo achado do canal oficial (RevitaFio Mossoró): a rota devolvia 502
+  // pra QUALQUER falha, inclusive a plataforma recusando um nome inválido.
+  // O proxy da hospedagem intercepta 502/503/504 e troca o corpo pela
+  // PRÓPRIA página de erro, engolindo a mensagem real que
+  // `zernio/templates.ts` extraiu com cuidado. A plataforma RESPONDEU —
+  // isso é 422, não falha de gateway.
+  it("usa o classificador neutro do seam, não um prefixo de provider hardcoded", () => {
+    const fonte = readFileSync("app/api/v1/channels/partner/templates/route.ts", "utf8");
+    expect(fonte).toMatch(/ehRecusaDaPlataforma\(msg\)/);
+    expect(fonte).toMatch(/"unprocessable_entity"/);
+    expect(fonte, "502 some sob proxy — não pode voltar aqui").not.toMatch(/,\s*502\s*,/);
+    expect(fonte, "nome de provider fora do seam — lint:channels reprovaria").not.toMatch(
+      /"zernio_template_failed"/,
+    );
+  });
+});
+
 describe("o conteúdo da definição, e o campo que causava as recusas", () => {
   it("lê corpo, cabeçalho, rodapé e botões do payload cru", () => {
     const c = lerConteudo([

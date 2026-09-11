@@ -55,6 +55,27 @@ describe("criar TAMBÉM sincroniza — senão o operador cria a mesma duas vezes
   });
 });
 
+describe("recusa da Meta não pode virar página de infra muda", () => {
+  // Achado ao vivo (RevitaFio Mossoró): a rota devolvia 502 pra QUALQUER
+  // falha, inclusive a Meta recusando um nome de template inválido. O proxy
+  // da hospedagem intercepta 502/503/504 — são o sinal de "gateway não
+  // alcançou o serviço" — e troca o corpo pela PRÓPRIA página de erro
+  // ("Not Found" / "Service is not reachable"), engolindo a mensagem real
+  // que `template-ops.ts` extraiu da Graph API. A Meta RESPONDEU; isso é
+  // 422, não falha de gateway.
+  it("recusa da plataforma vira 422, não 5xx", () => {
+    const fonte = readFileSync("app/api/v1/channels/templates/route.ts", "utf8");
+    expect(fonte).toMatch(/ehRecusaDaPlataforma\(mensagem\)/);
+    expect(fonte).toMatch(/"unprocessable_entity"/);
+    expect(fonte, "502 some sob proxy — não pode voltar aqui").not.toMatch(/,\s*502\s*,/);
+  });
+
+  it("falha sem resposta da Meta ainda usa um código de upstream (503), nunca 502", () => {
+    const fonte = readFileSync("app/api/v1/channels/templates/route.ts", "utf8");
+    expect(fonte).toMatch(/"upstream_unavailable"/);
+  });
+});
+
 describe("os elos que somem sem barulho", () => {
   it("a aba oferece 'Criar modelo', não só o espelho", () => {
     const fonte = readFileSync("components/connections/TemplatesClient.tsx", "utf8");

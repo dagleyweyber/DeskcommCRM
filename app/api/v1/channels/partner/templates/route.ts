@@ -38,6 +38,7 @@ import {
   type ChannelSessionRef,
 } from "@/lib/channels";
 import { findPartnerSession } from "@/lib/channels/connect";
+import { ehRecusaDaPlataforma } from "@/lib/channels/template-error";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -224,6 +225,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     logger.error("[partner/templates] falhou", { detail: msg, requestId });
     // A mensagem do provider CHEGA ao operador: é ela que distingue "nome
     // inválido" de "conta sem permissão", e sem ela a tela diz só "falhou".
-    return fail("upstream_error", msg, 502, { requestId });
+    // Mesmo achado do canal oficial (`channels/templates/route.ts`): 502
+    // some sob o proxy da hospedagem (ele intercepta 502/503/504 — "gateway
+    // não alcançou o serviço" — e troca o corpo pela própria página de erro).
+    // O provider RESPONDEU e recusou o conteúdo; isso é 422, não gateway.
+    const recusadaPeloProvider = ehRecusaDaPlataforma(msg);
+    return fail(
+      recusadaPeloProvider ? "unprocessable_entity" : "upstream_unavailable",
+      msg,
+      recusadaPeloProvider ? 422 : 503,
+      { requestId },
+    );
   }
 }

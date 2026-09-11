@@ -23,6 +23,7 @@ import { metaSessionForOrg } from "@/lib/channels/meta/session";
 import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { syncTemplates } from "@/lib/channels/meta/template-sync";
+import { ehRecusaDaPlataforma } from "@/lib/channels/template-error";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 
@@ -247,8 +248,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       request_id: requestId,
       error: mensagem,
     });
-    return fail("internal_error", mensagem, 502, {
-      requestId,
-    });
+    // Achado ao vivo (RevitaFio Mossoró): esta rota devolvia 502 pra QUALQUER
+    // falha — inclusive a Meta respondendo "nome inválido". O proxy da
+    // hospedagem intercepta 502/503/504 (são o sinal de "o gateway não
+    // alcançou o serviço") e troca o corpo pela PRÓPRIA página de erro,
+    // engolindo o JSON com o motivo real — o operador via uma página HTML
+    // genérica ("Not Found" / "Service is not reachable") em vez da frase
+    // que `template-ops.ts` extraiu com tanto cuidado. A Meta RESPONDEU e
+    // recusou o conteúdo — isso é 422 (cliente pode corrigir e reenviar),
+    // não uma falha de gateway. 503 (`upstream_unavailable`, mesmo código já
+    // usado em `admin/users/route.ts`) fica só pro caso em que a chamada à
+    // Graph API nem voltou.
+    const recusadaPelaMeta = ehRecusaDaPlataforma(mensagem);
+    return fail(
+      recusadaPelaMeta ? "unprocessable_entity" : "upstream_unavailable",
+      mensagem,
+      recusadaPelaMeta ? 422 : 503,
+      { requestId },
+    );
   }
 }
