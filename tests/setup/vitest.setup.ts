@@ -69,12 +69,20 @@ if (typeof globalThis.ResizeObserver === "undefined") {
  * DENTRO de um `Dialog`, primeira vez que essa combinação aparece nos testes
  * deste repo).
  */
-if (typeof Element.prototype.hasPointerCapture === "undefined") {
-  Element.prototype.hasPointerCapture = () => false;
-}
-if (typeof Element.prototype.releasePointerCapture === "undefined") {
-  Element.prototype.releasePointerCapture = () => {};
-}
-if (typeof Element.prototype.scrollIntoView === "undefined") {
-  Element.prototype.scrollIntoView = () => {};
+// Este setup roda em TODO arquivo — inclusive os com `// @vitest-environment
+// node` (ex.: pdf-extractor.test.ts), onde `Element` nem existe. Sem o guard,
+// esses arquivos quebram na importação do setup, antes de rodar um teste
+// sequer — achado ao vivo: 2 arquivos de servidor foram de "passa" pra
+// "ReferenceError: Element is not defined" no mesmo commit que só devia
+// mexer com jsdom.
+if (typeof Element !== "undefined") {
+  if (typeof Element.prototype.hasPointerCapture === "undefined") {
+    Element.prototype.hasPointerCapture = () => false;
+  }
+  if (typeof Element.prototype.releasePointerCapture === "undefined") {
+    Element.prototype.releasePointerCapture = () => {};
+  }
+  if (typeof Element.prototype.scrollIntoView === "undefined") {
+    Element.prototype.scrollIntoView = () => {};
+  }
 }
