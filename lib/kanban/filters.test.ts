@@ -121,3 +121,43 @@ describe("applyFilters — dateRange", () => {
     expect(out.map((l) => l.id)).toEqual(["hoje-open"]);
   });
 });
+
+describe("filtersFromParams / filtersToParams — source", () => {
+  it("⭐ round-trip", () => {
+    const f = filtersFromParams(params({ source: "meta_ads" }));
+    expect(f.source).toBe("meta_ads");
+    expect(filtersToParams(f)).toContain("source=meta_ads");
+  });
+
+  it("sem source, filtersToParams não adiciona o param", () => {
+    expect(filtersToParams({ status: "all" })).not.toContain("source=");
+  });
+});
+
+describe("applyFilters — source", () => {
+  const NOW = new Date().toISOString();
+  const leads = [
+    lead({ id: "ads", created_at: NOW, source: "meta_ads" }),
+    lead({ id: "wa", created_at: NOW, source: "whatsapp" }),
+    lead({ id: "manual", created_at: NOW, source: "manual" }),
+  ];
+
+  it("⭐ filtra pelo valor cru de source — igualdade exata", () => {
+    const out = applyFilters(leads, { source: "meta_ads" });
+    expect(out.map((l) => l.id)).toEqual(["ads"]);
+  });
+
+  it("sem source, todas as origens passam (comportamento de hoje preservado)", () => {
+    expect(applyFilters(leads, {})).toHaveLength(3);
+  });
+
+  it("combina com status — as duas condições valem", () => {
+    const misto = [
+      lead({ id: "ads-open", created_at: NOW, source: "meta_ads", status: "open" }),
+      lead({ id: "ads-won", created_at: NOW, source: "meta_ads", status: "won" }),
+      lead({ id: "wa-open", created_at: NOW, source: "whatsapp", status: "open" }),
+    ];
+    const out = applyFilters(misto, { source: "meta_ads", status: "open" });
+    expect(out.map((l) => l.id)).toEqual(["ads-open"]);
+  });
+});

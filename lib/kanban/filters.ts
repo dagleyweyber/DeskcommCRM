@@ -21,6 +21,8 @@ export interface LeadFilters {
   owner?: string | "any" | "unassigned";
   status?: "all" | "open" | "won" | "lost";
   tag?: string;
+  /** Valor cru de `crm_leads.source` (vocabulário aberto) — ver `sourceLabel` em lead-form-shared.ts pro rótulo. */
+  source?: string;
   search?: string;
   valueCentsMin?: number | null;
   valueCentsMax?: number | null;
@@ -43,6 +45,7 @@ export function filtersFromParams(
   const owner = sp.get("owner");
   const status = sp.get("status");
   const tag = sp.get("tag");
+  const source = sp.get("source");
   const search = sp.get("q");
   const dateRange = sp.get("date");
   return {
@@ -52,6 +55,7 @@ export function filtersFromParams(
         ? status
         : "all",
     tag: tag ?? undefined,
+    source: source ?? undefined,
     search: search ?? undefined,
     overdueOnly: sp.get("overdue") === "1" || undefined,
     dateRange:
@@ -64,6 +68,7 @@ export function filtersToParams(f: LeadFilters): string {
   if (f.owner && f.owner !== "any") p.set("owner", f.owner);
   if (f.status && f.status !== "all") p.set("status", f.status);
   if (f.tag) p.set("tag", f.tag);
+  if (f.source) p.set("source", f.source);
   if (f.search?.trim()) p.set("q", f.search.trim());
   if (f.overdueOnly) p.set("overdue", "1");
   if (f.dateRange) p.set("date", f.dateRange);
@@ -100,6 +105,7 @@ export function applyFilters(leads: Lead[], f: LeadFilters): Lead[] {
     }
     if (f.status && f.status !== "all" && l.status !== f.status) return false;
     if (f.tag && !l.tags.includes(f.tag)) return false;
+    if (f.source && l.source !== f.source) return false;
     if (
       search &&
       !`${l.title} ${l.description ?? ""}`.toLowerCase().includes(search)

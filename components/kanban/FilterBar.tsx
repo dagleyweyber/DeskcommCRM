@@ -13,6 +13,7 @@ import {
 import { useUser } from "@/hooks/auth/AuthProvider";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
+import { sourceLabel } from "@/lib/leads/lead-form-shared";
 import type { Lead, OwnerKind } from "@/lib/types/leads";
 import { OwnerBadge } from "./OwnerBadge";
 import {
@@ -63,6 +64,15 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
     const set = new Set<string>();
     for (const l of leads) for (const t of l.tags) set.add(t);
     return Array.from(set).sort();
+  }, [leads]);
+
+  // Mesma lógica do tag: opções vêm de quem REALMENTE aparece neste board, não
+  // de uma lista fixa — `source` é vocabulário aberto (o sistema grava
+  // "whatsapp"/"automation" que nenhum seletor manual oferece).
+  const sourceOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of leads) if (l.source) set.add(l.source);
+    return Array.from(set).sort((a, b) => sourceLabel(a).localeCompare(sourceLabel(b), "pt-BR"));
   }, [leads]);
 
   const filteredAgentId = parseAgentOwnerFilter(filters.owner);
@@ -116,6 +126,8 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
     STATUS_OPTIONS.find((o) => o.value === (filters.status ?? "all"))?.label ?? "Todos";
 
   const tagLabel = filters.tag ?? "Tag: todas";
+
+  const sourceLabelText = filters.source ? sourceLabel(filters.source) : "Origem: todas";
 
   const dateRangeLabel =
     DATE_RANGE_OPTIONS.find((o) => o.value === filters.dateRange)?.label ?? "Todo período";
@@ -224,6 +236,25 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" disabled={sourceOptions.length === 0}>
+            {sourceLabelText}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onClick={() => onChange({ ...filters, source: undefined })}>
+            Todas
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {sourceOptions.map((s) => (
+            <DropdownMenuItem key={s} onClick={() => onChange({ ...filters, source: s })}>
+              {sourceLabel(s)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       <label
         className={cn(
           "flex cursor-pointer select-none items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm",
@@ -241,6 +272,7 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
       {(filters.search ||
         filters.owner ||
         filters.tag ||
+        filters.source ||
         filters.overdueOnly ||
         filters.dateRange ||
         (filters.status && filters.status !== "all")) && (

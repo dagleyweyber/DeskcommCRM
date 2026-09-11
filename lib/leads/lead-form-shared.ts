@@ -18,6 +18,25 @@ export const LEAD_SOURCES = [
 ] as const;
 
 /**
+ * Rótulo de exibição pra QUALQUER origem que apareça num lead — supraconjunto
+ * de `LEAD_SOURCES`: cobre também as que só o SISTEMA atribui, nunca
+ * oferecidas num seletor manual (`nascimento-do-lead.ts` grava "whatsapp"
+ * quando a demanda nasce sozinha de uma conversa; `create-or-move-lead.ts`
+ * grava "automation" quando é regra/IA). `source` é vocabulário aberto (`text`,
+ * não enum) — uma origem sem entrada aqui aparece com o valor cru, nunca
+ * quebra o filtro do Kanban.
+ */
+const SOURCE_LABELS: Record<string, string> = {
+  ...Object.fromEntries(LEAD_SOURCES.map((s) => [s.value, s.label])),
+  whatsapp: "WhatsApp",
+  automation: "Automação",
+};
+
+export function sourceLabel(value: string): string {
+  return SOURCE_LABELS[value] ?? value;
+}
+
+/**
  * Normaliza telefone BR pra E.164. Espelha `normalizePhoneBR` de
  * lib/webhooks/inbound.ts (não importado de lá de propósito: aquele arquivo
  * carrega dependências de servidor que não devem ir pro bundle do client).
