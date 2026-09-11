@@ -57,3 +57,24 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect() {}
   };
 }
+
+/**
+ * jsdom não implementa `hasPointerCapture`/`scrollIntoView` — Radix `Select`
+ * usa os dois no ciclo de abertura (posiciona o viewport, rola até o item
+ * selecionado). Sem eles o clique no trigger não lança erro (o botão em si é
+ * clicável), mas o `data-state` nunca vira `open`: o dropdown simplesmente
+ * não aparece, e todo teste que abre um `Select` pra escolher uma opção falha
+ * silenciosamente com "Unable to find role option" — sintoma de infra, não do
+ * componente sob teste. Achado ao vivo testando `LoseLeadDialog` (`Select`
+ * DENTRO de um `Dialog`, primeira vez que essa combinação aparece nos testes
+ * deste repo).
+ */
+if (typeof Element.prototype.hasPointerCapture === "undefined") {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (typeof Element.prototype.releasePointerCapture === "undefined") {
+  Element.prototype.releasePointerCapture = () => {};
+}
+if (typeof Element.prototype.scrollIntoView === "undefined") {
+  Element.prototype.scrollIntoView = () => {};
+}
