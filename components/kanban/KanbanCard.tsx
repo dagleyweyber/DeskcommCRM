@@ -19,6 +19,8 @@ interface KanbanCardProps {
   lead: Lead;
   index: number;
   pipelineId: string;
+  /** `settings.lost_reasons` do pipeline — atravessa até o menu de ações, como `pipelineId`. */
+  lostReasons?: string[];
   isSelected?: boolean;
   /**
    * Contador de pulsos deste card (evento REMOTO). Muda a cada evento novo — é
@@ -61,6 +63,7 @@ export function KanbanCard({
   lead,
   index,
   pipelineId,
+  lostReasons,
   isSelected,
   pulseCount = 0,
   onSelect,
@@ -164,7 +167,7 @@ export function KanbanCard({
                 </button>
               </h3>
             </div>
-            <KanbanCardActions lead={lead} pipelineId={pipelineId} />
+            <KanbanCardActions lead={lead} pipelineId={pipelineId} lostReasons={lostReasons} />
           </div>
 
           {/* ② valor — altura reservada mesmo sem valor, senão o card encolhe. */}

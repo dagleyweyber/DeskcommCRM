@@ -27,9 +27,11 @@ import type { Lead } from "@/lib/types/leads";
 interface KanbanCardActionsProps {
   lead: Lead;
   pipelineId: string;
+  /** `settings.lost_reasons` do pipeline — repassado pro `LoseLeadDialog`. */
+  lostReasons?: string[];
 }
 
-export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) {
+export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardActionsProps) {
   const [loseOpen, setLoseOpen] = useState(false);
   const [existingCustomerOpen, setExistingCustomerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -186,6 +188,7 @@ export function KanbanCardActions({ lead, pipelineId }: KanbanCardActionsProps) 
         onOpenChange={setLoseOpen}
         leadId={lead.id}
         pipelineId={pipelineId}
+        extraReasons={lostReasons}
       />
       <MarkExistingCustomerDialog
         open={existingCustomerOpen}

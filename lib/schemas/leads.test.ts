@@ -5,6 +5,7 @@ import {
   bulkLeadActionSchema,
   objectionSchema,
   formatLostReason,
+  motivosParaExibir,
   scheduleMeetingSchema,
   meetingOutcomeSchema,
 } from "./leads";
@@ -65,6 +66,37 @@ describe("formatLostReason", () => {
 
   it("texto livre (motivo extra do pipeline) passa direto — já é o rótulo", () => {
     expect(formatLostReason("Mudou de cidade")).toBe("Mudou de cidade");
+  });
+});
+
+describe("motivosParaExibir", () => {
+  // Achado ao vivo (B'Laser Caruaru): o diálogo "Marcar como perdido" só
+  // renderizava os 8 códigos canônicos — a extensão cadastrada em
+  // Configurações › Funis (settings.lost_reasons) nunca aparecia.
+  it("⭐ sem extensão, é a lista canônica com 'other' por último (comportamento de hoje preservado)", () => {
+    const out = motivosParaExibir([]);
+    expect(out[out.length - 1]).toBe("other");
+    expect(out).toContain("price");
+    expect(out).toHaveLength(8);
+  });
+
+  it("⭐ a extensão do pipeline entra ANTES de 'other', que continua sendo o catch-all no fim", () => {
+    const out = motivosParaExibir(["Não tem cartão", "Mora fora"]);
+    expect(out.slice(-3)).toEqual(["Não tem cartão", "Mora fora", "other"]);
+  });
+
+  it("duplicata contra um código canônico (mesmo texto) não aparece duas vezes", () => {
+    // Se alguém colar "price" na config, o canônico já cobre — repetir
+    // confundiria o operador com duas opções idênticas.
+    const out = motivosParaExibir(["price", "Não tem cartão"]);
+    expect(out.filter((r) => r === "price")).toHaveLength(1);
+  });
+
+  it("entrada vazia ou só espaço na extensão é descartada", () => {
+    const out = motivosParaExibir(["  ", "", "Preço alto"]);
+    expect(out).not.toContain("");
+    expect(out).not.toContain("  ");
+    expect(out).toContain("Preço alto");
   });
 });
 

@@ -12,13 +12,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useLoseLead } from "@/hooks/kanban/useUpdateLead";
-import { CANONICAL_LOST_REASONS, LOST_REASON_LABELS } from "@/lib/schemas/leads";
+import { formatLostReason, motivosParaExibir } from "@/lib/schemas/leads";
 
 interface LoseLeadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   leadId: string;
   pipelineId: string;
+  /** Extensão curada do pipeline (`settings.lost_reasons`) — ver `motivosParaExibir`. */
+  extraReasons?: string[];
 }
 
 const MAX_LEN = 500;
@@ -28,10 +30,12 @@ export function LoseLeadDialog({
   onOpenChange,
   leadId,
   pipelineId,
+  extraReasons,
 }: LoseLeadDialogProps) {
   const [reasonCode, setReasonCode] = useState<string>("");
   const [otherText, setOtherText] = useState("");
   const mutation = useLoseLead(pipelineId);
+  const motivos = motivosParaExibir(extraReasons ?? []);
 
   const finalReason = reasonCode === "other" ? otherText.trim() || "other" : reasonCode;
   const disabled = !reasonCode || finalReason.length === 0 || finalReason.length > MAX_LEN || mutation.isPending;
@@ -61,7 +65,7 @@ export function LoseLeadDialog({
         <div className="grid gap-3">
           <Label>Motivo</Label>
           <div className="grid grid-cols-1 gap-1.5">
-            {CANONICAL_LOST_REASONS.map((code) => (
+            {motivos.map((code) => (
               <label
                 key={code}
                 className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
@@ -73,7 +77,7 @@ export function LoseLeadDialog({
                   checked={reasonCode === code}
                   onChange={(e) => setReasonCode(e.target.value)}
                 />
-                <span>{LOST_REASON_LABELS[code]}</span>
+                <span>{formatLostReason(code)}</span>
               </label>
             ))}
           </div>

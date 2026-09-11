@@ -67,6 +67,36 @@ export function formatLostReason(raw: string): string {
 }
 
 /**
+ * A lista pra render do diálogo "Marcar como perdido": os 8 códigos
+ * canônicos (menos "other", que sempre fica por último como catch-all) +
+ * a extensão curada do pipeline (`crm_pipelines.settings.lost_reasons`) +
+ * "other" no fim.
+ *
+ * Achado ao vivo (B'Laser Caruaru): o operador cadastrava os motivos em
+ * Configurações › Funis e eles nunca apareciam no Kanban — o diálogo só
+ * renderizava `CANONICAL_LOST_REASONS`, sem saber que a extensão existia.
+ * O backend (`fn_validate_lost_reason_required`, `encerraDemanda`) já
+ * aceitava a extensão desde a correção do fallback "Outros"; só a TELA
+ * nunca foi ligada a ela.
+ *
+ * `extraReasons` já em PT-BR (é o que o operador digitou na config) — não
+ * passa por `formatLostReason`, que só traduz CÓDIGO canônico. Duplicata
+ * contra um código canônico é removida: a extensão não pode reintroduzir
+ * "other" nem colidir com um dos 7 códigos fixos sob outro rótulo.
+ */
+export function motivosParaExibir(extraReasons: string[]): string[] {
+  const canonicos = new Set<string>(CANONICAL_LOST_REASONS);
+  const extras = extraReasons
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0 && !canonicos.has(r));
+  return [
+    ...CANONICAL_LOST_REASONS.filter((c) => c !== "other"),
+    ...extras,
+    "other",
+  ];
+}
+
+/**
  * loseLeadSchema accepts canonical reasons OR any string (pipeline-extended).
  * The server-side DB trigger is the source of truth; we keep the Zod schema
  * permissive here to not block tenant-specific extensions.

@@ -112,6 +112,15 @@ export function KanbanBoard({
     return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
   }, [pipelineProp, queryResult.data?.pipeline]);
 
+  // Achado ao vivo (B'Laser Caruaru): o operador cadastra os motivos de
+  // perda em Configurações › Funis e eles nunca chegavam ao diálogo
+  // "Marcar como perdido" — só os 8 códigos canônicos apareciam. Mesmo
+  // padrão de leitura do `canonicalTags` acima.
+  const extraLostReasons = useMemo(() => {
+    const raw = (pipelineProp ?? queryResult.data?.pipeline)?.settings?.lost_reasons;
+    return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
+  }, [pipelineProp, queryResult.data?.pipeline]);
+
   // O dossiê é do BOARD e não da página: ele precisa do lead inteiro e do nome
   // do estágio, que só existem aqui depois do agrupamento.
   const [dossieId, setDossieId] = useState<string | null>(null);
@@ -265,6 +274,7 @@ export function KanbanBoard({
             reactivations={reactivations}
             pulses={pulsesProp ?? queryResult.pulses}
             canonicalTags={canonicalTags}
+            lostReasons={extraLostReasons}
             selectedLeadIds={selectedLeadIds}
             onSelect={handleSelect}
             onOpen={setDossieId}
@@ -288,6 +298,7 @@ export function KanbanBoard({
         onOpenChange={(v) => !v && setLoseDragLeadId(null)}
         leadId={loseDragLeadId ?? ""}
         pipelineId={pipelineId}
+        extraReasons={extraLostReasons}
       />
     </DragDropContext>
   );
