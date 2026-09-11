@@ -67,33 +67,34 @@ export function formatLostReason(raw: string): string {
 }
 
 /**
- * A lista pra render do diálogo "Marcar como perdido": os 8 códigos
- * canônicos (menos "other", que sempre fica por último como catch-all) +
- * a extensão curada do pipeline (`crm_pipelines.settings.lost_reasons`) +
- * "other" no fim.
+ * A lista pra render do diálogo "Marcar como perdido".
  *
- * Achado ao vivo (B'Laser Caruaru): o operador cadastrava os motivos em
- * Configurações › Funis e eles nunca apareciam no Kanban — o diálogo só
- * renderizava `CANONICAL_LOST_REASONS`, sem saber que a extensão existia.
- * O backend (`fn_validate_lost_reason_required`, `encerraDemanda`) já
- * aceitava a extensão desde a correção do fallback "Outros"; só a TELA
- * nunca foi ligada a ela.
+ * Achado ao vivo (B'Laser Caruaru), em duas partes:
+ *
+ * 1. O operador cadastrava os motivos em Configurações › Funis
+ *    (`crm_pipelines.settings.lost_reasons`) e eles nunca apareciam no
+ *    Kanban — o diálogo só renderizava `CANONICAL_LOST_REASONS`, sem saber
+ *    que a extensão existia. O backend (`fn_validate_lost_reason_required`,
+ *    `encerraDemanda`) já aceitava a extensão desde a correção do fallback
+ *    "Outros"; só a TELA nunca foi ligada a ela.
+ * 2. Depois de ligar as duas listas, o pipeline QUE JÁ CURA os próprios
+ *    motivos passou a ver as duas juntas — 7 canônicos que ele não escolheu
+ *    mais os dele, poluído, e com "Preço" (canônico) duplicado ao lado do
+ *    "Preço" que ele mesmo digitou. Curou a lista pra ISTO ser a lista, não
+ *    um adendo. Pipeline sem curadoria continua vendo só os 8 canônicos —
+ *    comportamento de sempre, ninguém perde nada.
  *
  * `extraReasons` já em PT-BR (é o que o operador digitou na config) — não
- * passa por `formatLostReason`, que só traduz CÓDIGO canônico. Duplicata
- * contra um código canônico é removida: a extensão não pode reintroduzir
- * "other" nem colidir com um dos 7 códigos fixos sob outro rótulo.
+ * passa por `formatLostReason`, que só traduz CÓDIGO canônico. Deduplicado
+ * contra si mesmo: o cadastro pode repetir um valor (foi o que aconteceu),
+ * e a lista exibida não pode.
  */
 export function motivosParaExibir(extraReasons: string[]): string[] {
-  const canonicos = new Set<string>(CANONICAL_LOST_REASONS);
-  const extras = extraReasons
-    .map((r) => r.trim())
-    .filter((r) => r.length > 0 && !canonicos.has(r));
-  return [
-    ...CANONICAL_LOST_REASONS.filter((c) => c !== "other"),
-    ...extras,
-    "other",
-  ];
+  const extras = Array.from(
+    new Set(extraReasons.map((r) => r.trim()).filter((r) => r.length > 0)),
+  );
+  if (extras.length > 0) return [...extras, "other"];
+  return [...CANONICAL_LOST_REASONS];
 }
 
 /**

@@ -70,9 +70,12 @@ describe("formatLostReason", () => {
 });
 
 describe("motivosParaExibir", () => {
-  // Achado ao vivo (B'Laser Caruaru): o diálogo "Marcar como perdido" só
-  // renderizava os 8 códigos canônicos — a extensão cadastrada em
-  // Configurações › Funis (settings.lost_reasons) nunca aparecia.
+  // Achado ao vivo (B'Laser Caruaru), em duas partes: (1) o diálogo só
+  // renderizava os 8 códigos canônicos — a extensão de
+  // Configurações › Funis (settings.lost_reasons) nunca aparecia; (2) depois
+  // de ligar as duas, um pipeline QUE JÁ CURA os próprios motivos passou a
+  // ver os 7 canônicos que não escolheu MAIS os dele, poluído — e com
+  // "Preço" duplicado porque o cadastro dele repetia o valor.
   it("⭐ sem extensão, é a lista canônica com 'other' por último (comportamento de hoje preservado)", () => {
     const out = motivosParaExibir([]);
     expect(out[out.length - 1]).toBe("other");
@@ -80,16 +83,17 @@ describe("motivosParaExibir", () => {
     expect(out).toHaveLength(8);
   });
 
-  it("⭐ a extensão do pipeline entra ANTES de 'other', que continua sendo o catch-all no fim", () => {
+  it("⭐ COM extensão, a lista é SÓ a extensão + 'other' — os 7 canônicos somem", () => {
+    // O pipeline curou a própria lista pra ISTO ser a lista, não um adendo.
     const out = motivosParaExibir(["Não tem cartão", "Mora fora"]);
-    expect(out.slice(-3)).toEqual(["Não tem cartão", "Mora fora", "other"]);
+    expect(out).toEqual(["Não tem cartão", "Mora fora", "other"]);
+    expect(out).not.toContain("price");
   });
 
-  it("duplicata contra um código canônico (mesmo texto) não aparece duas vezes", () => {
-    // Se alguém colar "price" na config, o canônico já cobre — repetir
-    // confundiria o operador com duas opções idênticas.
-    const out = motivosParaExibir(["price", "Não tem cartão"]);
-    expect(out.filter((r) => r === "price")).toHaveLength(1);
+  it("⭐ entrada repetida no cadastro (o caso real) não aparece duas vezes", () => {
+    const out = motivosParaExibir(["Preço", "Mora fora", "Preço"]);
+    expect(out.filter((r) => r === "Preço")).toHaveLength(1);
+    expect(out).toEqual(["Preço", "Mora fora", "other"]);
   });
 
   it("entrada vazia ou só espaço na extensão é descartada", () => {
@@ -97,6 +101,12 @@ describe("motivosParaExibir", () => {
     expect(out).not.toContain("");
     expect(out).not.toContain("  ");
     expect(out).toContain("Preço alto");
+  });
+
+  it("extensão só com entradas vazias equivale a NÃO ter extensão — cai pro canônico", () => {
+    const out = motivosParaExibir(["", "   "]);
+    expect(out).toContain("price");
+    expect(out).toHaveLength(8);
   });
 });
 

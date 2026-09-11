@@ -11,6 +11,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useLoseLead } from "@/hooks/kanban/useUpdateLead";
 import { formatLostReason, motivosParaExibir } from "@/lib/schemas/leads";
 
@@ -63,24 +70,19 @@ export function LoseLeadDialog({
         </DialogHeader>
 
         <div className="grid gap-3">
-          <Label>Motivo</Label>
-          <div className="grid grid-cols-1 gap-1.5">
-            {motivos.map((code) => (
-              <label
-                key={code}
-                className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent"
-              >
-                <input
-                  type="radio"
-                  name="lost-reason"
-                  value={code}
-                  checked={reasonCode === code}
-                  onChange={(e) => setReasonCode(e.target.value)}
-                />
-                <span>{formatLostReason(code)}</span>
-              </label>
-            ))}
-          </div>
+          <Label htmlFor="lost-reason">Motivo</Label>
+          <Select value={reasonCode} onValueChange={setReasonCode}>
+            <SelectTrigger id="lost-reason">
+              <SelectValue placeholder="Selecione o motivo" />
+            </SelectTrigger>
+            <SelectContent>
+              {motivos.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {formatLostReason(code)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {reasonCode === "other" && (
             <div className="grid gap-1.5">
               <Label htmlFor="lost-reason-other">Detalhe (opcional)</Label>
