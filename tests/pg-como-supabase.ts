@@ -122,6 +122,23 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
   }
 
   /**
+   * `>=` — nasceu porque a janela de reativação
+   * (`lib/leads/nascimento-do-lead.ts`) filtra `closed_at >= cortaEm` e o
+   * adaptador ESTOURAVA ao ser chamado. `montar()` já trata qualquer
+   * operador fora da lista especial (`is`/`in`/`@>`) genericamente — só
+   * faltava o método que empilha o filtro, mesmo padrão de `lt`/`gt` acima.
+   */
+  gte(coluna: string, valor: unknown): this {
+    this.filtros.push([">=", coluna, valor]);
+    return this;
+  }
+
+  lte(coluna: string, valor: unknown): this {
+    this.filtros.push(["<=", coluna, valor]);
+    return this;
+  }
+
+  /**
    * `IS NULL`/`IS TRUE`/`IS FALSE` — nasceu porque `queryTolerantToMissingArchived`
    * (lib/channels/archived.ts) usa `.is(ARCHIVED_AT, null)` e o adaptador
    * ESTOUROU ao ser chamado. `= NULL` não existe em SQL (sempre falso), por

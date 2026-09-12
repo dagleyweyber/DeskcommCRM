@@ -195,12 +195,19 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
     // Os DOIS desfechos viram log. Sem a linha do "não criou", o silêncio de
     // "já existia" e o de "a organização não tem funil configurado" têm a mesma
     // cara — e o segundo é falha de configuração que alguém precisa ver.
-    logger.info(nascimento.criado ? "pos-entrada: lead criado" : "pos-entrada: lead nao criado", {
-      organization_id: entrada.organizationId,
-      conversation_id: entrada.conversationId,
-      origem: entrada.origem,
-      ...(nascimento.criado ? { lead_id: nascimento.leadId } : { motivo: nascimento.motivo }),
-    });
+    logger.info(
+      nascimento.criado
+        ? nascimento.reaberto
+          ? "pos-entrada: lead reaberto (janela de reativação)"
+          : "pos-entrada: lead criado"
+        : "pos-entrada: lead nao criado",
+      {
+        organization_id: entrada.organizationId,
+        conversation_id: entrada.conversationId,
+        origem: entrada.origem,
+        ...(nascimento.criado ? { lead_id: nascimento.leadId } : { motivo: nascimento.motivo }),
+      },
+    );
   } catch (err) {
     logger.error("pos-entrada: nascimento do lead falhou (a mensagem entra assim mesmo)", {
       organization_id: entrada.organizationId,

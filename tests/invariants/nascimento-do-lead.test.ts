@@ -353,6 +353,294 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
   });
 });
 
+describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplicar", () => {
+  // Achado ao vivo (Ads Pro Company): "é comum um lead falar agora no
+  // WhatsApp, não dar continuidade, e 3-5 dias depois chamar de novo — e
+  // isso gera um lead novo, poluindo relatório". Decisão de produto
+  // (2026-09-12): 30 dias, regra fixa pra toda a plataforma.
+  it("perdido há 5 dias (dentro da janela): REABRE o mesmo lead, não cria outro", async () => {
+    const contato = await criarContato(ORG_VIVA, "Retomou Cardoso");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Retomou Cardoso",
+    };
+
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    await pool.query(
+      "update crm_leads set status = 'lost', lost_reason = 'price', closed_at = now() - interval '5 days' where id = $1",
+      [primeira.leadId],
+    );
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado, "reabre, não recusa").toBe(true);
+    if (!segunda.criado) return;
+    expect(segunda.leadId, "é o MESMO lead — não um segundo").toBe(primeira.leadId);
+    expect(segunda.reaberto).toBe(true);
+
+    const { rows } = await pool.query<{ n: string }>(
+      "select count(*) as n from crm_leads where contact_id = $1",
+      [contato],
+    );
+    expect(rows[0]!.n, "um contato, um card — mesmo depois de perdido e retomado").toBe("1");
+
+    const { rows: lead } = await pool.query<{
+      status: string;
+      closed_at: string | null;
+      lost_reason: string | null;
+      stage_is_lost: boolean;
+    }>(
+      `select l.status, l.closed_at, l.lost_reason, s.is_lost as stage_is_lost
+         from crm_leads l join crm_stages s on s.id = l.stage_id
+        where l.id = $1`,
+      [primeira.leadId],
+    );
+    expect(lead[0]!.status).toBe("open");
+    expect(lead[0]!.closed_at).toBeNull();
+    expect(lead[0]!.lost_reason).toBeNull();
+    expect(lead[0]!.stage_is_lost, "volta pra coluna de ENTRADA, não fica na de perdido").toBe(false);
+  });
+
+  it("⭐ volta pra ETAPA DE ENTRADA, não pra onde tinha parado antes de perder", async () => {
+    const contato = await criarContato(ORG_VIVA, "Progresso Teixeira");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Progresso Teixeira",
+    };
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    // Simula progresso no funil ANTES de perder: uma etapa aberta qualquer,
+    // diferente da de entrada.
+    const { rows: outraEtapa } = await pool.query<{ id: string }>(
+      `select id from crm_stages where pipeline_id = $1 and is_won = false and is_lost = false
+         and id <> $2 limit 1`,
+      [primeira.pipelineId, primeira.stageId],
+    );
+    if (outraEtapa[0]) {
+      await pool.query("update crm_leads set stage_id = $1 where id = $2", [
+        outraEtapa[0].id,
+        primeira.leadId,
+      ]);
+    }
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() - interval '2 days' where id = $1",
+      [primeira.leadId],
+    );
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado).toBe(true);
+    if (!segunda.criado) return;
+    expect(segunda.stageId, "reabre na entrada, não na etapa onde tinha avançado").toBe(
+      primeira.stageId,
+    );
+  });
+
+  it("⭐ perdido há 45 dias (FORA da janela de 30): nasce demanda nova de verdade, a antiga continua fechada", async () => {
+    const contato = await criarContato(ORG_VIVA, "Ciclo Novo Duarte");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Ciclo Novo Duarte",
+    };
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() - interval '45 days' where id = $1",
+      [primeira.leadId],
+    );
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado).toBe(true);
+    if (!segunda.criado) return;
+    expect(segunda.leadId, "fora da janela é ciclo de venda novo — outro id").not.toBe(primeira.leadId);
+    expect((segunda as { reaberto?: boolean }).reaberto).toBeFalsy();
+
+    const { rows } = await pool.query<{ n: string }>(
+      "select count(*) as n from crm_leads where contact_id = $1",
+      [contato],
+    );
+    expect(rows[0]!.n).toBe("2");
+
+    const { rows: antiga } = await pool.query<{ status: string }>(
+      "select status from crm_leads where id = $1",
+      [primeira.leadId],
+    );
+    expect(antiga[0]!.status, "a demanda antiga não muda por a pessoa ter voltado").toBe("lost");
+  });
+
+  it("cliente reconhecido (became_customer_at) NUNCA reabre sozinho — nem dentro da janela", async () => {
+    // Ordem que importa: um contato pode ter um lead PERDIDO antigo (uma
+    // consulta que não foi adiante) e DEPOIS ter comprado outra coisa
+    // (became_customer_at). O sinal de "já é cliente" vence — reabrir o
+    // lead perdido sozinho seria reviver uma negociação morta em vez de
+    // simplesmente reconhecer quem já é cliente.
+    const contato = await criarContato(ORG_VIVA, "Cliente Com Historico");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Cliente Com Historico",
+    };
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() - interval '5 days' where id = $1",
+      [primeira.leadId],
+    );
+    await pool.query("update contacts set became_customer_at = now() where id = $1", [contato]);
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado).toBe(false);
+    if (segunda.criado) return;
+    expect(segunda.motivo).toBe("cliente_existente");
+
+    const { rows } = await pool.query<{ n: string }>(
+      "select count(*) as n from crm_leads where contact_id = $1",
+      [contato],
+    );
+    expect(rows[0]!.n, "não reabriu, não criou — só o lead perdido original").toBe("1");
+  });
+
+  it("⭐ `created_at` do lead não muda ao reabrir — continua contando desde o primeiro contato", async () => {
+    const contato = await criarContato(ORG_VIVA, "Data Preservada Rocha");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Data Preservada Rocha",
+    };
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    const { rows: antes } = await pool.query<{ created_at: string }>(
+      "select created_at from crm_leads where id = $1",
+      [primeira.leadId],
+    );
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() - interval '3 days' where id = $1",
+      [primeira.leadId],
+    );
+
+    await garantirLeadDaConversa(db, dados);
+
+    const { rows: depois } = await pool.query<{ created_at: string }>(
+      "select created_at from crm_leads where id = $1",
+      [primeira.leadId],
+    );
+    expect(depois[0]!.created_at).toEqual(antes[0]!.created_at);
+  });
+
+  it("⭐ atividade e evento de reabertura ficam registrados, com o motivo da perda anterior", async () => {
+    const contato = await criarContato(ORG_VIVA, "Historico Nogueira");
+    const dados = {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Historico Nogueira",
+    };
+    const primeira = await garantirLeadDaConversa(db, dados);
+    expect(primeira.criado).toBe(true);
+    if (!primeira.criado) return;
+
+    await pool.query(
+      "update crm_leads set status = 'lost', lost_reason = 'no_response', closed_at = now() - interval '4 days' where id = $1",
+      [primeira.leadId],
+    );
+
+    const segunda = await garantirLeadDaConversa(db, dados);
+    expect(segunda.criado).toBe(true);
+    if (!segunda.criado) return;
+
+    const { rows: atividade } = await pool.query<{ type: string; reason: string }>(
+      `select type, reason from crm_lead_activities
+        where lead_id = $1 and type = 'lead_reactivated'`,
+      [primeira.leadId],
+    );
+    expect(atividade, "exatamente uma atividade de reabertura").toHaveLength(1);
+    expect(atividade[0]!.reason).toMatch(/Sem resposta do cliente/);
+
+    const { rows: evento } = await pool.query<{ event_type: string }>(
+      "select event_type from event_log where entity_id = $1 and event_type = 'lead.reactivated'",
+      [primeira.leadId],
+    );
+    expect(evento).toHaveLength(1);
+  });
+
+  it("clique de anúncio NOVO ao reabrir atualiza a atribuição — sem clique novo, preserva a antiga", async () => {
+    const semNovoClique = await criarContato(ORG_VIVA, "Sem Clique Novo Assis");
+    const dadosSemClique = {
+      organizationId: ORG_VIVA,
+      contactId: semNovoClique,
+      conversationId: CONVERSA,
+      nomeDoContato: "Sem Clique Novo Assis",
+      adReferral: { clickId: "clique-original", sourceId: "ad-original" },
+    };
+    const primeira1 = await garantirLeadDaConversa(db, dadosSemClique);
+    expect(primeira1.criado).toBe(true);
+    if (!primeira1.criado) return;
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() - interval '1 days' where id = $1",
+      [primeira1.leadId],
+    );
+    // Reabre SEM clique novo (mensagem de texto direta, não veio de anúncio).
+    await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: semNovoClique,
+      conversationId: CONVERSA,
+      nomeDoContato: "Sem Clique Novo Assis",
+    });
+    const { rows: preservado } = await pool.query<{ source_metadata: Record<string, unknown> }>(
+      "select source_metadata from crm_leads where id = $1",
+      [primeira1.leadId],
+    );
+    expect(preservado[0]!.source_metadata).toMatchObject({ ad_id: "ad-original" });
+
+    const comNovoClique = await criarContato(ORG_VIVA, "Clique Novo Barreto");
+    const dadosComClique = {
+      organizationId: ORG_VIVA,
+      contactId: comNovoClique,
+      conversationId: CONVERSA,
+      nomeDoContato: "Clique Novo Barreto",
+      adReferral: { clickId: "clique-manha", sourceId: "ad-manha" },
+    };
+    const primeira2 = await garantirLeadDaConversa(db, dadosComClique);
+    expect(primeira2.criado).toBe(true);
+    if (!primeira2.criado) return;
+    await pool.query(
+      "update crm_leads set status = 'lost', closed_at = now() where id = $1",
+      [primeira2.leadId],
+    );
+    // Reabre COM clique novo — mesmo dia, ad diferente (o caso real: manhã
+    // fechou, tarde clicou de novo).
+    await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: comNovoClique,
+      conversationId: CONVERSA,
+      nomeDoContato: "Clique Novo Barreto",
+      adReferral: { clickId: "clique-tarde", sourceId: "ad-tarde" },
+    });
+    const { rows: atualizado } = await pool.query<{ source_metadata: Record<string, unknown> }>(
+      "select source_metadata from crm_leads where id = $1",
+      [primeira2.leadId],
+    );
+    expect(atualizado[0]!.source_metadata).toMatchObject({ ad_id: "ad-tarde" });
+  });
+});
+
 describe("quando o lead NÃO nasce — e cada recusa diz por quê", () => {
   it("quem pediu para sair não vira oportunidade", async () => {
     const contato = await criarContato(ORG_VIVA, "Saiu Lima");

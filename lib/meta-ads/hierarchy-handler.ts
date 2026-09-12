@@ -90,7 +90,12 @@ export async function handleLeadCreatedForAdHierarchy(
 
 export const metaAdsHierarchyHandler: EventHandler = {
   key: META_ADS_HIERARCHY_CONSUMER_KEY,
-  events: ["lead.created"],
+  // `lead.reactivated`: a janela de reativação (nascimento-do-lead.ts) pode
+  // reabrir uma demanda com atribuição FRESCA (clique de anúncio novo) — sem
+  // este evento aqui, esse clique nunca teria a campanha/conjunto resolvidos,
+  // diferente de um lead genuinamente novo com o mesmo ad_id. O handler abaixo
+  // é agnóstico de qual evento disparou (relê `source_metadata` do banco).
+  events: ["lead.created", "lead.reactivated"],
   async handle(row) {
     return handleLeadCreatedForAdHierarchy(createAdminClient(), row);
   },
