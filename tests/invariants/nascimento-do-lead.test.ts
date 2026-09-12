@@ -353,12 +353,13 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
   });
 });
 
-describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplicar", () => {
+describe("⭐ reativação SEM PRAZO — reabre a MESMA demanda em vez de duplicar", () => {
   // Achado ao vivo (Ads Pro Company): "é comum um lead falar agora no
   // WhatsApp, não dar continuidade, e 3-5 dias depois chamar de novo — e
   // isso gera um lead novo, poluindo relatório". Decisão de produto
-  // (2026-09-12): 30 dias, regra fixa pra toda a plataforma.
-  it("perdido há 5 dias (dentro da janela): REABRE o mesmo lead, não cria outro", async () => {
+  // (2026-09-12, revista no mesmo dia): permanente, sem prazo — "nunca
+  // vamos criar lead novo, não vamos duplicar leads no CRM".
+  it("perdido há 5 dias: REABRE o mesmo lead, não cria outro", async () => {
     const contato = await criarContato(ORG_VIVA, "Retomou Cardoso");
     const dados = {
       organizationId: ORG_VIVA,
@@ -443,43 +444,41 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
     );
   });
 
-  it("⭐ perdido há 45 dias (FORA da janela de 30): nasce demanda nova de verdade, a antiga continua fechada", async () => {
-    const contato = await criarContato(ORG_VIVA, "Ciclo Novo Duarte");
+  it("⭐ perdido há 400 dias: REABRE do mesmo jeito — sem prazo, nunca nasce lead novo pra quem já teve um", async () => {
+    // Decisão revista no mesmo dia da primeira versão: a janela de 30 dias
+    // virou permanente por pedido explícito do dono do produto ("nunca
+    // vamos criar lead novo, não vamos duplicar leads no CRM"). Este caso
+    // prova que não sobrou nenhum corte de tempo escondido no código.
+    const contato = await criarContato(ORG_VIVA, "Retorno Tardio Farias");
     const dados = {
       organizationId: ORG_VIVA,
       contactId: contato,
       conversationId: CONVERSA,
-      nomeDoContato: "Ciclo Novo Duarte",
+      nomeDoContato: "Retorno Tardio Farias",
     };
     const primeira = await garantirLeadDaConversa(db, dados);
     expect(primeira.criado).toBe(true);
     if (!primeira.criado) return;
 
     await pool.query(
-      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '45 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '400 days' where id = $1",
       [primeira.leadId],
     );
 
     const segunda = await garantirLeadDaConversa(db, dados);
-    expect(segunda.criado).toBe(true);
+    expect(segunda.criado, "reabre, não recusa").toBe(true);
     if (!segunda.criado) return;
-    expect(segunda.leadId, "fora da janela é ciclo de venda novo — outro id").not.toBe(primeira.leadId);
-    expect((segunda as { reaberto?: boolean }).reaberto).toBeFalsy();
+    expect(segunda.leadId, "é o MESMO lead, mesmo depois de mais de um ano").toBe(primeira.leadId);
+    expect(segunda.reaberto).toBe(true);
 
     const { rows } = await pool.query<{ n: string }>(
       "select count(*) as n from crm_leads where contact_id = $1",
       [contato],
     );
-    expect(rows[0]!.n).toBe("2");
-
-    const { rows: antiga } = await pool.query<{ status: string }>(
-      "select status from crm_leads where id = $1",
-      [primeira.leadId],
-    );
-    expect(antiga[0]!.status, "a demanda antiga não muda por a pessoa ter voltado").toBe("lost");
+    expect(rows[0]!.n, "um contato, um card — não importa há quanto tempo perdeu").toBe("1");
   });
 
-  it("cliente reconhecido (became_customer_at) NUNCA reabre sozinho — nem dentro da janela", async () => {
+  it("cliente reconhecido (became_customer_at) NUNCA reabre sozinho — única exceção à regra permanente", async () => {
     // Ordem que importa: um contato pode ter um lead PERDIDO antigo (uma
     // consulta que não foi adiante) e DEPOIS ter comprado outra coisa
     // (became_customer_at). O sinal de "já é cliente" vence — reabrir o

@@ -49,23 +49,6 @@ import { formatLostReason } from "@/lib/schemas/leads";
 import { emitLeadActivity } from "./activity-emitter";
 
 /**
- * Janela de reativação (regra fixa da plataforma, decisão de produto de
- * 2026-09-12): reengajamento dentro deste prazo, depois de uma demanda
- * marcada perdida, REABRE a mesma demanda em vez de criar outra. Fora da
- * janela é ciclo de venda novo de verdade — mesma filosofia de sempre.
- *
- * Achado ao vivo (Ads Pro Company): "é comum um lead falar agora no
- * WhatsApp, não dar continuidade, e 3-5 dias depois chamar de novo — e isso
- * gera um lead novo", e o mesmo padrão para clique duplo de anúncio no
- * mesmo dia quando o lead da manhã já foi fechado antes do clique da
- * tarde. Um número FIXO pra toda a plataforma, não por pipeline — decisão
- * explícita: mais simples de entregar agora, e nada impede virar
- * `settings` por pipeline depois (mesmo padrão de `lost_reasons`) se algum
- * funil precisar de um número diferente.
- */
-export const JANELA_DE_REATIVACAO_DIAS = 30;
-
-/**
  * Por que um lead NÃO nasceu. Cada motivo é registrado — silêncio não distingue
  * "não devia nascer" de "falhou ao nascer", e a segunda é a que custa caro.
  */
@@ -83,7 +66,7 @@ export type NascimentoDoLead =
       leadId: string;
       pipelineId: string;
       stageId: string;
-      /** `true` quando é a MESMA demanda reaberta (janela de reativação) — ver `JANELA_DE_REATIVACAO_DIAS`. Ausente/`false` = card genuinamente novo, comportamento de sempre. */
+      /** `true` quando é a MESMA demanda reaberta (reativação sem prazo — ver `reabreLead`). Ausente/`false` = card genuinamente novo, comportamento de sempre. */
       reaberto?: boolean;
     }
   | { criado: false; motivo: MotivoSemLead; detalhe?: string };
@@ -152,12 +135,13 @@ export async function funilDeEntrada(
 }
 
 /**
- * Reabre uma demanda PERDIDA recentemente em vez de criar outra — o passo
- * 2.7 de `garantirLeadDaConversa`. Volta pra COLUNA DE ENTRADA do funil
- * (mesma `funilDeEntrada` de um lead genuinamente novo, e não a etapa onde
- * tinha parado antes de perder): decisão de produto deliberada — o
- * atendente triagem de novo do zero, porque a demanda esfriou o bastante
- * pra ter sido marcada perdida.
+ * Reabre a demanda PERDIDA mais recente em vez de criar outra — o passo
+ * 2.7 de `garantirLeadDaConversa`. Sem prazo: não importa se fechou ontem
+ * ou há um ano, é a MESMA demanda que volta, nunca uma nova. Volta pra
+ * COLUNA DE ENTRADA do funil (mesma `funilDeEntrada` de um lead
+ * genuinamente novo, e não a etapa onde tinha parado antes de perder):
+ * decisão de produto deliberada — o atendente triagem de novo do zero,
+ * porque a demanda esfriou o bastante pra ter sido marcada perdida.
  *
  * `created_at` do lead NUNCA é tocado — quem olhar "há quanto tempo este
  * contato está na base" continua vendo o primeiro contato de verdade, não
@@ -275,20 +259,22 @@ async function reabreLead(
  * Garante que a conversa tenha um lead. Idempotente por contato: chamar de novo
  * não cria um segundo card.
  *
- * **Um lead por DEMANDA, não por mensagem — com duas exceções deliberadas.**
+ * **Um lead por CONTATO, pra sempre — com uma exceção deliberada.**
  * Enquanto houver lead aberto para o contato, novas mensagens alimentam o que
- * já existe. Quando fecha `lost` e a pessoa volta a escrever DENTRO da
- * `JANELA_DE_REATIVACAO_DIAS`, a MESMA demanda reabre (passo 2.7) — regra
- * fixa da plataforma contra o card fantasma que poluía relatório ("lead fala
- * hoje, some, volta 3-5 dias depois, vira lead novo" — o mesmo padrão do
- * clique duplo de anúncio no mesmo dia, quando o primeiro já fechou antes do
- * segundo clique). Só FORA da janela nasce outro de verdade — aí é ciclo de
- * venda novo, ninguém comprou nada ainda.
+ * já existe. Quando fecha `lost` e a pessoa volta a escrever — não importa
+ * se é no mesmo dia ou anos depois — a MESMA demanda reabre (passo 2.7).
+ * Nunca nasce um lead novo pra quem já teve um. Regra fixa da plataforma
+ * (revista em 2026-09-12: a primeira versão tinha janela de 30 dias; virou
+ * permanente por pedido explícito — "nunca vamos criar lead novo, não
+ * vamos duplicar leads no CRM") contra o card fantasma que poluía
+ * relatório ("lead fala hoje, some, volta dias depois, vira lead novo" —
+ * o mesmo padrão do clique duplo de anúncio no mesmo dia, quando o
+ * primeiro já fechou antes do segundo clique).
  *
  * **Mas quando fecha porque a pessoa JÁ É CLIENTE** (`won`, ou reconhecida à
  * mão em `marcar-cliente-existente.ts` — o mesmo sinal, `contacts.
  * became_customer_at`), a próxima mensagem NÃO nasce card sozinha, e não
- * reabre nada — nem janela de reativação se aplica aqui. Ver o comentário no
+ * reabre nada — essa é a ÚNICA exceção à regra acima. Ver o comentário no
  * passo 2.5 abaixo para o porquê.
  */
 export async function garantirLeadDaConversa(
@@ -340,30 +326,27 @@ export async function garantirLeadDaConversa(
   // verdade — não precisa de tela nova.
   if (contato?.became_customer_at) return { criado: false, motivo: "cliente_existente" };
 
-  // 2.7 · demanda PERDIDA recentemente (dentro da janela de reativação)?
+  // 2.7 · já existiu demanda PERDIDA algum dia?
   //
-  // Reabre a MESMA demanda em vez de criar outra. Antes desta checagem, uma
-  // demanda que fechasse `lost` e a pessoa voltasse a escrever dias depois
-  // sempre virava card novo — "correto" pelo doutrina de "um lead por
-  // demanda de verdade", mas medido como o principal poluidor de relatório:
-  // o mesmo contato aparecendo como "lead novo" repetidas vezes por ter
-  // esfriado e retomado o MESMO assunto, não por ter uma demanda nova.
-  const cortaEm = new Date(
-    Date.now() - JANELA_DE_REATIVACAO_DIAS * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const { data: perdidoRecente } = await db
+  // Reabre a MAIS RECENTE em vez de criar outra — sem prazo, não importa
+  // quanto tempo passou. Antes desta checagem, uma demanda que fechasse
+  // `lost` e a pessoa voltasse a escrever sempre virava card novo —
+  // "correto" pela doutrina de "um lead por demanda de verdade", mas
+  // medido como o principal poluidor de relatório: o mesmo contato
+  // aparecendo como "lead novo" repetidas vezes por ter esfriado e
+  // retomado o MESMO assunto, não por ter uma demanda nova.
+  const { data: perdidoAnterior } = await db
     .from("crm_leads")
     .select("id, closed_at, lost_reason")
     .eq("organization_id", organizationId)
     .eq("contact_id", contactId)
     .eq("status", "lost")
-    .gte("closed_at", cortaEm)
     .order("closed_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (perdidoRecente) {
-    return reabreLead(db, dados, perdidoRecente as { id: string; closed_at: string; lost_reason: string | null });
+  if (perdidoAnterior) {
+    return reabreLead(db, dados, perdidoAnterior as { id: string; closed_at: string; lost_reason: string | null });
   }
 
   // 3 · onde entra

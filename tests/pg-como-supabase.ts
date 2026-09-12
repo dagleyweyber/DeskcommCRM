@@ -122,11 +122,12 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
   }
 
   /**
-   * `>=` — nasceu porque a janela de reativação
-   * (`lib/leads/nascimento-do-lead.ts`) filtra `closed_at >= cortaEm` e o
-   * adaptador ESTOURAVA ao ser chamado. `montar()` já trata qualquer
-   * operador fora da lista especial (`is`/`in`/`@>`) genericamente — só
-   * faltava o método que empilha o filtro, mesmo padrão de `lt`/`gt` acima.
+   * `>=`/`<=` — nasceram porque `lib/routing/queue.ts` já chama os dois
+   * contra o Supabase real (janela de horário da fila de atribuição) e o
+   * adaptador de teste ESTOURAVA ao ser chamado. `montar()` já trata
+   * qualquer operador fora da lista especial (`is`/`in`/`@>`)
+   * genericamente — só faltavam os métodos que empilham o filtro, mesmo
+   * padrão de `lt`/`gt` acima.
    */
   gte(coluna: string, valor: unknown): this {
     this.filtros.push([">=", coluna, valor]);

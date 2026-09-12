@@ -198,7 +198,7 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
     logger.info(
       nascimento.criado
         ? nascimento.reaberto
-          ? "pos-entrada: lead reaberto (janela de reativação)"
+          ? "pos-entrada: lead reaberto (reativação)"
           : "pos-entrada: lead criado"
         : "pos-entrada: lead nao criado",
       {

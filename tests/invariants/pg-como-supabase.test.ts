@@ -202,12 +202,12 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
     expect((data as Array<{ name: string }>).map((x) => x.name)).toEqual(["Alfa"]);
   });
 
-  it("⭐ `gte`/`lte` incluem a BORDA — diferença de `gt`/`lt` que a janela de reativação depende", async () => {
-    // Nasceu por pressão do mesmo mecanismo: `garantirLeadDaConversa`
-    // (lib/leads/nascimento-do-lead.ts) chama `.gte("closed_at", cortaEm)`
-    // pra achar demanda perdida DENTRO da janela, e o adaptador ESTOURAVA.
-    // `gt` excluiria quem fechou EXATAMENTE no instante de corte — borda
-    // que `gte` inclui de propósito.
+  it("⭐ `gte`/`lte` incluem a BORDA — diferença de `gt`/`lt`", async () => {
+    // Nasceu por pressão do mesmo mecanismo: `lib/routing/queue.ts` já
+    // chama `.gte`/`.lte` contra o Supabase real (janela de horário da
+    // fila), e o adaptador de teste não tinha os dois — qualquer
+    // invariante que exercitasse esse caminho estouraria. `gt` excluiria
+    // quem está EXATAMENTE na borda; `gte` inclui de propósito.
     const dentro = await db
       .from("crm_pipelines")
       .select("name")
