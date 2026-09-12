@@ -431,7 +431,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
       ]);
     }
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() - interval '2 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '2 days' where id = $1",
       [primeira.leadId],
     );
 
@@ -456,7 +456,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
     if (!primeira.criado) return;
 
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() - interval '45 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '45 days' where id = $1",
       [primeira.leadId],
     );
 
@@ -497,7 +497,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
     if (!primeira.criado) return;
 
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() - interval '5 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '5 days' where id = $1",
       [primeira.leadId],
     );
     await pool.query("update contacts set became_customer_at = now() where id = $1", [contato]);
@@ -531,7 +531,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
       [primeira.leadId],
     );
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() - interval '3 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '3 days' where id = $1",
       [primeira.leadId],
     );
 
@@ -593,7 +593,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
     expect(primeira1.criado).toBe(true);
     if (!primeira1.criado) return;
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() - interval '1 days' where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() - interval '1 days' where id = $1",
       [primeira1.leadId],
     );
     // Reabre SEM clique novo (mensagem de texto direta, não veio de anúncio).
@@ -621,7 +621,7 @@ describe("⭐ janela de reativação — reabre a MESMA demanda em vez de duplic
     expect(primeira2.criado).toBe(true);
     if (!primeira2.criado) return;
     await pool.query(
-      "update crm_leads set status = 'lost', closed_at = now() where id = $1",
+      "update crm_leads set status = 'lost', lost_reason = 'other', closed_at = now() where id = $1",
       [primeira2.leadId],
     );
     // Reabre COM clique novo — mesmo dia, ad diferente (o caso real: manhã
