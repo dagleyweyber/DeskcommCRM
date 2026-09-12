@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useCampaigns,
   useCancelCampaign,
@@ -12,6 +13,7 @@ import {
   useStartCampaign,
   type CampaignSummary,
 } from "@/hooks/campaigns/useCampaigns";
+import { AutomacoesClient } from "./_components/AutomacoesClient";
 import { NovaCampanhaForm } from "./_components/NovaCampanhaForm";
 
 const COR_DO_STATUS: Record<CampaignSummary["status"], "default" | "secondary" | "destructive" | "outline"> = {
@@ -87,7 +89,7 @@ function AcoesDaCampanha({ campanha }: { campanha: CampaignSummary }) {
   return null;
 }
 
-export function CampaignsClient() {
+function DisparosTab() {
   const { data, isPending } = useCampaigns();
   const [criando, setCriando] = useState(false);
   const campanhas = data?.data.campaigns ?? [];
@@ -133,5 +135,30 @@ export function CampaignsClient() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Duas abas dentro do MESMO menu "Campanhas" — pedido explícito do dono da
+ * agência ao encomendar a 1ª automação recorrente ("no menu de
+ * campanhas"), em vez de um item de navegação novo. `Automações` é
+ * conceitualmente diferente de `Disparos` (recorrente vs. uma vez só),
+ * mas os dois vivem da mesma infraestrutura de canal/template/variável —
+ * ficar juntos é onde o operador já olha pra "mandar mensagem em massa".
+ */
+export function CampaignsClient() {
+  return (
+    <Tabs defaultValue="disparos">
+      <TabsList>
+        <TabsTrigger value="disparos">Disparos</TabsTrigger>
+        <TabsTrigger value="automacoes">Automações</TabsTrigger>
+      </TabsList>
+      <TabsContent value="disparos" className="mt-4">
+        <DisparosTab />
+      </TabsContent>
+      <TabsContent value="automacoes" className="mt-4">
+        <AutomacoesClient />
+      </TabsContent>
+    </Tabs>
   );
 }

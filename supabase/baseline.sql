@@ -13783,4 +13783,169 @@ where mt.channel_session_id is null
   and cs.organization_id = mt.organization_id
   and cs.meta_waba_id = mt.waba_id;
 
+-- ---- automações de template: lembrete de agendamento (migration 0169) ----
+-- Ver o cabeçalho da migration 0169 pra contexto completo. Duas tabelas:
+-- `whatsapp_template_automations` (a config — canal, template, gatilho) e
+-- `whatsapp_template_automation_sends` (dedup por OCORRÊNCIA, não por
+-- data — reagendar emite uma linha nova em `crm_lead_activities`, então
+-- `activity_id` novo = ocorrência nova, sem comparar timestamp).
+create table if not exists public.whatsapp_template_automations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  trigger_kind text not null,
+  channel_session_id uuid not null references public.channel_sessions(id),
+  template_name text not null,
+  template_language text not null,
+  variable_mapping jsonb not null default '{}'::jsonb,
+  status text not null default 'draft',
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint whatsapp_template_automations_status_check
+    check (status in ('draft', 'active', 'paused'))
+);
+
+create or replace trigger trg_whatsapp_template_automations_updated_at
+  before update on public.whatsapp_template_automations
+  for each row execute function public.fn_set_updated_at();
+
+create index if not exists whatsapp_template_automations_org_status_idx
+  on public.whatsapp_template_automations (organization_id, status);
+
+alter table public.whatsapp_template_automations enable row level security;
+
+drop policy if exists whatsapp_template_automations_select on public.whatsapp_template_automations;
+drop policy if exists whatsapp_template_automations_write on public.whatsapp_template_automations;
+
+create policy whatsapp_template_automations_select
+  on public.whatsapp_template_automations for select
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    or public.fn_is_platform_admin()
+  );
+
+create policy whatsapp_template_automations_write
+  on public.whatsapp_template_automations
+  using (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  );
+
+revoke all on public.whatsapp_template_automations from anon;
+
+create table if not exists public.whatsapp_template_automation_sends (
+  id uuid primary key default gen_random_uuid(),
+  automation_id uuid not null references public.whatsapp_template_automations(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  lead_id uuid references public.crm_leads(id),
+  contact_id uuid not null references public.contacts(id),
+  occurrence_key text not null,
+  external_id text,
+  status text not null default 'sent',
+  error_message text,
+  sent_at timestamptz not null default now(),
+  constraint whatsapp_template_automation_sends_status_check
+    check (status in ('sent', 'failed'))
+);
+
+create unique index if not exists whatsapp_template_automation_sends_occurrence_uidx
+  on public.whatsapp_template_automation_sends (automation_id, occurrence_key);
+
+alter table public.whatsapp_template_automation_sends enable row level security;
+
+drop policy if exists whatsapp_template_automation_sends_select on public.whatsapp_template_automation_sends;
+drop policy if exists whatsapp_template_automation_sends_write on public.whatsapp_template_automation_sends;
+
+create policy whatsapp_template_automation_sends_select
+  on public.whatsapp_template_automation_sends for select
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    or public.fn_is_platform_admin()
+  );
+
+create policy whatsapp_template_automation_sends_write
+  on public.whatsapp_template_automation_sends
+  using (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  );
+
+revoke all on public.whatsapp_template_automation_sends from anon;
+
+create index if not exists crm_lead_activities_meeting_scheduled_date_idx
+  on public.crm_lead_activities (organization_id, ((payload->>'scheduled_at')::date))
+  where type = 'meeting_scheduled';
+
+create or replace function public.fn_due_appointment_reminders(
+  p_organization_id uuid,
+  p_automation_id uuid,
+  p_now timestamptz default now()
+)
+returns table (
+  lead_id uuid,
+  contact_id uuid,
+  activity_id uuid,
+  scheduled_at timestamptz,
+  display_name text
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with ultima_por_lead as (
+    select distinct on (a.lead_id)
+      a.lead_id,
+      a.contact_id,
+      a.id as activity_id,
+      a.type,
+      (a.payload->>'scheduled_at')::timestamptz as scheduled_at
+    from public.crm_lead_activities a
+    where a.organization_id = p_organization_id
+      and a.type in ('meeting_scheduled', 'meeting_outcome')
+    order by a.lead_id, a.performed_at desc
+  )
+  select
+    u.lead_id,
+    u.contact_id,
+    u.activity_id,
+    u.scheduled_at,
+    coalesce(c.display_name, c.name, c.phone_number, 'Sem nome') as display_name
+  from ultima_por_lead u
+  join public.contacts c on c.id = u.contact_id
+  where u.type = 'meeting_scheduled'
+    and (u.scheduled_at at time zone 'America/Sao_Paulo')::date
+      = (p_now at time zone 'America/Sao_Paulo')::date
+    and not exists (
+      select 1 from public.whatsapp_template_automation_sends s
+      where s.automation_id = p_automation_id
+        and s.occurrence_key = u.activity_id::text
+    );
+$$;
+
+revoke all on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from public;
+revoke execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from anon;
+grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) to service_role;
+
 notify pgrst, 'reload schema';

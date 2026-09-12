@@ -511,6 +511,18 @@ class AtualizacaoPg<T> implements PromiseLike<RespostaFalsa<unknown>> {
 }
 
 /**
+ * Funções `returns table`/`setof` chamadas via `.rpc()` — o PostgREST real
+ * sempre devolve um ARRAY de linhas pra essas, nunca um valor escalar só.
+ * `chamarRpc` por padrão assume escalar (`select fn(...) as valor`, um
+ * valor só) porque é o caso de longe mais comum aqui (`emit_event` e
+ * afins devolvem `uuid`); uma função tabular precisa entrar nesta lista
+ * pra sair como linhas de verdade em vez de um composite Postgres
+ * serializado como texto cru (o que `select fn(...) as valor` faria sem
+ * este desvio, e o chamador receberia string ilegível em vez de objeto).
+ */
+const RPCS_TABULARES = new Set(["fn_due_appointment_reminders"]);
+
+/**
  * `rpc(nome, args)` — chamada de função por argumentos NOMEADOS, como o
  * PostgREST faz. Sem isto, todo caminho que emite evento (`emit_event`) morre no
  * meio do handler sob teste.
@@ -527,6 +539,10 @@ async function chamarRpc(
   });
   const nomeados = chaves.map((k, i) => `${k} => $${i + 1}`).join(", ");
   try {
+    if (RPCS_TABULARES.has(nome)) {
+      const r = await pool.query(`select * from public."${nome}"(${nomeados})`, valores);
+      return { data: normalizarLinhas(r.rows), error: null };
+    }
     const r = await pool.query(`select public."${nome}"(${nomeados}) as valor`, valores);
     const valor = (r.rows[0] as { valor: unknown } | undefined)?.valor ?? null;
     return { data: Buffer.isBuffer(valor) ? `\\x${valor.toString("hex")}` : valor, error: null };

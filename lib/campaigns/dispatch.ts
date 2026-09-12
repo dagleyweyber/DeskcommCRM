@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureConversation } from "@/lib/automation/start-conversation";
 import { CAMPAIGN_SEND_SPACING_MS, checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
 import { lerConteudo } from "@/lib/channels/template-conteudo";
-import { renderBodyWithValues } from "./render-body";
+import { renderBodyWithValues } from "@/lib/messaging/render-body";
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 
 /** Deixa margem sob o timeout do cron (25s, `docker/scheduler/entrypoint.sh`). */

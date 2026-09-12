@@ -53,6 +53,7 @@ CRONS="
 */5 * * * *|45|api/v1/cron/channel-health
 */10 * * * *|60|api/v1/cron/contact-avatars
 */15 * * * *|60|api/v1/cron/risk-watcher
+*/15 * * * *|60|api/v1/cron/template-automations-dispatch
 */30 * * * *|60|api/v1/cron/contact-phones
 17 * * * *|60|api/v1/cron/contact-proposals-watcher
 0 12 * * *|60|api/v1/cron/lgpd-sla-watcher

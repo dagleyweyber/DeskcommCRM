@@ -13,7 +13,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
-import { resolveValuesForRecipient, type VariableMapping } from "@/lib/campaigns/resolve-values";
+import { resolveValuesForRecipient, type VariableMapping } from "@/lib/messaging/variable-mapping";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";

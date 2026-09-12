@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
-import type { VariableMapping } from "@/lib/campaigns/resolve-values";
+import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 export interface CampaignSummary {
   id: string;

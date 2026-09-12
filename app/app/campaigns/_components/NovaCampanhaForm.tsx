@@ -3,13 +3,12 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
 import { useCreateCampaign, usePreviewAudience } from "@/hooks/campaigns/useCampaigns";
 import { useTemplates } from "@/hooks/channels/useTemplates";
 import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
-import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
-import { slotKey } from "@/lib/channels/meta/build-components";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
-import type { VariableMapping, VariableSource } from "@/lib/campaigns/resolve-values";
+import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 type AudienceKind = AudienceFilter["kind"];
 
@@ -35,17 +34,6 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
     [templates.data],
   );
   const atual = aprovados.find((t) => `${t.name}|${t.language}` === templateEscolhido) ?? null;
-  const contrato = useMemo(
-    () =>
-      atual
-        ? deriveTemplateContract({
-            name: atual.name,
-            language: atual.language,
-            components: atual.components as never,
-          })
-        : null,
-    [atual],
-  );
 
   function audience(): AudienceFilter | null {
     if (audienceKind === "tag") return tag.trim() ? { kind: "tag", tag: tag.trim() } : null;
@@ -101,79 +89,13 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         />
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium" htmlFor="campanha-template">
-          Modelo aprovado
-        </label>
-        {aprovados.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhum modelo aprovado ainda. Crie um em <strong>Conexões → Templates da Meta</strong>.
-          </p>
-        ) : (
-          <select
-            id="campanha-template"
-            value={templateEscolhido}
-            onChange={(e) => {
-              setTemplateEscolhido(e.target.value);
-              setMapping({});
-            }}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-          >
-            <option value="">Escolha um modelo…</option>
-            {aprovados.map((t) => (
-              <option key={`${t.name}|${t.language}`} value={`${t.name}|${t.language}`}>
-                {t.name} ({t.language})
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {contrato && contrato.slots.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-md bg-muted/40 p-3">
-          <p className="text-xs text-muted-foreground">
-            Este modelo pede {contrato.slots.length} valor(es). Escolha um texto fixo (igual pra
-            todo mundo) ou o nome do contato (muda por destinatário).
-          </p>
-          {contrato.slots.map((s) => {
-            const key = slotKey(s.address, s.key);
-            const fonte = mapping[key];
-            return (
-              <div key={key} className="flex flex-wrap items-center gap-2">
-                <span className="w-40 shrink-0 text-xs text-muted-foreground">
-                  {describeAddress(s.address)} · {s.contextBefore.slice(-15)}…
-                </span>
-                <select
-                  value={fonte?.kind ?? "fixed"}
-                  onChange={(e) => {
-                    const kind = e.target.value as VariableSource["kind"];
-                    const proximo: VariableSource =
-                      kind === "fixed" ? { kind: "fixed", value: "" } : { kind };
-                    setMapping({ ...mapping, [key]: proximo });
-                  }}
-                  aria-label={`Fonte do valor de ${describeAddress(s.address)}`}
-                  className="h-8 w-44 rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  <option value="fixed">Texto fixo</option>
-                  <option value="contact_name">Nome do contato</option>
-                  <option value="contact_first_name">Primeiro nome</option>
-                </select>
-                {(!fonte || fonte.kind === "fixed") && (
-                  <input
-                    value={fonte?.kind === "fixed" ? fonte.value : ""}
-                    onChange={(e) =>
-                      setMapping({ ...mapping, [key]: { kind: "fixed", value: e.target.value } })
-                    }
-                    placeholder="Valor pra todo mundo"
-                    aria-label={`Texto fixo de ${describeAddress(s.address)}`}
-                    className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <TemplateEVariaveisPicker
+        aprovados={aprovados}
+        templateEscolhido={templateEscolhido}
+        onTemplateChange={setTemplateEscolhido}
+        mapping={mapping}
+        onMappingChange={setMapping}
+      />
 
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium">Público</span>

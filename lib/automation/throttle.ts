@@ -25,8 +25,13 @@ export interface ThrottleVerdict {
   reason?: string;
 }
 
-/** Data/hora de parede em `TIMEZONE` — mesma decomposição de `wallClock` em `pacing/engine.ts`. */
-function wallClock(instant: Date): { y: number; mo: number; d: number; h: number } {
+/**
+ * Data/hora de parede em `TIMEZONE` — mesma decomposição de `wallClock` em
+ * `pacing/engine.ts`. Exportada: `lib/automations/triggers/agendamento.ts`
+ * reaproveita pra saber "já passou das 8h em São Paulo?" — mesma premissa
+ * de fuso fixo, sem reimplementar a extração de hora local uma terceira vez.
+ */
+export function wallClock(instant: Date): { y: number; mo: number; d: number; h: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: TIMEZONE,
     hour12: false,
