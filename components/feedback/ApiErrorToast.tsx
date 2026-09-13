@@ -54,6 +54,14 @@ const COPY: Record<string, { variant: Variant; msg: string }> = {
     variant: "error",
     msg: "Esta ação não pode ser desfeita: o contato já foi anonimizado.",
   },
+  contact_duplicate_phone: {
+    variant: "warning",
+    msg: "Já existe um contato com este telefone nesta organização.",
+  },
+  contact_duplicate_email: {
+    variant: "warning",
+    msg: "Já existe um contato com este e-mail nesta organização.",
+  },
   internal_error: {
     variant: "error",
     // Fallback só — `internal_error` é o balde genérico de VÁRIAS rotas

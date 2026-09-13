@@ -284,6 +284,33 @@ export async function createContactHandler(
     .single();
 
   if (insErr) {
+    // 23505 = já existe contato com este telefone/e-mail na org
+    // (`uniq_contacts_org_phone`/`uniq_contacts_org_email`). Achado ao vivo:
+    // sem este tratamento, o erro cru do Postgres ("duplicate key value
+    // violates unique constraint...") ia direto pro toast do usuário — o
+    // `internal_error` genérico é desenhado pra deixar passar mensagem real
+    // do servidor (ver `ApiErrorToast.tsx`), então isto não é bug de exibição,
+    // é a rota nunca ter reconhecido o caso como coisa esperada.
+    if (insErr.code === "23505") {
+      if (insErr.message.includes("uniq_contacts_org_phone")) {
+        throw new ApiError(
+          409,
+          "contact_duplicate_phone",
+          undefined,
+          ctx.requestId,
+          "Já existe um contato com este telefone nesta organização.",
+        );
+      }
+      if (insErr.message.includes("uniq_contacts_org_email")) {
+        throw new ApiError(
+          409,
+          "contact_duplicate_email",
+          undefined,
+          ctx.requestId,
+          "Já existe um contato com este e-mail nesta organização.",
+        );
+      }
+    }
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, insErr.message);
   }
 
