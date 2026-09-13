@@ -31,8 +31,6 @@ const admin = pgComoSupabase(pool);
 const ORG = "a90da000-0000-4000-8000-000000000001";
 const ORG_B = "a90da000-0000-4000-8000-000000000002";
 const SESSION = "a90da000-0000-4000-8000-000000000010";
-const PIPELINE = "a90da000-0000-4000-8000-000000000020";
-const STAGE = "a90da000-0000-4000-8000-000000000021";
 const AUTOMATION = "a90da000-0000-4000-8000-000000000030";
 
 let contato = "";
@@ -104,20 +102,29 @@ beforeAll(async () => {
   );
   contato = c[0]!.id;
 
-  await pool.query(
-    `insert into crm_pipelines (id, organization_id, name, slug, is_default, position)
-     values ($1, $2, 'Funil', 'funil', true, 0) on conflict (id) do nothing`,
-    [PIPELINE, ORG],
+  // A organização já NASCE com funil padrão — `fn_seed_default_pipeline_for_org`
+  // (mesmo trigger que `nascimento-do-lead.test.ts` documenta). Inserir um
+  // segundo `is_default = true` bateria em `uniq_crm_pipelines_org_default`;
+  // este teste não é sobre qual é o funil de entrada, só precisa de um
+  // estágio aberto válido pra pendurar o lead.
+  const { rows: p } = await pool.query<{ id: string }>(
+    `select id from crm_pipelines where organization_id = $1 and is_default = true`,
+    [ORG],
   );
-  await pool.query(
-    `insert into crm_stages (id, organization_id, pipeline_id, name, slug, position, is_won, is_lost)
-     values ($1, $2, $3, 'Aberto', 'aberto', 0, false, false) on conflict (id) do nothing`,
-    [STAGE, ORG, PIPELINE],
+  const pipelineId = p[0]!.id;
+  const { rows: s } = await pool.query<{ id: string }>(
+    `select id from crm_stages
+       where organization_id = $1 and pipeline_id = $2
+         and is_archived = false and is_won = false and is_lost = false
+       order by position asc limit 1`,
+    [ORG, pipelineId],
   );
+  const stageId = s[0]!.id;
+
   const { rows: l } = await pool.query<{ id: string }>(
     `insert into crm_leads (organization_id, pipeline_id, stage_id, contact_id, title, source)
      values ($1, $2, $3, $4, 'Paciente Teste', 'whatsapp') returning id`,
-    [ORG, PIPELINE, STAGE, contato],
+    [ORG, pipelineId, stageId, contato],
   );
   lead = l[0]!.id;
 });
