@@ -262,4 +262,11 @@ export type AuditAction =
   | "campaign.created"
   | "campaign.started"
   | "campaign.paused"
-  | "campaign.cancelled";
+  | "campaign.cancelled"
+  // Automações recorrentes por gatilho de dado (1ª: lembrete de
+  // agendamento) — `created` nasce `draft`; `activated`/`paused` são as
+  // únicas transições depois disso, o despachante (cron) é service role e
+  // não passa por rota autenticada, mesma nota de Campanhas acima.
+  | "automation.created"
+  | "automation.activated"
+  | "automation.paused";
