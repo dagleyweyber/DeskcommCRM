@@ -8585,6 +8585,11 @@ create policy tenant_isolation_meta_templates_all on public.meta_templates
 -- podia ser gravado como 'text' porque o tipo e a unica coluna que carrega custo
 -- (template e cobrado por entrega), conformidade de janela, e o que o contato viu.
 -- Backfill: nenhum por construcao — o conjunto antigo e subconjunto do novo.
+--
+-- ÚNICO bloco que reconstrói `messages_type_check` no baseline (doutrina de
+-- `tests/unit/baseline-constraint-reconstruida.test.ts`) — migration que só
+-- AMPLIA o vocabulário edita este array, não abre um novo `drop`/`add`. O
+-- valor `button` (migration 0170) já está incluído aqui por isso mesmo.
 
 do $$ begin
   alter table public.messages drop constraint if exists messages_type_check;
@@ -8592,8 +8597,10 @@ do $$ begin
     check (type = any (array[
       'text', 'image', 'video', 'audio', 'document', 'sticker',
       'location', 'contact', 'reaction', 'system',
-      -- novo: envio de template aprovado (canal oficial, fora da janela de 24h)
-      'template'
+      -- envio de template aprovado (canal oficial, fora da janela de 24h) — 0091
+      'template',
+      -- resposta a botão de resposta rápida de template — 0170
+      'button'
     ]));
 end $$;
 
@@ -13964,15 +13971,10 @@ notify pgrst, 'reload schema';
 -- ---- message type: button (migration 0170) ----
 -- Ver o cabeçalho da migration 0170: resposta de botão de template
 -- ("Confirmo presença"/"Preciso remarcar") reprovava no CHECK e se perdia
--- pra sempre — não é payload malformado, a Meta não re-entrega.
-do $$ begin
-  alter table public.messages drop constraint if exists messages_type_check;
-  alter table public.messages add constraint messages_type_check
-    check (type = any (array[
-      'text', 'image', 'video', 'audio', 'document', 'sticker',
-      'location', 'contact', 'reaction', 'system', 'template',
-      'button'
-    ]));
-end $$;
+-- pra sempre — não é payload malformado, a Meta não re-entrega. O valor
+-- `button` já está no ÚNICO bloco que reconstrói `messages_type_check`
+-- (marcado "migration 0091", no início deste arquivo) — doutrina de
+-- `tests/unit/baseline-constraint-reconstruida.test.ts`: uma constraint, um
+-- bloco, editado no lugar em vez de reconstruído em série.
 
 notify pgrst, 'reload schema';
