@@ -223,7 +223,18 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             // A Meta manda epoch em SEGUNDOS, string. Passar direto ao Date daria 1970.
             sentAt: new Date(Number(str(raw.timestamp) ?? "0") * 1000),
             type: tipo,
-            text: tipo === "text" ? str((raw.text as Record<string, unknown>)?.body) : null,
+            // `button`: clique num botão de resposta rápida de template
+            // ("Confirmo presença"/"Preciso remarcar") — o texto visível do
+            // botão É a resposta do cliente, mesmo papel do corpo de um
+            // texto livre. Sem isto a mensagem entraria com `text: null` e
+            // apareceria em branco no inbox mesmo depois do tipo liberado
+            // no CHECK (migration 0170).
+            text:
+              tipo === "text"
+                ? str((raw.text as Record<string, unknown>)?.body)
+                : tipo === "button"
+                  ? str((raw.button as Record<string, unknown> | undefined)?.text)
+                  : null,
             media:
               corpoMidia && str(corpoMidia.id)
                 ? {

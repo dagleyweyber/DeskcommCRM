@@ -111,7 +111,7 @@ async function pedirPersistenciaDaMidia(
 
 /** Prévia curta para a lista de conversas. Mídia vira rótulo, nunca URL. */
 function previewOf(e: InboundMessageEvent): string {
-  if (e.type === "text") return (e.text ?? "").slice(0, 120);
+  if (e.type === "text" || e.type === "button") return (e.text ?? "").slice(0, 120);
   if (e.type === "audio") return e.media?.voice ? "🎤 Mensagem de voz" : "🎵 Áudio";
   if (e.type === "image") return "📷 Imagem";
   if (e.type === "video") return "🎬 Vídeo";

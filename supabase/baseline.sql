@@ -13960,3 +13960,19 @@ where mt.channel_session_id is null
   and cs.meta_waba_id = mt.waba_id;
 
 notify pgrst, 'reload schema';
+
+-- ---- message type: button (migration 0170) ----
+-- Ver o cabeçalho da migration 0170: resposta de botão de template
+-- ("Confirmo presença"/"Preciso remarcar") reprovava no CHECK e se perdia
+-- pra sempre — não é payload malformado, a Meta não re-entrega.
+do $$ begin
+  alter table public.messages drop constraint if exists messages_type_check;
+  alter table public.messages add constraint messages_type_check
+    check (type = any (array[
+      'text', 'image', 'video', 'audio', 'document', 'sticker',
+      'location', 'contact', 'reaction', 'system', 'template',
+      'button'
+    ]));
+end $$;
+
+notify pgrst, 'reload schema';

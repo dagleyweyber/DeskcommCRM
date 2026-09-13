@@ -156,6 +156,40 @@ describe("adReferral — o clique em anúncio (Fase A da atribuição pro Meta A
   });
 });
 
+describe("button — resposta a botão de resposta rápida de template (migration 0170)", () => {
+  // Achado ao vivo: clique em "Confirmo presença" chegava com `type: "button"` e o
+  // insert em `messages` reprovava no CHECK (nunca incluía `button`) — a mensagem
+  // se perdia pra sempre, porque a Meta não re-entrega o que já recebeu 200.
+  it("extrai o texto visível do botão como `text` — mesmo papel de uma resposta livre", () => {
+    const [e] = parseMetaWebhook({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "w",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                metadata: { phone_number_id: "pn1" },
+                messages: [
+                  {
+                    id: "wamid.BTN",
+                    from: "5531",
+                    timestamp: "1785342028",
+                    type: "button",
+                    button: { text: "Confirmo presença", payload: "Confirmo presença" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    }) as InboundMessageEvent[];
+    expect(e).toMatchObject({ type: "button", text: "Confirmo presença", media: null });
+  });
+});
+
 describe("payload capenga não vira linha meia-boca", () => {
   it("mensagem sem id é descartada", () => {
     const r = parseMetaWebhook({

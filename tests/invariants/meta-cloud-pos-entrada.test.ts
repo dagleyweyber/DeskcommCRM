@@ -155,4 +155,30 @@ describe("ingestMetaInbound — o conserto do pos-entrada", () => {
     );
     expect(rows[0]!.n, "contato bloqueado não abre demanda nova").toBe("0");
   });
+
+  // Achado ao vivo (RevitaFio Mossoró, automação 0169): clique em "Confirmo
+  // presença" chegava com `type: "button"`, e o INSERT reprovava no CHECK —
+  // `messages_type_check` nunca incluiu `button` (migration 0170). A rota
+  // devolvia 200 mesmo assim, então a Meta não re-entregava: a resposta do
+  // cliente se perdia pra sempre, sem aparecer no inbox e sem abrir a janela
+  // de 24h. Prova de ponta a ponta, não só do parser: insere de verdade.
+  it("⭐ resposta a botão de template ('Confirmo presença') é ingerida — não mais rejeitada pelo CHECK", async () => {
+    const r = await ingestMetaInbound(
+      db,
+      evento({
+        from: "553199900001",
+        externalId: "wamid.button1",
+        type: "button",
+        text: "Confirmo presença",
+      }),
+    );
+    expect(r.status).toBe("ingested");
+    if (r.status !== "ingested") return;
+
+    const { rows } = await pool.query<{ type: string; body: string | null }>(
+      "select type, body from messages where id = $1",
+      [r.messageId],
+    );
+    expect(rows[0]).toEqual({ type: "button", body: "Confirmo presença" });
+  });
 });
