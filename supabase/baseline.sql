@@ -13653,10 +13653,13 @@ create policy whatsapp_template_automation_sends_write
 
 revoke all on public.whatsapp_template_automation_sends from anon;
 
-create index if not exists crm_lead_activities_meeting_scheduled_date_idx
-  on public.crm_lead_activities (organization_id, ((payload->>'scheduled_at')::date))
-  where type = 'meeting_scheduled';
-
+-- Um índice funcional pra "data do agendamento" foi tentado aqui e
+-- recusado pelo Postgres: `(payload->>'scheduled_at')::date` não é
+-- IMMUTABLE quando o texto carrega hora e fuso. A travessia principal já
+-- é coberta por `idx_crm_lead_activities_org_meeting` (partial index da
+-- Fase 3, mesmo par de tipos); o filtro de data roda depois da
+-- deduplicação por lead, sobre conjunto já pequeno. Ver o comentário
+-- completo na migration 0169.
 create or replace function public.fn_due_appointment_reminders(
   p_organization_id uuid,
   p_automation_id uuid,

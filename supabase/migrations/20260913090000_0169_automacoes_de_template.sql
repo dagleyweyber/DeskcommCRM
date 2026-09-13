@@ -137,15 +137,19 @@ create policy whatsapp_template_automation_sends_write
 
 revoke all on public.whatsapp_template_automation_sends from anon;
 
--- Sem este índice, achar "todo agendamento de hoje" varreria
--- `crm_lead_activities` inteira por tenant a cada tick — a tabela cresce
--- pra sempre (append-only) e o tipo já é comum (toda visita agendada
--- passa por aqui). Parcial: só a fração `meeting_scheduled` importa pra
--- esta busca.
-create index if not exists crm_lead_activities_meeting_scheduled_date_idx
-  on public.crm_lead_activities (organization_id, ((payload->>'scheduled_at')::date))
-  where type = 'meeting_scheduled';
-
+-- Um índice funcional pra "data do agendamento" foi tentado aqui e
+-- recusado pelo Postgres: `(payload->>'scheduled_at')::date` não é
+-- IMMUTABLE quando o texto carrega hora e fuso (a data resultante depende
+-- do fuso de sessão pra resolver) — o mesmo motivo pelo qual a FUNÇÃO
+-- abaixo usa `at time zone 'America/Sao_Paulo'` em vez de `::date` cru, e
+-- exatamente por isso não dá pra indexar direto. Sem um índice dedicado,
+-- a travessia por `(organization_id, type, performed_at desc)` do
+-- `DISTINCT ON` abaixo já é coberta por `idx_crm_lead_activities_org_meeting`
+-- (a partial index da Fase 3 do dashboard, mesmo par de tipos) — o filtro
+-- de data roda DEPOIS da deduplicação por lead, sobre um conjunto já
+-- pequeno; escala além disso é problema pra quando aparecer, não pra
+-- resolver com um índice frágil agora.
+--
 -- "Quem tem agendamento HOJE (fuso de São Paulo — mesma premissa fixa de
 -- `lib/automation/throttle.ts`, nenhuma instalação multi-fuso ainda) e
 -- ainda não recebeu lembrete desta automação."
