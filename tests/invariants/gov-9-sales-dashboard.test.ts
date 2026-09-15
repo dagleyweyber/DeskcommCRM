@@ -59,6 +59,7 @@ const LEAD_F1 = "05050505-8888-4000-8000-000000000001"; // ad-1, com headline
 const LEAD_F2 = "05050505-8888-4000-8000-000000000002"; // ad-1, sem headline nesta linha
 const LEAD_F3 = "05050505-8888-4000-8000-000000000003"; // ad-2
 const LEAD_F4 = "05050505-8888-4000-8000-000000000004"; // sem ad_id (orgânico)
+const LEAD_F5 = "05050505-8888-4000-8000-000000000005"; // ad-3, com ad_name E headline (migration 0171)
 // ORG_G é exclusivo dos testes de Fase 5 ("cliente já existente": leads_total
 // exclui existing_customer + LTV/recompra), dataset separado, mesma razão do
 // ORG_D acima.
@@ -248,12 +249,20 @@ beforeAll(() => {
               '{"ad_id":"ad-2","ad_headline":"Campanha Inverno"}'::jsonb, '${D1}', '${D1}');
     insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, created_at, closed_at)
       values ('${LEAD_F4}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won organico sem anuncio', 'won', 'whatsapp', 999999, '${D1}', '${D1}');
+    -- ad-3: headline genérico ("Fale Conosco") IGUAL ao que outro anúncio
+    -- qualquer poderia ter — só o ad_name (nome real, resolvido pela Fase E)
+    -- diferencia esta linha das demais. Prova a 0171: o rótulo tem que vir
+    -- do nome real, não do headline, quando os dois existem.
+    insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, status, source, value_cents, source_metadata, created_at, closed_at)
+      values ('${LEAD_F5}', '${ORG_F}', '${PIPELINE_F}', '${STAGE_F}', 'F won ad-3 com nome real', 'won', 'whatsapp', 10000,
+              '{"ad_id":"ad-3","ad_headline":"Fale Conosco"}'::jsonb, '${D1}', '${D1}');
 
-    -- Fase E3: hierarquia cacheada (Fase E1/E2) pros dois anúncios de ORG_F.
-    insert into public.meta_ads_ad_metadata (organization_id, ad_id, campaign_id, campaign_name, adset_id, adset_name)
+    -- Fase E3: hierarquia cacheada (Fase E1/E2) pros anúncios de ORG_F.
+    insert into public.meta_ads_ad_metadata (organization_id, ad_id, campaign_id, campaign_name, adset_id, adset_name, ad_name)
       values
-        ('${ORG_F}', 'ad-1', 'cg-verao', 'CG Verão', 'adset-a', 'Conjunto A'),
-        ('${ORG_F}', 'ad-2', 'cg-inverno', 'CG Inverno', 'adset-b', 'Conjunto B')
+        ('${ORG_F}', 'ad-1', 'cg-verao', 'CG Verão', 'adset-a', 'Conjunto A', null),
+        ('${ORG_F}', 'ad-2', 'cg-inverno', 'CG Inverno', 'adset-b', 'Conjunto B', null),
+        ('${ORG_F}', 'ad-3', 'cg-verao', 'CG Verão', 'adset-a', 'Conjunto A', 'AD3 - VIDEO')
       on conflict (organization_id, ad_id) do nothing;
 
     -- LEAD_F1 tem DOIS meeting_scheduled (remarcação) — prova que o EXISTS
@@ -553,7 +562,7 @@ describe("fn_sales_dashboard — Fase 3 (funil de agendamento, migration 0158)",
 describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)", () => {
   const dashboard = () => fetchDashboard(MANAGER_F, ORG_F);
 
-  it("⭐ ad-2(200000) > ad-1(150000, F1+F2 somados) — ordenado por receita_cents desc", () => {
+  it("⭐ ad-2(200000) > ad-1(150000, F1+F2 somados) > ad-3(10000) — ordenado por receita_cents desc", () => {
     expect(dashboard().receita_por_anuncio).toEqual([
       {
         anuncio: "Campanha Inverno",
@@ -579,6 +588,21 @@ describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)",
         agendamentos: 1,
         receita_cents: 150_000,
       },
+      {
+        // migration 0171: ad-3 tem headline "Fale Conosco" (mesmo texto que
+        // qualquer outro anúncio da campanha poderia ter) E ad_name "AD3 -
+        // VIDEO" — o rótulo tem que ser o nome real, não o headline.
+        anuncio: "AD3 - VIDEO",
+        ad_id: "ad-3",
+        campaign_id: "cg-verao",
+        campaign_name: "CG Verão",
+        adset_id: "adset-a",
+        adset_name: "Conjunto A",
+        leads: 1,
+        vendas: 1,
+        agendamentos: 0,
+        receita_cents: 10_000,
+      },
     ]);
   });
 
@@ -597,8 +621,8 @@ describe("fn_sales_dashboard — Fase D (receita por anúncio, migration 0160)",
     expect(anuncios.filter((a) => a.ad_id === "ad-1")).toHaveLength(1);
   });
 
-  it("F4 (sem ad_id, lead orgânico) NÃO aparece em receita_por_anuncio — só 2 grupos, não 3", () => {
-    expect(dashboard().receita_por_anuncio).toHaveLength(2);
+  it("F4 (sem ad_id, lead orgânico) NÃO aparece em receita_por_anuncio — só 3 grupos (ad-1/ad-2/ad-3), não 4", () => {
+    expect(dashboard().receita_por_anuncio).toHaveLength(3);
   });
 });
 
