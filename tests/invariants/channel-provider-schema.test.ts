@@ -67,11 +67,20 @@ describe("0087 · o canal da sessão chega ao clone", () => {
     ).toBe("'waha'::text|NO");
   });
 
-  it("as três colunas do ramo meta_cloud existem", () => {
+  it("as colunas do ramo meta_cloud existem", () => {
+    // `meta_app_id` (migration 0172) juntou-se às três originais — App ID da
+    // Meta dono da WABA, necessário pra Resumable Upload API (imagem de
+    // cabeçalho de template). Nullable, então não muda nada do resto deste
+    // describe (a união provider/coluna continua exprimindo os mesmos casos).
     const cols = sql(`select column_name from information_schema.columns
                        where table_schema = 'public' and table_name = 'channel_sessions'
                          and column_name like 'meta\\_%' order by 1`).split("\n");
-    expect(cols).toEqual(["meta_phone_number_id", "meta_token_encrypted", "meta_waba_id"]);
+    expect(cols).toEqual([
+      "meta_app_id",
+      "meta_phone_number_id",
+      "meta_token_encrypted",
+      "meta_waba_id",
+    ]);
   });
 
   it("waha_session_name deixou de ser obrigatório — senão meta_cloud é inexprimível", () => {
