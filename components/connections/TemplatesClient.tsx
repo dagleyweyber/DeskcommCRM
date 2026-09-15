@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -85,9 +85,23 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
   const [rodape, setRodape] = useState("");
   const [exemplos, setExemplos] = useState<string[]>([]);
   const [cabecalho, setCabecalho] = useState("");
-  const [midiaUrl, setMidiaUrl] = useState("");
+  // `midiaHandle` é o que vai pra Meta (`example.header_handle`, obtido via
+  // Resumable Upload API — ver `app/api/v1/channels/templates/media`).
+  // `midiaPreviewUrl` é só pra TELA: um handle é opaco, não dá pra mostrar
+  // como `<img src>`. Um Object URL local (o arquivo nunca sai do
+  // navegador pra isto) resolve sem depender de round-trip nenhum.
+  const [midiaHandle, setMidiaHandle] = useState("");
+  const [midiaPreviewUrl, setMidiaPreviewUrl] = useState("");
   const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>([]);
   const [subindo, setSubindo] = useState(false);
+
+  // Revoga o Object URL anterior sempre que troca ou desmonta — Object URL
+  // vivo sem revogar vaza memória (o navegador não libera sozinho).
+  useEffect(() => {
+    return () => {
+      if (midiaPreviewUrl) URL.revokeObjectURL(midiaPreviewUrl);
+    };
+  }, [midiaPreviewUrl]);
 
   // Recalculado enquanto se digita: o operador vê o campo de exemplo aparecer
   // no instante em que escreve `{{1}}`, não numa recusa que chega horas depois.
@@ -138,11 +152,14 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
             value={cabecalho}
             onChange={(e) => {
               setCabecalho(e.target.value);
-              if (e.target.value) setMidiaUrl("");
+              if (e.target.value) {
+                setMidiaHandle("");
+                setMidiaPreviewUrl("");
+              }
             }}
             placeholder="Cabeçalho de texto (opcional)"
             aria-label="Cabeçalho de texto"
-            disabled={!!midiaUrl}
+            disabled={!!midiaHandle}
             className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
           />
           <label
@@ -151,7 +168,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
               cabecalho && "pointer-events-none opacity-50",
             )}
           >
-            {subindo ? "Subindo…" : midiaUrl ? "Trocar imagem" : "Subir imagem (JPG/PNG)"}
+            {subindo ? "Subindo…" : midiaHandle ? "Trocar imagem" : "Subir imagem (JPG/PNG)"}
             <input
               type="file"
               accept="image/jpeg,image/png"
@@ -161,22 +178,29 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                 const f = e.target.files?.[0];
                 if (!f) return;
                 setSubindo(true);
+                // Prévia instantânea, sem esperar o upload pra Meta — o
+                // arquivo já está no navegador, não precisa de round-trip
+                // nenhum só pra mostrar como fica.
+                const preview = URL.createObjectURL(f);
                 try {
                   const fd = new FormData();
                   fd.append("file", f);
-                  const r = await fetch("/api/v1/channels/partner/templates/media", {
+                  const r = await fetch("/api/v1/channels/templates/media", {
                     method: "POST",
                     body: fd,
                   });
                   const j = (await r.json()) as {
-                    data?: { url?: string };
+                    data?: { handle?: string };
                     error?: { message?: string };
                   };
-                  if (!r.ok || !j.data?.url) {
+                  if (!r.ok || !j.data?.handle) {
                     toast.error(j.error?.message ?? "Não consegui subir a imagem.");
+                    URL.revokeObjectURL(preview);
                     return;
                   }
-                  setMidiaUrl(j.data.url);
+                  if (midiaPreviewUrl) URL.revokeObjectURL(midiaPreviewUrl);
+                  setMidiaHandle(j.data.handle);
+                  setMidiaPreviewUrl(preview);
                   setCabecalho("");
                 } finally {
                   setSubindo(false);
@@ -333,7 +357,12 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                     body: corpo,
                     footer: rodape,
                     exemplos,
-                    cabecalho: { texto: cabecalho, midiaUrl },
+                    // `midiaUrl` é o nome do campo do contrato de
+                    // `montarComponents` (compartilhado com o canal
+                    // parceiro) — o valor que ele espera é o que vai em
+                    // `header_handle`, e aqui é o HANDLE da Meta, não uma
+                    // URL. Ver `resumable-upload.ts`.
+                    cabecalho: { texto: cabecalho, midiaUrl: midiaHandle },
                     botoes,
                   }),
                 },
@@ -345,7 +374,9 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                     setRodape("");
                     setExemplos([]);
                     setCabecalho("");
-                    setMidiaUrl("");
+                    if (midiaPreviewUrl) URL.revokeObjectURL(midiaPreviewUrl);
+                    setMidiaHandle("");
+                    setMidiaPreviewUrl("");
                     setBotoes([]);
                     onCriado();
                   },
@@ -363,7 +394,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
       <div className="lg:sticky lg:top-4 lg:self-start">
         <PreviaDaDefinicao
           cabecalho={cabecalho}
-          midiaUrl={midiaUrl}
+          midiaUrl={midiaPreviewUrl}
           corpo={corpo}
           rodape={rodape}
           botoes={botoes}

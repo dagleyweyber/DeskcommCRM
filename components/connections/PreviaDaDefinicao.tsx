@@ -1,6 +1,4 @@
 "use client";
-import Image from "next/image";
-
 import { contarVariaveis, type BotaoDaDefinicao } from "@/lib/channels/template-conteudo";
 
 /**
@@ -55,14 +53,16 @@ export function PreviaDaDefinicao({
         ) : (
           <div className="max-w-[22rem] rounded-lg rounded-tl-sm bg-background p-2.5 shadow-sm">
             {midiaUrl && (
-              // `unoptimized`: a URL é assinada e temporária, e o otimizador do
-              // Next a buscaria de novo depois de ela expirar.
-              <Image
+              // `<img>` cru, não `next/image`: o canal oficial manda um
+              // Object URL local (`blob:...`) pra prévia instantânea sem
+              // round-trip — `next/image` valida `src` contra
+              // `remotePatterns` (só `*.supabase.co`/`*.supabase.in`) e
+              // recusaria um `blob:`. O canal parceiro ainda manda URL
+              // assinada do Storage; `<img>` mostra as duas sem distinção.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
                 src={midiaUrl}
                 alt="Cabeçalho"
-                width={320}
-                height={180}
-                unoptimized
                 className="mb-2 h-auto w-full rounded"
               />
             )}

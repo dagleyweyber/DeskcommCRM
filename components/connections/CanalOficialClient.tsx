@@ -52,13 +52,16 @@ function ParaColar({ rotulo, valor }: { rotulo: string; valor: string | null }) 
 export function CanalOficialClient() {
   const { data, isPending } = useOfficialChannel();
   const conectar = useConnectOfficialChannel();
-  const [form, setForm] = useState({ phone_number_id: "", waba_id: "", token: "" });
+  const [form, setForm] = useState({ phone_number_id: "", waba_id: "", app_id: "", token: "" });
 
   const estado = data?.data;
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
-    const r = await conectar.mutateAsync(form);
+    // Campo vazio vira `undefined`, não string vazia — o schema exige
+    // `min(5)` quando presente, e "" presente reprovaria a validação em vez
+    // de contar como "não preenchido, mantém o que já tinha".
+    const r = await conectar.mutateAsync({ ...form, app_id: form.app_id.trim() || undefined });
     toast.success(`Conectado: ${r.data.displayName} ${r.data.phoneNumber ?? ""}`.trim());
     // O token some do formulário assim que grava — deixá-lo na tela seria mantê-lo
     // em memória do navegador sem motivo, e ele não volta em nenhum GET.
@@ -87,6 +90,18 @@ export function CanalOficialClient() {
           <p className="mt-1 text-xs text-muted-foreground">
             WABA <span className="font-mono">{estado.wabaId}</span> · número{" "}
             <span className="font-mono">{estado.phoneNumberId}</span>
+            {estado.appId ? (
+              <>
+                {" "}
+                · App <span className="font-mono">{estado.appId}</span>
+              </>
+            ) : (
+              <span className="text-amber-600 dark:text-amber-500">
+                {" "}
+                · sem App ID — imagem de cabeçalho de template não vai funcionar até reconectar
+                preenchendo esse campo
+              </span>
+            )}
           </p>
         </Card>
       ) : null}
@@ -123,7 +138,7 @@ export function CanalOficialClient() {
           {estado?.connected ? "Trocar credencial" : "Conectar canal oficial"}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Os três valores vêm do seu app na Meta (<strong>WhatsApp → Configuração da API</strong>).
+          Os valores vêm do seu app na Meta (<strong>WhatsApp → Configuração da API</strong>).
           A credencial é <strong>validada com a Meta antes de ser gravada</strong> — se o número
           não responder, nada é salvo.
         </p>
@@ -148,6 +163,19 @@ export function CanalOficialClient() {
               placeholder="2434045433735175"
               required
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="appid">App ID (opcional)</Label>
+            <Input
+              id="appid"
+              value={form.app_id}
+              onChange={(e) => setForm((f) => ({ ...f, app_id: e.target.value }))}
+              placeholder={estado?.appId ? `${estado.appId} (já guardado)` : "1234567890123456"}
+            />
+            <span className="text-xs text-muted-foreground">
+              Necessário só pra criar template com imagem no cabeçalho. Fica em{" "}
+              <strong>Configurações básicas</strong> do seu app em developers.facebook.com.
+            </span>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="tok">Token de acesso</Label>

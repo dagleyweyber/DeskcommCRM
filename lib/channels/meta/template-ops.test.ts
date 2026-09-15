@@ -10,9 +10,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * pelo motivo errado (foi assim que `channel-adapter-meta.test.ts` documenta
  * ter acontecido quando a resolução por sessão entrou).
  */
-const sessaoNoBanco: { wabaId: string | null; token: string | null } = {
+const sessaoNoBanco: { wabaId: string | null; token: string | null; appId: string | null } = {
   wabaId: null,
   token: null,
+  appId: null,
 };
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
@@ -21,7 +22,11 @@ vi.mock("@/lib/supabase/admin", () => ({
         eq: () => ({
           maybeSingle: async () => ({
             data: sessaoNoBanco.wabaId
-              ? { meta_waba_id: sessaoNoBanco.wabaId, meta_token_encrypted: "\\xdeadbeef" }
+              ? {
+                  meta_waba_id: sessaoNoBanco.wabaId,
+                  meta_token_encrypted: "\\xdeadbeef",
+                  meta_app_id: sessaoNoBanco.appId,
+                }
               : null,
             error: null,
           }),
@@ -50,12 +55,44 @@ afterEach(() => {
   vi.resetModules();
   sessaoNoBanco.wabaId = null;
   sessaoNoBanco.token = null;
+  sessaoNoBanco.appId = null;
 });
 
 async function ops() {
   const mod = await import("./template-ops");
   return mod.metaTemplateOps;
 }
+
+// ---- migration 0172: appId nas credenciais resolvidas (upload de imagem de cabeçalho) ----
+describe("resolveCreds — appId (Resumable Upload API, migration 0172)", () => {
+  it("⭐ sessão com meta_app_id preenchido: appId vem junto no resultado", async () => {
+    sessaoNoBanco.wabaId = "waba-1";
+    sessaoNoBanco.appId = "app-da-sessao";
+    const mod = await import("./template-ops");
+
+    const creds = await mod.resolveCreds("5511999999999");
+    expect(creds.appId).toBe("app-da-sessao");
+  });
+
+  it("sessão SEM meta_app_id (canal conectado antes da 0172): appId é null, não quebra", async () => {
+    sessaoNoBanco.wabaId = "waba-1";
+    sessaoNoBanco.appId = null;
+    const mod = await import("./template-ops");
+
+    const creds = await mod.resolveCreds("5511999999999");
+    expect(creds.appId).toBeNull();
+  });
+
+  it("sem sessão, cai no env — META_APP_ID vira o appId", async () => {
+    vi.stubEnv("META_WABA_ID", "waba-do-env");
+    vi.stubEnv("META_SYSTEM_USER_TOKEN", "token-do-env");
+    vi.stubEnv("META_APP_ID", "app-do-env");
+    const mod = await import("./template-ops");
+
+    const creds = await mod.resolveCreds("qualquer");
+    expect(creds.appId).toBe("app-do-env");
+  });
+});
 
 describe("credencial — sessão primeiro, env como fallback", () => {
   it("com credencial NA SESSÃO, usa a WABA e o token dela", async () => {

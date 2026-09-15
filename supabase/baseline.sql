@@ -14257,3 +14257,16 @@ notify pgrst, 'reload schema';
 -- bloco, editado no lugar em vez de reconstruído em série.
 
 notify pgrst, 'reload schema';
+
+-- ---- channel_sessions.meta_app_id (migration 0172) ----
+-- Ver o cabeçalho da migration 0172: template com imagem no cabeçalho
+-- sempre falhava porque faltava o App ID da Meta pra chamar a Resumable
+-- Upload API. Nullable — canal conectado antes desta coluna continua
+-- funcionando pra template de texto/botão.
+alter table public.channel_sessions
+  add column if not exists meta_app_id text;
+
+comment on column public.channel_sessions.meta_app_id is
+  'App ID da Meta dono da WABA — necessário pra Resumable Upload API (imagem de cabeçalho de template). Nullable: canais conectados antes desta coluna continuam funcionando pra template sem imagem.';
+
+notify pgrst, 'reload schema';

@@ -92,16 +92,57 @@ describe("os elos que somem sem barulho", () => {
     expect(fonte).toMatch(/IDIOMAS_DA_DEFINICAO\.map/);
   });
 
-  it("a imagem do cabeçalho sobe pela rota de mídia compartilhada", () => {
-    // A rota é neutra de provider (só grava no storage e assina o link) —
-    // reaproveitar em vez de duplicar é a checagem que importa aqui.
+  it("a imagem do cabeçalho sobe pela rota EXCLUSIVA do canal oficial, não a do parceiro", () => {
+    // Migration 0172: a rota do parceiro (`.../partner/templates/media`)
+    // devolve uma URL do nosso Storage — errado pro contrato de criação de
+    // definição, que exige um HANDLE da Resumable Upload API da Meta. As
+    // duas rotas resolvem credencial de jeito diferente (canal oficial tem
+    // `meta_app_id`; o parceiro/Zernio, não) — reaproveitar uma rota só
+    // esconderia dois contratos atrás do mesmo path.
     const fonte = readFileSync("components/connections/TemplatesClient.tsx", "utf8");
-    expect(fonte).toMatch(/\/api\/v1\/channels\/partner\/templates\/media/);
+    expect(fonte).toMatch(/\/api\/v1\/channels\/templates\/media/);
+    expect(
+      fonte,
+      "voltou a chamar a rota do parceiro — ela devolve URL, não handle, e a Meta recusa",
+    ).not.toMatch(/\/api\/v1\/channels\/partner\/templates\/media/);
+  });
+
+  it("o upload devolve `handle`, não `url` — é o que vai em header_handle, não uma URL", () => {
+    const fonte = readFileSync("app/api/v1/channels/templates/media/route.ts", "utf8");
+    expect(fonte).toMatch(/uploadMediaHandle/);
+    expect(fonte).toMatch(/ok\(\{ handle: resultado\.handle \}/);
   });
 
   it("useCreateTemplate invalida o mesmo cache que o sync e o seletor do inbox leem", () => {
     const fonte = readFileSync("hooks/channels/useTemplates.ts", "utf8");
     const bloco = fonte.slice(fonte.indexOf("export function useCreateTemplate"));
     expect(bloco).toMatch(/queryKey: \["channel-templates"\]/);
+  });
+});
+
+// ---- migration 0172: App ID — sem ele, template com imagem nunca funciona ----
+describe("App ID do canal oficial (necessário só pra imagem de cabeçalho de template)", () => {
+  it("o schema de conexão aceita app_id, opcional (canal sem imagem continua funcionando sem ele)", () => {
+    const fonte = readFileSync("app/api/v1/channels/official/route.ts", "utf8");
+    expect(fonte).toMatch(/app_id: z\.string\(\)\.min\(5\)\.optional\(\)/);
+  });
+
+  it("reconectar sem digitar App ID de novo NÃO apaga o que já estava salvo", () => {
+    // A trava: `meta_app_id` só entra no patch quando `app_id` veio
+    // preenchido — regressão aqui apagaria silenciosamente uma credencial
+    // que já funcionava, na próxima vez que alguém só trocasse o token.
+    const fonte = readFileSync("app/api/v1/channels/official/route.ts", "utf8");
+    expect(fonte).toMatch(/\.\.\.\(app_id \? \{ meta_app_id: app_id \} : \{\}\)/);
+  });
+
+  it("o GET devolve appId — a tela precisa saber se falta preencher", () => {
+    const fonte = readFileSync("app/api/v1/channels/official/route.ts", "utf8");
+    expect(fonte).toMatch(/appId: data\?\.meta_app_id \?\? null/);
+  });
+
+  it("a tela tem o campo e avisa quando falta, sem travar o canal pra texto/botão", () => {
+    const fonte = readFileSync("components/connections/CanalOficialClient.tsx", "utf8");
+    expect(fonte).toMatch(/App ID \(opcional\)/);
+    expect(fonte).toMatch(/sem App ID — imagem de cabeçalho de template não vai funcionar/);
   });
 });

@@ -44,6 +44,10 @@ const conectarSchema = z.object({
   phone_number_id: z.string().min(5),
   waba_id: z.string().min(5),
   token: z.string().min(20),
+  // Opcional: canal já funciona pra texto/botão sem ele. Só bloqueia quem
+  // tenta subir imagem de cabeçalho de template (Resumable Upload API
+  // exige `/{app_id}/uploads`) — ver migration 0172.
+  app_id: z.string().min(5).optional(),
 });
 
 type Gate = { ok: true; orgId: string; userId: string } | { ok: false; resposta: NextResponse };
@@ -89,7 +93,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const consultar = () =>
     admin
       .from("channel_sessions")
-      .select("id, meta_phone_number_id, meta_waba_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
+      .select("id, meta_phone_number_id, meta_waba_id, meta_app_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
       .eq("organization_id", g.orgId)
       .eq("provider", CHANNEL_PROVIDER_META);
   const { data } = await queryTolerantToMissingArchived(
@@ -105,6 +109,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     hasToken: Boolean(data?.meta_token_encrypted),
     phoneNumberId: data?.meta_phone_number_id ?? null,
     wabaId: data?.meta_waba_id ?? null,
+    appId: data?.meta_app_id ?? null,
     displayName: data?.display_name ?? null,
     phoneNumber: data?.phone_number ?? null,
     status: data?.status ?? null,
@@ -130,7 +135,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       requestId,
     });
   }
-  const { phone_number_id, waba_id, token } = parsed.data;
+  const { phone_number_id, waba_id, token, app_id } = parsed.data;
 
   // VALIDA ANTES DE GRAVAR — a rota não sabe com quem fala; ela pergunta se a
   // credencial presta e o canal responde.
@@ -189,6 +194,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     provider: CHANNEL_PROVIDER_META,
     meta_phone_number_id: phone_number_id,
     meta_waba_id: waba_id,
+    // Só entra no patch quando preenchido — reconectar (trocar token) sem
+    // digitar o App ID de novo não pode apagar o que já estava salvo.
+    ...(app_id ? { meta_app_id: app_id } : {}),
     meta_token_encrypted: cifrado,
     phone_number: validacao.displayPhoneNumber ? `+${validacao.displayPhoneNumber.replace(/\D/g, "")}` : null,
     display_name: validacao.verifiedName ?? "Canal oficial",

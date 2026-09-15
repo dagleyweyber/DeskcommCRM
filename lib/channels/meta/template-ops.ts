@@ -24,10 +24,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import type { ChannelTemplate, ChannelTemplateDraft, ChannelTemplateOps } from "../types";
 
-interface WabaCreds {
+export interface WabaCreds {
   wabaId: string;
   token: string;
   graphVersion: string;
+  /**
+   * App ID da Meta dono da WABA — `null` quando a sessão foi conectada antes
+   * da 0172 (ou via env, sem `META_APP_ID`). Só bloqueia quem precisa dele
+   * (upload de imagem de cabeçalho de template, via Resumable Upload API);
+   * template de texto/botão nunca olha este campo.
+   */
+  appId: string | null;
 }
 
 function graphVersion(): string {
@@ -41,7 +48,7 @@ async function credsFromSession(
   if (!phoneNumberId) return null;
   const { data } = await admin
     .from("channel_sessions")
-    .select("meta_waba_id, meta_token_encrypted")
+    .select("meta_waba_id, meta_token_encrypted, meta_app_id")
     .eq("meta_phone_number_id", phoneNumberId)
     .maybeSingle();
 
@@ -52,17 +59,23 @@ async function credsFromSession(
   const token = await decryptWebhookSecret(admin, cifrado as unknown as string);
   if (!token) return null;
 
-  return { wabaId, token, graphVersion: graphVersion() };
+  return { wabaId, token, graphVersion: graphVersion(), appId: (data.meta_app_id as string | null) ?? null };
 }
 
 function credsFromEnv(): WabaCreds | null {
   const wabaId = process.env.META_WABA_ID;
   const token = process.env.META_SYSTEM_USER_TOKEN;
   if (!wabaId || !token) return null;
-  return { wabaId, token, graphVersion: graphVersion() };
+  return { wabaId, token, graphVersion: graphVersion(), appId: process.env.META_APP_ID ?? null };
 }
 
-async function resolveCreds(sessionRef: string): Promise<WabaCreds> {
+/**
+ * Exportado — a rota de upload de mídia de template (Fase F) resolve a MESMA
+ * credencial daqui em vez de duplicar a busca em `channel_sessions`. Um
+ * segundo resolvedor divergiria da fonte no dia em que um dos dois ganhasse
+ * um caso a mais (ex.: fallback novo).
+ */
+export async function resolveCreds(sessionRef: string): Promise<WabaCreds> {
   const admin = createAdminClient();
   const creds = (await credsFromSession(admin, sessionRef)) ?? credsFromEnv();
   if (!creds) {

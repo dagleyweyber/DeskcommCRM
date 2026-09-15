@@ -158,8 +158,16 @@ export function montarComponents(input: {
   const midia = input.cabecalho?.midiaUrl?.trim();
   const tituloTexto = input.cabecalho?.texto?.trim();
   if (midia) {
-    // `header_handle` é o campo do contrato para mídia, e pede URL PÚBLICA —
-    // a plataforma baixa o arquivo na revisão. Link autenticado é recusado.
+    // `header_handle` é o campo do contrato pra mídia de cabeçalho — mas
+    // pede um HANDLE opaco da Resumable Upload API da Meta
+    // (`lib/channels/meta/resumable-upload.ts`), não uma URL. Mandar URL
+    // aqui é recusado com "Parâmetro de exemplo não fornecido para o tipo
+    // do título" — achado ao vivo (RevitaFio Mossoró): este comentário
+    // dizia o contrário até a 0172, e foi exatamente por isso que todo
+    // template com imagem falhava, sempre, para qualquer imagem. Quem monta
+    // este valor (`midia`, o parâmetro `cabecalho.midiaUrl`) tem que
+    // entregar o handle já resolvido — o canal oficial resolve via
+    // `app/api/v1/channels/templates/media`.
     components.push({
       type: "HEADER",
       format: "IMAGE",

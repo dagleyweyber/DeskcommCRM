@@ -10,6 +10,7 @@ export interface OfficialChannelState {
   hasToken: boolean;
   phoneNumberId: string | null;
   wabaId: string | null;
+  appId: string | null;
   displayName: string | null;
   phoneNumber: string | null;
   status: string | null;
@@ -24,6 +25,7 @@ export interface ConnectInput {
   phone_number_id: string;
   waba_id: string;
   token: string;
+  app_id?: string;
 }
 
 export function useOfficialChannel() {
