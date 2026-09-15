@@ -115,6 +115,14 @@ export interface MessageStatusEvent {
   recipient: string | null;
   errorCode: number | null;
   errorTitle: string | null;
+  /**
+   * `error.message` — geralmente um rótulo genérico ("Message failed to
+   * send"), mesmo padrão de `template-ops.ts`'s `call()`: sozinho não diz o
+   * motivo. Capturado mesmo assim porque às vezes é o único campo presente.
+   */
+  errorMessage: string | null;
+  /** `error.error_data.details` — o campo que costuma ter o motivo ESPECÍFICO. */
+  errorDetails: string | null;
 }
 
 export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent;
@@ -258,6 +266,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             ? (raw.errors as Record<string, unknown>[])
             : [];
           const first = errors[0] ?? {};
+          const errorData = first.error_data as Record<string, unknown> | undefined;
           out.push({
             kind: "message_status",
             wabaId,
@@ -266,6 +275,8 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             recipient: str(raw.recipient_id),
             errorCode: typeof first.code === "number" ? first.code : null,
             errorTitle: str(first.title),
+            errorMessage: str(first.message),
+            errorDetails: str(errorData?.details),
           });
         }
       }

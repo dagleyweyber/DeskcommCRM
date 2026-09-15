@@ -114,9 +114,31 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
     } else {
+      // Achado ao vivo (RevitaFio Mossoró): campanha com TODO envio "failed"
+      // e nenhum jeito de saber por quê — o `errorCode`/`errorTitle` que a
+      // Meta manda no próprio webhook de status era descartado aqui, e
+      // `messages.metadata` ficava `{}` pra sempre. Falha de entrega
+      // (assíncrona, depois de um `wamid` válido) é diferente de recusa na
+      // submissão (síncrona, já tratada em `template-ops.ts`) — as duas
+      // precisam do motivo real, cada uma na sua camada.
+      const detalheErro =
+        e.status === "failed"
+          ? Array.from(
+              new Set([e.errorTitle, e.errorMessage, e.errorDetails].filter(
+                (p): p is string => Boolean(p && p.trim()),
+              )),
+            ).join(" — ") || null
+          : null;
+
       await admin
         .from("messages")
-        .update({ status: e.status === "failed" ? "failed" : "sent", updated_at: now })
+        .update({
+          status: e.status === "failed" ? "failed" : "sent",
+          updated_at: now,
+          ...(detalheErro
+            ? { metadata: { failure_code: e.errorCode, failure_reason: detalheErro } }
+            : {}),
+        })
         .eq("organization_id", session.organizationId)
         .eq("external_id", e.externalId);
     }

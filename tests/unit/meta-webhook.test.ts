@@ -134,6 +134,19 @@ describe("parseMetaWebhook", () => {
                     recipient_id: "5531888",
                     errors: [{ code: 131047, title: "Re-engagement message" }],
                   },
+                  {
+                    id: "wamid.C",
+                    status: "failed",
+                    recipient_id: "5531777",
+                    errors: [
+                      {
+                        code: 100,
+                        title: "Invalid parameter",
+                        message: "Param template.components.parameters.image.link is not a valid URI.",
+                        error_data: { details: "URI malformada" },
+                      },
+                    ],
+                  },
                 ],
               },
             },
@@ -141,12 +154,24 @@ describe("parseMetaWebhook", () => {
         },
       ],
     });
-    expect(eventos).toHaveLength(2);
+    expect(eventos).toHaveLength(3);
     expect(eventos[1]).toMatchObject({
       kind: "message_status",
       externalId: "wamid.B",
       status: "failed",
       errorCode: 131047,
+    });
+    // Achado ao vivo (RevitaFio Mossoró): `message`/`error_data.details` —
+    // não só `title` — carregam o motivo ESPECÍFICO que faltava pra
+    // diagnosticar campanha com todo envio "failed" sem pista nenhuma.
+    expect(eventos[2]).toMatchObject({
+      kind: "message_status",
+      externalId: "wamid.C",
+      status: "failed",
+      errorCode: 100,
+      errorTitle: "Invalid parameter",
+      errorMessage: "Param template.components.parameters.image.link is not a valid URI.",
+      errorDetails: "URI malformada",
     });
   });
 

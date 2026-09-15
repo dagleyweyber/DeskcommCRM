@@ -26,6 +26,39 @@ const FONTES_BASE: Array<{ kind: VariableSource["kind"]; label: string }> = [
   { kind: "contact_first_name", label: "Primeiro nome" },
 ];
 
+/** Dica do campo de texto fixo — diz o FORMATO esperado, não só "valor". */
+export function placeholderPara(expects: string): string {
+  switch (expects) {
+    case "image":
+      return "https://…/imagem.jpg";
+    case "video":
+      return "https://…/video.mp4";
+    case "document":
+      return "https://…/arquivo.pdf";
+    case "coupon_code":
+      return "Código do cupom";
+    default:
+      return "Valor pra todo mundo";
+  }
+}
+
+/**
+ * Slot de MÍDIA/cupom só aceita texto fixo — nome/primeiro-nome do contato
+ * nunca é uma URL de imagem nem um código de cupom. Slot de TEXTO (o caso
+ * comum, `{{1}}` no corpo ou num botão) continua com todas as fontes.
+ *
+ * Achado ao vivo (RevitaFio Mossoró): campanha com template de cabeçalho de
+ * imagem mandava "Primeiro nome" pro campo que a Meta espera como
+ * `image.link` — o operador escolheu "Primeiro nome" porque a tela oferecia
+ * essa opção pra QUALQUER slot, sem diferenciar mídia de texto. Toda
+ * mensagem da campanha falhava com `(#100) Param ... image.link is not a
+ * valid URI`. A opção errada nem aparece mais.
+ */
+export function fontesPara(expects: string, extras: Array<{ kind: VariableSource["kind"]; label: string }>) {
+  if (expects === "text" || expects === "url_suffix") return [...FONTES_BASE, ...extras];
+  return FONTES_BASE.filter((f) => f.kind === "fixed");
+}
+
 interface Props {
   aprovados: TemplateAprovado[];
   templateEscolhido: string;
@@ -56,8 +89,6 @@ export function TemplateEVariaveisPicker({
         : null,
     [atual],
   );
-  const fontes = [...FONTES_BASE, ...fontesExtras];
-
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -97,6 +128,7 @@ export function TemplateEVariaveisPicker({
           {contrato.slots.map((s) => {
             const key = slotKey(s.address, s.key);
             const fonte = mapping[key];
+            const fontes = fontesPara(s.expects, fontesExtras);
             return (
               <div key={key} className="flex flex-wrap items-center gap-2">
                 <span className="w-40 shrink-0 text-xs text-muted-foreground">
@@ -125,7 +157,7 @@ export function TemplateEVariaveisPicker({
                     onChange={(e) =>
                       onMappingChange({ ...mapping, [key]: { kind: "fixed", value: e.target.value } })
                     }
-                    placeholder="Valor pra todo mundo"
+                    placeholder={placeholderPara(s.expects)}
                     aria-label={`Texto fixo de ${describeAddress(s.address)}`}
                     className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
                   />
