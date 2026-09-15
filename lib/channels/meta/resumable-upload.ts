@@ -22,9 +22,15 @@
  *    header `file_offset: 0` e o corpo sendo os BYTES crus do arquivo (não
  *    multipart, não base64). Devolve `{h: "<handle>"}`.
  *
- * As duas chamadas usam `Authorization: OAuth <token>` (não `Bearer`) — é o
- * esquema que a documentação da Resumable Upload API pede, diferente do
- * resto da Graph API neste repo.
+ * O passo 1 (abrir sessão) leva o token como QUERY PARAM
+ * (`access_token=...`), não `Authorization` — achado ao vivo (RevitaFio
+ * Mossoró): a versão anterior deste arquivo mandava o token só no header
+ * `Authorization: OAuth` pro passo 1, e a Meta respondia "Object with ID
+ * '<app_id>' does not exist, cannot be loaded due to missing permissions"
+ * — o erro genérico de chamada SEM autenticação reconhecida, não de app_id
+ * errado nem de permissão faltando de verdade. O passo 2 (subir os bytes)
+ * é o oposto: usa `Authorization: OAuth <token>` (não `Bearer`) — os dois
+ * passos da Resumable Upload API autenticam de jeitos diferentes.
  */
 const GRAPH_API_VERSION_DEFAULT = "v22.0";
 const TIMEOUT_MS = 20_000;
@@ -65,12 +71,12 @@ export async function uploadMediaHandle(
       file_name: input.fileName,
       file_length: String(input.bytes.byteLength),
       file_type: input.mime,
+      access_token: input.token,
     });
     const sessaoRes = await fetchFn(
       `https://graph.facebook.com/${version}/${encodeURIComponent(input.appId)}/uploads?${qs}`,
       {
         method: "POST",
-        headers: { Authorization: `OAuth ${input.token}` },
         redirect: "manual",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },

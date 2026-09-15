@@ -49,8 +49,13 @@ describe("uploadMediaHandle", () => {
     const [primeiraUrl, primeiraInit] = fetchImpl.mock.calls[0]!;
     expect(String(primeiraUrl)).toContain("/app-1/uploads");
     expect(String(primeiraUrl)).toContain("file_type=image%2Fjpeg");
+    // Achado ao vivo (RevitaFio Mossoró): o token deste passo vai como QUERY
+    // PARAM, não header — mandar só no `Authorization` aqui é o bug exato
+    // que fazia a Meta responder "Object with ID '<app_id>' does not
+    // exist... missing permissions" (o erro genérico de chamada sem
+    // autenticação reconhecida NESTE passo específico).
+    expect(String(primeiraUrl)).toContain("access_token=token-xyz");
     expect((primeiraInit as RequestInit).method).toBe("POST");
-    expect((primeiraInit as RequestInit).headers).toMatchObject({ Authorization: "OAuth token-xyz" });
 
     const [segundaUrl, segundaInit] = fetchImpl.mock.calls[1]!;
     expect(String(segundaUrl)).toContain("upload:sessao123");
