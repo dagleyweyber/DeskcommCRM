@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { fontesPara, placeholderPara } from "./TemplateEVariaveisPicker";
@@ -58,5 +60,36 @@ describe("placeholderPara — dica do campo de texto fixo por tipo", () => {
 
   it("text cai no genérico de sempre", () => {
     expect(placeholderPara("text")).toBe("Valor pra todo mundo");
+  });
+});
+
+/**
+ * O pedido depois do fix acima: "não tem uma forma melhor, minhas imagens
+ * não estão hospedadas em lugar nenhum" — o CRM já tem upload funcionando
+ * (o composer do inbox manda imagem pelo canal oficial reaproveitando a
+ * MESMA rota de Storage), só faltava o botão aqui. Envio de mensagem aceita
+ * link direto (`lib/channels/adapters/meta-cloud.ts`'s `mediaPayload`); só
+ * CRIAÇÃO de definição exige o handle da Resumable Upload API — rotas
+ * diferentes de propósito, não confundir uma pela outra de novo.
+ */
+describe("upload de imagem pro slot de mídia (fonte-grep — sem harness de file input em RTL)", () => {
+  const fonte = readFileSync("components/campaigns/TemplateEVariaveisPicker.tsx", "utf8");
+
+  it("usa a rota de Storage (URL assinada), não a de criação de template (handle)", () => {
+    expect(fonte).toMatch(/\/api\/v1\/channels\/partner\/templates\/media/);
+    expect(
+      fonte,
+      "rota errada aqui geraria handle, não URL — 'não é uma URI válida' de novo no envio",
+    ).not.toMatch(/\/api\/v1\/channels\/templates\/media["'`]/);
+  });
+
+  it("botão de upload só aparece pra slot 'image' — vídeo/documento continuam por URL colada", () => {
+    const bloco = fonte.slice(fonte.indexOf("subirImagem(key, f)") - 1000, fonte.indexOf("subirImagem(key, f)"));
+    expect(bloco).toMatch(/s\.expects === "image"/);
+  });
+
+  it("sucesso do upload grava a URL devolvida como fonte 'fixed' do slot", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function subirImagem"));
+    expect(bloco).toMatch(/kind: "fixed", value: j\.data\.url/);
   });
 });

@@ -1,5 +1,6 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { slotKey } from "@/lib/channels/meta/build-components";
@@ -77,6 +78,32 @@ export function TemplateEVariaveisPicker({
   onMappingChange,
   fontesExtras = [],
 }: Props) {
+  // Chave do slot que está subindo agora, ou `null` — nunca mais de um por
+  // vez faz sentido aqui (um clique trava o próprio botão).
+  const [subindoSlot, setSubindoSlot] = useState<string | null>(null);
+
+  async function subirImagem(key: string, file: File): Promise<void> {
+    setSubindoSlot(key);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      // Rota do Storage (URL assinada), não a de criação de template — o
+      // ENVIO de mensagem aceita link direto (mesmo caminho que o composer
+      // do inbox já usa pra mandar imagem pelo canal oficial,
+      // `lib/channels/adapters/meta-cloud.ts`'s `mediaPayload`); só a
+      // CRIAÇÃO de definição é que exige o handle da Resumable Upload API.
+      const r = await fetch("/api/v1/channels/partner/templates/media", { method: "POST", body: fd });
+      const j = (await r.json()) as { data?: { url?: string }; error?: { message?: string } };
+      if (!r.ok || !j.data?.url) {
+        toast.error(j.error?.message ?? "Não consegui subir a imagem.");
+        return;
+      }
+      onMappingChange({ ...mapping, [key]: { kind: "fixed", value: j.data.url } });
+    } finally {
+      setSubindoSlot(null);
+    }
+  }
+
   const atual = aprovados.find((t) => `${t.name}|${t.language}` === templateEscolhido) ?? null;
   const contrato = useMemo(
     () =>
@@ -161,6 +188,29 @@ export function TemplateEVariaveisPicker({
                     aria-label={`Texto fixo de ${describeAddress(s.address)}`}
                     className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
                   />
+                )}
+                {/* Só imagem: a rota de Storage que faz o upload (ver
+                    `subirImagem` acima) só aceita JPG/PNG — vídeo/documento
+                    continuam por URL colada até a rota ganhar esses tipos. */}
+                {(!fonte || fonte.kind === "fixed") && s.expects === "image" && (
+                  <label
+                    className="flex h-8 shrink-0 cursor-pointer items-center rounded-md border border-dashed border-input px-2 text-xs text-muted-foreground hover:bg-muted"
+                    aria-disabled={subindoSlot === key}
+                  >
+                    {subindoSlot === key ? "Subindo…" : "Subir imagem"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      className="hidden"
+                      disabled={subindoSlot === key}
+                      aria-label={`Subir imagem pra ${describeAddress(s.address)}`}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void subirImagem(key, f);
+                      }}
+                    />
+                  </label>
                 )}
               </div>
             );
