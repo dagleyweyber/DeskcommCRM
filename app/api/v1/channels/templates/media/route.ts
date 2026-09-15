@@ -11,11 +11,12 @@
  * objeto totalmente diferente: um handle opaco, obtido subindo o arquivo
  * PARA a Meta antes de submeter o template — ver `resumable-upload.ts`.
  *
- * Duplicar em vez de ramificar a rota antiga: o canal parceiro (Zernio)
- * resolve credencial de outro jeito (`lib/channels/zernio/`, sem
- * `meta_app_id` — a coluna só existe em sessões `meta_cloud`) e essa
- * bifurcação dentro de uma rota só teria virado um `if` escondendo dois
- * contratos diferentes atrás do mesmo path. Rota nova, contrato explícito.
+ * Duplicar em vez de ramificar a rota antiga: o canal parceiro resolve
+ * credencial por um caminho totalmente diferente (sem o App ID que esta
+ * rota precisa) — bifurcar por dentro de UMA rota só teria virado um `if`
+ * escondendo dois contratos diferentes atrás do mesmo path. Rota nova,
+ * contrato explícito; a identidade de qual canal é qual fica onde já mora
+ * (`lib/channels/`), não repetida aqui.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
