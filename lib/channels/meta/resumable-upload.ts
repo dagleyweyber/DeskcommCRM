@@ -94,7 +94,11 @@ export async function uploadMediaHandle(
         file_offset: "0",
         "Content-Type": "application/octet-stream",
       },
-      body: input.bytes,
+      // `as unknown as BodyInit`: `Uint8Array<ArrayBufferLike>` (o tipo
+      // genérico da lib global) não bate estruturalmente com o `BodyInit`
+      // da lib DOM nesta versão do TS — atrito só de TIPO, `fetch` (undici,
+      // em runtime) aceita `Uint8Array` cru normalmente.
+      body: input.bytes as unknown as BodyInit,
       redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

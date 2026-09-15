@@ -11,7 +11,11 @@ import { uploadMediaHandle } from "./resumable-upload";
  */
 function fetchMock(respostas: Array<{ ok: boolean; status: number; body: unknown }>) {
   let i = 0;
-  return vi.fn(async () => {
+  // Assinatura explícita (não `async () => ...`): sem ela o TS infere
+  // `Parameters<typeof fetchImpl>` como `[]`, e todo `mock.calls[n][k]`
+  // vira "índice fora da tupla" — o mock precisa aceitar os mesmos
+  // argumentos de `fetch` pra `fetchImpl?: typeof fetch` bater o tipo.
+  return vi.fn(async (..._args: Parameters<typeof fetch>) => {
     const r = respostas[i++]!;
     return {
       ok: r.ok,
