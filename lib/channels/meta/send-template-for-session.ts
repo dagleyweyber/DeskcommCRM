@@ -101,7 +101,7 @@ export async function sendTemplateForSession(
   });
 
   if (resultado.sent) {
-    return { externalId: resultado.externalId, headerMedia: resultado.headerMedia };
+    return { externalId: resultado.externalId, headerMedia: resultado.headerMedia ?? null };
   }
 
   switch (resultado.reason) {

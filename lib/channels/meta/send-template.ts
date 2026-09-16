@@ -47,7 +47,7 @@ export interface SendTemplateInput {
  * ou se tenta de novo.
  */
 export type SendTemplateResult =
-  | { sent: true; externalId: string | null; headerMedia: HeaderMedia | null }
+  | { sent: true; externalId: string | null; headerMedia?: HeaderMedia | null }
   // `ok` NUNCA é motivo de falha — excluí-lo torna o switch do tradutor exaustivo
   // por construção, em vez de exigir um `default` que engoliria caso novo em silêncio.
   | { sent: false; reason: Exclude<BindingState, "ok"> }
