@@ -49,6 +49,16 @@ export interface UserOrgMembership {
   organization_id: string;
   organization_name: string;
   role: Role;
+  /**
+   * `organizations.status` desta org. Existe aqui (e não só na consulta de
+   * `app/app/layout.tsx`) porque `resolveActiveOrg` precisa dele pra não
+   * escolher, na ausência de cookie, a primeira linha que a consulta sem
+   * `ORDER BY` disser — que pode ser uma org suspensa enquanto o mesmo
+   * usuário tem outra ativa (achado ao vivo: atendente da RevitaFio
+   * Mossoró tinha as duas, a duplicata suspensa e a de verdade, e caía
+   * sempre na suspensa).
+   */
+  organization_status: string;
 }
 
 export interface AuthUser {

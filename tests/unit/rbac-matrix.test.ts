@@ -82,7 +82,9 @@ function session(role: Role | null, tables: Record<string, unknown> = {}) {
         full_name: null,
         avatar_url: null,
         is_platform_admin: false,
-        organizations: [{ organization_id: ORG_ID, organization_name: "Org", role }],
+        organizations: [
+          { organization_id: ORG_ID, organization_name: "Org", role, organization_status: "active" },
+        ],
       }
     : null;
   vi.mocked(loadAuthUser).mockResolvedValue(user);

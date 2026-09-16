@@ -40,7 +40,9 @@ function sessao(papel: Role) {
     full_name: "Ana",
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG, organization_name: "Org", role: papel }],
+    organizations: [
+      { organization_id: ORG, organization_name: "Org", role: papel, organization_status: "active" },
+    ],
   };
   vi.mocked(requireRole).mockImplementation(async (min: Role) =>
     ROLE_RANK[papel] >= ROLE_RANK[min]

@@ -182,7 +182,9 @@ function authOk(): void {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG, organization_name: "Org", role: "admin" }],
+    organizations: [
+      { organization_id: ORG, organization_name: "Org", role: "admin", organization_status: "active" },
+    ],
   };
   vi.mocked(requireRole).mockResolvedValue({
     ok: true,

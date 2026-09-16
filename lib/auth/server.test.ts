@@ -39,7 +39,12 @@ const PLATFORM_ADMIN: AuthUser = {
   avatar_url: null,
   is_platform_admin: true,
   organizations: [
-    { organization_id: OWN_ORG_ID, organization_name: "Ads Pro Company", role: "admin" },
+    {
+      organization_id: OWN_ORG_ID,
+      organization_name: "Ads Pro Company",
+      role: "admin",
+      organization_status: "active",
+    },
   ],
 };
 
@@ -118,5 +123,78 @@ describe("resolveActiveOrg — impersonate (S-11.07)", () => {
     await resolveActiveOrg(usuarioComum);
 
     expect(verifyImpersonateCookie).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Achado ao vivo (RevitaFio Mossoró, 2026-09-16): a atendente tinha DUAS
+ * orgs — a duplicata criada por engano no cadastro (suspensa no mesmo dia)
+ * e a de verdade (ativa). Sem cookie de org ativa (primeiro acesso pela
+ * tela, não por troca explícita), a escolha caía na primeira linha que
+ * `user_organizations` devolvesse — sem `ORDER BY`, podia ser a suspensa —
+ * e ela via "conta suspensa" com acesso perfeitamente válido do lado.
+ */
+describe("resolveActiveOrg — prefere org ATIVA quando o usuário tem mais de uma", () => {
+  const SUSPENSA_ID = "44444444-4444-4444-8444-444444444444";
+  const ATIVA_ID = "55555555-5555-4555-8555-555555555555";
+  const USUARIO_COM_DUAS_ORGS = (ordem: ["suspensa" | "ativa", "suspensa" | "ativa"]): AuthUser => {
+    const suspensa = {
+      organization_id: SUSPENSA_ID,
+      organization_name: "Revitafio Mossoró (duplicata)",
+      role: "admin" as const,
+      organization_status: "suspended",
+    };
+    const ativa = {
+      organization_id: ATIVA_ID,
+      organization_name: "RevitaFio Mossoro",
+      role: "admin" as const,
+      organization_status: "active",
+    };
+    const mapa = { suspensa, ativa };
+    return { ...PLATFORM_ADMIN, is_platform_admin: false, organizations: [mapa[ordem[0]], mapa[ordem[1]]] };
+  };
+
+  it("⭐ sem cookie, suspensa vindo PRIMEIRO — ainda assim resolve pra ativa", async () => {
+    const { resolveActiveOrg } = await import("./server");
+    const org = await resolveActiveOrg(USUARIO_COM_DUAS_ORGS(["suspensa", "ativa"]));
+    expect(org).toEqual({ orgId: ATIVA_ID, name: "RevitaFio Mossoro", role: "admin" });
+  });
+
+  it("sem cookie, ativa vindo primeiro — comportamento inalterado", async () => {
+    const { resolveActiveOrg } = await import("./server");
+    const org = await resolveActiveOrg(USUARIO_COM_DUAS_ORGS(["ativa", "suspensa"]));
+    expect(org).toEqual({ orgId: ATIVA_ID, name: "RevitaFio Mossoro", role: "admin" });
+  });
+
+  it("⭐ cookie aponta pra org que virou suspensa DEPOIS — não trava, cai pra ativa", async () => {
+    cookieStore.set("active_org", SUSPENSA_ID);
+    const { resolveActiveOrg } = await import("./server");
+    const org = await resolveActiveOrg(USUARIO_COM_DUAS_ORGS(["suspensa", "ativa"]));
+    expect(org).toEqual({ orgId: ATIVA_ID, name: "RevitaFio Mossoro", role: "admin" });
+  });
+
+  it("cookie aponta pra org ativa — respeita a escolha explícita normalmente", async () => {
+    cookieStore.set("active_org", ATIVA_ID);
+    const { resolveActiveOrg } = await import("./server");
+    const org = await resolveActiveOrg(USUARIO_COM_DUAS_ORGS(["suspensa", "ativa"]));
+    expect(org).toEqual({ orgId: ATIVA_ID, name: "RevitaFio Mossoro", role: "admin" });
+  });
+
+  it("única org é suspensa — continua mostrando a página de conta suspensa (não há pra onde cair)", async () => {
+    const soSuspensa: AuthUser = {
+      ...PLATFORM_ADMIN,
+      is_platform_admin: false,
+      organizations: [
+        {
+          organization_id: SUSPENSA_ID,
+          organization_name: "Revitafio Mossoró (duplicata)",
+          role: "admin",
+          organization_status: "suspended",
+        },
+      ],
+    };
+    const { resolveActiveOrg } = await import("./server");
+    const org = await resolveActiveOrg(soSuspensa);
+    expect(org).toEqual({ orgId: SUSPENSA_ID, name: "Revitafio Mossoró (duplicata)", role: "admin" });
   });
 });

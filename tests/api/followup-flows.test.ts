@@ -217,7 +217,9 @@ function session(effectiveRole: Role, db: ReturnType<typeof makeDb>) {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG_ID, organization_name: "Org", role: effectiveRole }],
+    organizations: [
+      { organization_id: ORG_ID, organization_name: "Org", role: effectiveRole, organization_status: "active" },
+    ],
   };
   vi.mocked(requireRole).mockImplementation(async (min: Role) => {
     if (ROLE_RANK[effectiveRole] >= ROLE_RANK[min]) {

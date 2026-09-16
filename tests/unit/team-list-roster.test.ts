@@ -84,7 +84,9 @@ function managerSession(rows: Array<Record<string, unknown>>, spy: QuerySpy) {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG_ID, organization_name: "Org", role: "manager" }],
+    organizations: [
+      { organization_id: ORG_ID, organization_name: "Org", role: "manager", organization_status: "active" },
+    ],
   };
   vi.mocked(loadAuthUser).mockResolvedValue(user);
   vi.mocked(resolveActiveOrg).mockResolvedValue({ orgId: ORG_ID, name: "Org", role: "manager" });

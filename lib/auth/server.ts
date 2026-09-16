@@ -50,7 +50,10 @@ async function resolveImpersonatedOrg(authUser: AuthUser): Promise<ActiveOrg | n
 interface RawMembershipRow {
   organization_id: string;
   role: string;
-  organizations: { display_name: string } | { display_name: string }[] | null;
+  organizations:
+    | { display_name: string; status: string }
+    | { display_name: string; status: string }[]
+    | null;
 }
 
 /**
@@ -84,7 +87,7 @@ export async function loadAuthUser(): Promise<AuthUser | null> {
   // Org memberships (only active = not revoked, accepted)
   const { data: rawMemberships, error: membErro } = await supabase
     .from("user_organizations")
-    .select("organization_id, role, organizations(display_name)")
+    .select("organization_id, role, organizations(display_name, status)")
     .eq("user_id", user.id)
     .is("revoked_at", null);
 
@@ -123,11 +126,12 @@ export async function loadAuthUser(): Promise<AuthUser | null> {
   const rows = (rawMemberships ?? []) as RawMembershipRow[];
   const memberships: UserOrgMembership[] = rows.map((row) => {
     const orgs = row.organizations;
-    const name = Array.isArray(orgs) ? (orgs[0]?.display_name ?? "—") : (orgs?.display_name ?? "—");
+    const org = Array.isArray(orgs) ? orgs[0] : orgs;
     return {
       organization_id: row.organization_id,
-      organization_name: name,
+      organization_name: org?.display_name ?? "—",
       role: row.role as Role,
+      organization_status: org?.status ?? "active",
     };
   });
 
@@ -148,7 +152,8 @@ export async function loadAuthUser(): Promise<AuthUser | null> {
 
 /**
  * Resolves the active organization for the current request.
- * Priority: cookie `active_org` (if member of) → first membership.
+ * Priority: cookie `active_org` (if member of, and ATIVA) → primeira membership ATIVA
+ * → primeira membership (suspensa) se for a única que existe.
  * Returns null if user has zero memberships.
  */
 export async function resolveActiveOrg(authUser: AuthUser): Promise<ActiveOrg | null> {
@@ -160,13 +165,29 @@ export async function resolveActiveOrg(authUser: AuthUser): Promise<ActiveOrg | 
   const cookieOrg = store.get(ACTIVE_ORG_COOKIE)?.value;
   if (cookieOrg) {
     const found = authUser.organizations.find((o) => o.organization_id === cookieOrg);
-    if (found) {
+    // Cookie aponta pra membership real E ativa: honra a escolha explícita.
+    // Se ela virou suspensa desde a última visita, NÃO trava aqui — cai pro
+    // mesmo desempate de baixo, porque o cookie pode ser só resquício do
+    // cadastro inicial (achado ao vivo, ver comentário abaixo), não uma
+    // escolha que o usuário faria de novo se pudesse.
+    if (found && found.organization_status !== "suspended") {
       return { orgId: found.organization_id, name: found.organization_name, role: found.role };
     }
   }
-  const first = authUser.organizations[0];
-  if (!first) return null;
-  return { orgId: first.organization_id, name: first.organization_name, role: first.role };
+  // Sem cookie utilizável: a escolha cairia na consulta de `loadAuthUser`,
+  // que não tem `ORDER BY` — a ordem não é garantida. Um usuário membro de
+  // duas orgs (achado ao vivo: atendente da RevitaFio Mossoró tinha a
+  // duplicata suspensa, criada por engano no próprio dia do cadastro — e o
+  // cookie `active_org` do navegador dela ainda apontava pra essa duplicata
+  // — E a org de verdade) ficava trancado do lado de fora com "conta
+  // suspensa" mesmo tendo acesso perfeitamente válido a outra org. Prefere
+  // a primeira ATIVA; só cai numa suspensa se for a ÚNICA que o usuário tem
+  // — aí "conta suspensa" volta a ser a informação certa.
+  const preferida =
+    authUser.organizations.find((o) => o.organization_status !== "suspended") ??
+    authUser.organizations[0];
+  if (!preferida) return null;
+  return { orgId: preferida.organization_id, name: preferida.organization_name, role: preferida.role };
 }
 
 /**

@@ -62,7 +62,7 @@ beforeEach(() => {
     avatar_url: null,
     is_platform_admin: false,
     organizations: [
-      { organization_id: ORG_ID, organization_name: "Org", role: "manager" },
+      { organization_id: ORG_ID, organization_name: "Org", role: "manager", organization_status: "active" },
     ],
   } as AuthUser);
   vi.mocked(resolveActiveOrg).mockResolvedValue({

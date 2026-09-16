@@ -273,7 +273,9 @@ const FAKE_USER: AuthUser = {
   full_name: null,
   avatar_url: null,
   is_platform_admin: false,
-  organizations: [{ organization_id: ORG, organization_name: "Gov Inv BulkEv", role: "manager" }],
+  organizations: [
+    { organization_id: ORG, organization_name: "Gov Inv BulkEv", role: "manager", organization_status: "active" },
+  ],
 };
 
 beforeAll(() => {

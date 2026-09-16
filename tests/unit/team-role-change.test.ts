@@ -83,7 +83,9 @@ function adminSession(state: StubState) {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG_ID, organization_name: "Org", role: "admin" }],
+    organizations: [
+      { organization_id: ORG_ID, organization_name: "Org", role: "admin", organization_status: "active" },
+    ],
   };
   vi.mocked(loadAuthUser).mockResolvedValue(user);
   vi.mocked(resolveActiveOrg).mockResolvedValue({ orgId: ORG_ID, name: "Org", role: "admin" });

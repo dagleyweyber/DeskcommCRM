@@ -35,7 +35,7 @@ function authUserFixture(role: Role | null, platformAdmin = false): AuthUser {
     avatar_url: null,
     is_platform_admin: platformAdmin,
     organizations: role
-      ? [{ organization_id: ORG_ID, organization_name: "Org", role }]
+      ? [{ organization_id: ORG_ID, organization_name: "Org", role, organization_status: "active" }]
       : [],
   };
 }
@@ -135,9 +135,21 @@ describe("requireRole — helper único (spec 13 §4)", () => {
       vi.mocked(loadAuthUser).mockResolvedValue({
         ...authUserFixture(roleInActive),
         organizations: [
-          { organization_id: ORG_ID, organization_name: "Org A", role: roleInActive },
+          {
+            organization_id: ORG_ID,
+            organization_name: "Org A",
+            role: roleInActive,
+            organization_status: "active",
+          },
           ...(roleInOther
-            ? [{ organization_id: OTHER_ORG, organization_name: "Org B", role: roleInOther }]
+            ? [
+                {
+                  organization_id: OTHER_ORG,
+                  organization_name: "Org B",
+                  role: roleInOther,
+                  organization_status: "active",
+                },
+              ]
             : []),
         ],
       });

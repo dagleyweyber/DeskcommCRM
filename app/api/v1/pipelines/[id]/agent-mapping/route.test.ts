@@ -145,7 +145,9 @@ function authOk(role: "manager" | "admin" = "manager") {
     full_name: null,
     avatar_url: null,
     is_platform_admin: false,
-    organizations: [{ organization_id: ORG_ID, organization_name: "Org", role }],
+    organizations: [
+      { organization_id: ORG_ID, organization_name: "Org", role, organization_status: "active" },
+    ],
   };
   vi.mocked(requireRole).mockResolvedValue({
     ok: true,
