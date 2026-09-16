@@ -16,6 +16,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { resolveMetaCreds } from "./credentials";
+import type { HeaderMedia } from "./build-components";
 import { sendTemplate } from "./send-template";
 
 export interface SendTemplateForSessionInput {
@@ -40,9 +41,14 @@ export interface SendTemplateForSessionInput {
 }
 
 /**
- * Devolve o `external_id` do envio. **Lança** em qualquer desfecho que não seja
- * sucesso — o handler já tem `catch` que grava `failed` com o motivo, e inventar um
- * segundo caminho de erro aqui duplicaria a tradução.
+ * Devolve o `external_id` do envio, e a mídia do cabeçalho quando o slot é
+ * imagem/vídeo/documento — quem persiste a mensagem precisa disso pra
+ * guardar o que foi realmente enviado (sem isto o envio funciona igual, mas
+ * a conversa no inbox nunca mostra a mídia de volta).
+ *
+ * **Lança** em qualquer desfecho que não seja sucesso — o handler já tem
+ * `catch` que grava `failed` com o motivo, e inventar um segundo caminho de
+ * erro aqui duplicaria a tradução.
  *
  * As mensagens carregam o motivo real (contrato obsoleto, valor faltando, recusa da
  * plataforma) porque é isso que o operador lê em `error_message`.
@@ -50,7 +56,7 @@ export interface SendTemplateForSessionInput {
 export async function sendTemplateForSession(
   db: SupabaseClient,
   input: SendTemplateForSessionInput,
-): Promise<string | null> {
+): Promise<{ externalId: string | null; headerMedia: HeaderMedia | null }> {
   if (!input.name || !input.language) {
     throw new Error("template_incompleto: nome e idioma são obrigatórios em type=template");
   }
@@ -94,7 +100,9 @@ export async function sendTemplateForSession(
       : null,
   });
 
-  if (resultado.sent) return resultado.externalId;
+  if (resultado.sent) {
+    return { externalId: resultado.externalId, headerMedia: resultado.headerMedia };
+  }
 
   switch (resultado.reason) {
     case "missing":

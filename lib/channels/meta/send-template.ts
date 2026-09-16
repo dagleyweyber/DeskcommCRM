@@ -15,7 +15,13 @@
  * / 132012 depois de aceitar a chamada. Descobrir no erro custa dinheiro e tempo do
  * lead — e é exatamente o estado que esta fase inteira existe para sair.
  */
-import { buildComponents, missingSlots, type MetaSendComponent } from "./build-components";
+import {
+  buildComponents,
+  extractHeaderMedia,
+  missingSlots,
+  type HeaderMedia,
+  type MetaSendComponent,
+} from "./build-components";
 import {
   bindingState,
   type BindingState,
@@ -41,7 +47,7 @@ export interface SendTemplateInput {
  * ou se tenta de novo.
  */
 export type SendTemplateResult =
-  | { sent: true; externalId: string | null }
+  | { sent: true; externalId: string | null; headerMedia: HeaderMedia | null }
   // `ok` NUNCA é motivo de falha — excluí-lo torna o switch do tradutor exaustivo
   // por construção, em vez de exigir um `default` que engoliria caso novo em silêncio.
   | { sent: false; reason: Exclude<BindingState, "ok"> }
@@ -123,5 +129,9 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
     };
   }
 
-  return { sent: true, externalId: body.messages?.[0]?.id ?? null };
+  return {
+    sent: true,
+    externalId: body.messages?.[0]?.id ?? null,
+    headerMedia: extractHeaderMedia(components),
+  };
 }

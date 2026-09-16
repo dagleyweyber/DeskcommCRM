@@ -124,6 +124,30 @@ function componentsForLeafSlots(
 }
 
 /**
+ * O parâmetro de mídia do cabeçalho, se houver — pra quem persiste a
+ * mensagem enviada saber que existe uma imagem/vídeo/documento pra guardar
+ * e mostrar de volta na conversa (achado ao vivo: campanha com cabeçalho de
+ * imagem "enviava certo" e o inbox nunca mostrava nada, porque a mensagem
+ * de `type: 'template'` nunca guardava a mídia usada — só o texto).
+ */
+export interface HeaderMedia {
+  kind: "image" | "video" | "document";
+  url: string;
+}
+
+export function extractHeaderMedia(components: MetaSendComponent[]): HeaderMedia | null {
+  for (const c of components) {
+    if (c.type !== "header") continue;
+    for (const p of c.parameters) {
+      if (p.type === "image") return { kind: "image", url: p.image.link };
+      if (p.type === "video") return { kind: "video", url: p.video.link };
+      if (p.type === "document") return { kind: "document", url: p.document.link };
+    }
+  }
+  return null;
+}
+
+/**
  * @throws se algum slot do contrato ficou sem valor. Montar o payload incompleto e
  *   deixar a Meta reprovar com 132000 é o comportamento de hoje; falhar aqui põe o
  *   erro onde o operador ainda pode corrigi-lo. Chame `missingSlots` antes para

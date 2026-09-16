@@ -21,6 +21,7 @@ import {
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { conferirDefinicao } from "@/lib/channels/conferir-definicao";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
+import { resolveHeaderMediaStorage } from "@/lib/messaging/header-media-storage";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -432,6 +433,11 @@ export async function sendMessageHandler(
       // adapter preserva o mesmo branch (e a mesma mensagem de erro de cada
       // método) do outro lado do seam.
       let externalId: string | null;
+      // Só preenchido quando o template mandado tem cabeçalho de mídia — é o
+      // que falta pra linha de `messages` guardar o que foi realmente
+      // enviado (achado ao vivo: campanha com imagem "enviava certo" e a
+      // conversa nunca mostrava nada de volta, só o texto).
+      let headerMedia: { kind: "image" | "video" | "document"; url: string } | null = null;
       if (input.type === "template") {
         // Template é caminho próprio: não passa pelo `adapter.send` (que fala em
         // texto/mídia) porque o payload da plataforma é outro — e porque o envio
@@ -462,25 +468,29 @@ export async function sendMessageHandler(
           values: input.template_values ?? {},
         });
 
-        externalId = adapter.sendTemplate
-          ? (
-              await adapter.sendTemplate({
-                sessionRef: resolveSessionRef(c.channel_sessions),
-                to: chatId,
-                providerConversationId: c.provider_conversation_id,
-                name: input.template_name ?? "",
-                language: input.template_language ?? "",
-                values: input.template_values ?? {},
-              })
-            ).externalId
-          : await sendTemplateForSession(supabase, {
-              organizationId: ctx.organization_id,
-              phoneNumberId: resolveSessionRef(c.channel_sessions),
-              to: chatId,
-              name: input.template_name ?? "",
-              language: input.template_language ?? "",
-              values: input.template_values ?? {},
-            });
+        if (adapter.sendTemplate) {
+          const resultado = await adapter.sendTemplate({
+            sessionRef: resolveSessionRef(c.channel_sessions),
+            to: chatId,
+            providerConversationId: c.provider_conversation_id,
+            name: input.template_name ?? "",
+            language: input.template_language ?? "",
+            values: input.template_values ?? {},
+          });
+          externalId = resultado.externalId;
+          headerMedia = resultado.headerMedia ?? null;
+        } else {
+          const resultado = await sendTemplateForSession(supabase, {
+            organizationId: ctx.organization_id,
+            phoneNumberId: resolveSessionRef(c.channel_sessions),
+            to: chatId,
+            name: input.template_name ?? "",
+            language: input.template_language ?? "",
+            values: input.template_values ?? {},
+          });
+          externalId = resultado.externalId;
+          headerMedia = resultado.headerMedia;
+        }
       } else if (input.media_storage_path) {
         // Storage-first: signed URL curta só pro canal baixar (nunca base64).
         const admin = createAdminClient();
@@ -520,6 +530,11 @@ export async function sendMessageHandler(
         externalId,
         externalId ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId]) : [],
       );
+      // `message.type` continua "template" (não vira "image"/"video"/"document")
+      // — outras leituras (custo, janela de conformidade) contam com isso. O
+      // que muda é só o par media_storage_path/media_mime, pra
+      // MediaRenderer.tsx saber o que mostrar sem depender do `type`.
+      const mediaDoTemplate = headerMedia ? resolveHeaderMediaStorage(headerMedia) : null;
       const { data: updated } = await supabase
         .from("messages")
         .update({
@@ -530,6 +545,9 @@ export async function sendMessageHandler(
           // janela depois, sem varrer jsonb.
           ...(input.type === "template"
             ? { template_name: input.template_name, template_language: input.template_language }
+            : {}),
+          ...(mediaDoTemplate
+            ? { media_storage_path: mediaDoTemplate.storagePath, media_mime: mediaDoTemplate.mime }
             : {}),
         })
         .eq("id", message.id)

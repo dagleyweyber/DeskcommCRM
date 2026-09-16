@@ -251,7 +251,16 @@ export interface ChannelAdapter {
     language: string;
     /** Valores dos `{{n}}`, na ordem em que a definição os declara. */
     values: Record<string, string>;
-  }): Promise<{ externalId: string | null }>;
+  }): Promise<{
+    externalId: string | null;
+    /**
+     * A mídia do cabeçalho, quando o template tem um. OPCIONAL: um adapter
+     * que ainda não sabe extrair essa informação simplesmente não a devolve
+     * — quem persiste a mensagem trata ausência como "sem mídia pra guardar",
+     * nunca como erro.
+     */
+    headerMedia?: { kind: "image" | "video" | "document"; url: string } | null;
+  }>;
 }
 
 /** O que o transporte respondeu quando perguntamos se está de pé. */
