@@ -140,6 +140,34 @@ describe("público por ETAPA DO FUNIL", () => {
     expect(publico[0]!.leadId).not.toBeNull();
   });
 
+  /**
+   * Achado ao vivo (RevitaFio Mossoró, 2026-09-16): "Nenhum contato bate com
+   * esse público" pra uma etapa que tinha 31 contatos válidos — porque a
+   * MESMA etapa também tinha leads criados direto no Kanban, sem contato
+   * vinculado (`contact_id null`, o mesmo padrão já visto nesta sessão pra
+   * este tenant). O `null` entrava no array do `.in("id", contactIds)`, o
+   * PostgREST recusava a query INTEIRA (`22P02 invalid uuid`), e como o erro
+   * nunca era checado isso derrubava o público pra ZERO — não só o lead
+   * órfão, TODOS os outros da etapa junto.
+   */
+  it("⭐ lead órfão (sem contato vinculado) na mesma etapa não derruba o público inteiro", async () => {
+    const comContato = await criarContato(ORG_A, "Com contato de verdade", "+5511900000015");
+    await criarLead(ORG_A, comContato, pipelineA, stageAlvoA, "open");
+
+    await pool.query(
+      `insert into crm_leads (organization_id, contact_id, pipeline_id, stage_id, title, status)
+       values ($1, null, $2, $3, 'lead órfão de teste', 'open')`,
+      [ORG_A, pipelineA, stageAlvoA],
+    );
+
+    const publico = await resolveAudience(admin, ORG_A, {
+      kind: "pipeline_stage",
+      pipelineId: pipelineA,
+      stageId: stageAlvoA,
+    });
+    expect(publico.map((p) => p.contactId)).toContain(comContato);
+  });
+
   it("contato bloqueado na etapa certa não entra", async () => {
     const bloqueado = await criarContato(ORG_A, "Bloqueado na etapa", "+5511900000020", {
       blocked: true,

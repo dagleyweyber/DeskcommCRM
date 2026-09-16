@@ -97,7 +97,17 @@ async function porEtapaDoFunil(
     .eq("stage_id", stageId)
     .eq("status", "open");
 
-  const linhas = (leads ?? []) as Array<{ id: string; contact_id: string }>;
+  // `contact_id` É nullable — lead criado direto no Kanban (sem vir de uma
+  // conversa) nasce sem contato vinculado, achado ao vivo nesta mesma sessão
+  // pra RevitaFio Mossoró. Sem este filtro, um `null` entrava no array do
+  // `.in("id", ...)` abaixo, o PostgREST devolvia `22P02 invalid input
+  // syntax for type uuid: "null"`, e como o erro nunca era checado o
+  // `contatos ?? []` mascarava a falha como "zero contato bate" — não só
+  // pros leads órfãos, pra ETAPA INTEIRA, porque a query de contatos inteira
+  // falhava.
+  const linhas = ((leads ?? []) as Array<{ id: string; contact_id: string | null }>).filter(
+    (l): l is { id: string; contact_id: string } => l.contact_id !== null,
+  );
   if (linhas.length === 0) return [];
 
   const contactIds = [...new Set(linhas.map((l) => l.contact_id))];
