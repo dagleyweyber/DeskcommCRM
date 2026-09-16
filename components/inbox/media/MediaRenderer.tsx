@@ -30,7 +30,7 @@ export function MediaRenderer({ message }: { message: Message }) {
   const isOutbound = message.direction === "outbound";
   switch (tipoEfetivoDeMidia(message)) {
     case "image":
-      return <ImageMedia messageId={message.id} alt="Imagem" />;
+      return <ImageMedia messageId={message.id} alt="Imagem recebida" />;
     case "sticker":
       return <StickerMedia messageId={message.id} />;
     case "audio":

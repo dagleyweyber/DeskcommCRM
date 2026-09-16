@@ -49,7 +49,7 @@ describe("sendTemplate", () => {
     const spy = stubFetch({ messages: [{ id: "wamid.ABC" }] });
     const r = await sendTemplate({ ...BASE, binding: BINDING, current: CURRENT });
 
-    expect(r).toEqual({ sent: true, externalId: "wamid.ABC" });
+    expect(r).toEqual({ sent: true, externalId: "wamid.ABC", headerMedia: null });
 
     const corpo = JSON.parse(spy.mock.calls[0]![1].body as string) as {
       template: { name: string; components: { type: string; parameters: unknown[] }[] };
@@ -135,6 +135,32 @@ describe("sendTemplate", () => {
     expect(r).toMatchObject({ sent: false, reason: "api_error", code: 132000 });
     if (r.sent || r.reason !== "api_error") throw new Error("inalcançável");
     expect(r.message).toContain("localizable_params");
+  });
+
+  /**
+   * Achado ao vivo (RevitaFio Mossoró): campanha com cabeçalho de imagem
+   * enviava certo e o inbox nunca mostrava a mídia de volta, porque nada
+   * capturava qual imagem tinha ido. `headerMedia` é o que fecha essa
+   * lacuna — precisa vir preenchido quando o template tem esse cabeçalho.
+   */
+  it("⭐ template com cabeçalho de imagem devolve headerMedia com o link usado", async () => {
+    const cta = FIXTURE.data.find((t) => t.name === "jaspers_market_image_cta_v1")!;
+    stubFetch({ messages: [{ id: "wamid.IMG" }] });
+    const r = await sendTemplate({
+      ...BASE,
+      binding: {
+        name: cta.name,
+        language: cta.language,
+        contractHash: "h",
+        values: { "header:1": "https://exemplo.com/banner.jpg" },
+      },
+      current: { name: cta.name, language: cta.language, contractHash: "h", status: "APPROVED", components: cta.components },
+    });
+    expect(r).toEqual({
+      sent: true,
+      externalId: "wamid.IMG",
+      headerMedia: { kind: "image", url: "https://exemplo.com/banner.jpg" },
+    });
   });
 
   it("template SEM parâmetro não manda `components` vazio — a Meta recusa", async () => {
