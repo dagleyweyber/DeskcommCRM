@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mapInboundPayload, normalizePhoneBR, verifyInboundSignature } from "@/lib/webhooks/inbound";
+import {
+  mapInboundPayload,
+  normalizePhoneBR,
+  tagDoParceiro,
+  verifyInboundSignature,
+} from "@/lib/webhooks/inbound";
 import { createHmac } from "node:crypto";
 
 describe("normalizePhoneBR", () => {
@@ -60,6 +65,44 @@ describe("mapInboundPayload", () => {
   it("FBCLID em maiúscula ainda casa (mesma normalização de utm_*)", () => {
     const m = mapInboundPayload({ FBCLID: "IwAR123" });
     expect(m.source_metadata).toEqual({ fbclid: "IwAR123" });
+  });
+
+  /**
+   * Achado ao vivo (RevitaFio Mossoró): o mesmo webhook genérico atende
+   * tráfego pago e landing page de parceria — cada uma manda seu próprio
+   * `origem`, e antes disso a rota gravava "webhook" fixo pras duas.
+   */
+  describe("⭐ origem do payload vira `origin` — minúscula, pra bater com LEAD_SOURCES", () => {
+    it("'origem' é reconhecido, e some de custom_fields (consumido, igual nome/telefone)", () => {
+      const m = mapInboundPayload({ nome: "Ana", origem: "Parceria" });
+      expect(m.origin).toBe("parceria");
+      expect(m.custom_fields).toEqual({});
+    });
+
+    it("'source'/'origin' em inglês também são reconhecidos", () => {
+      expect(mapInboundPayload({ nome: "A", source: "Trafego Pago" }).origin).toBe("trafego pago");
+      expect(mapInboundPayload({ nome: "A", origin: "Google Ads" }).origin).toBe("google ads");
+    });
+
+    it("payload sem nenhum alias de origem devolve origin null — quem chama decide o default", () => {
+      expect(mapInboundPayload({ nome: "Ana" }).origin).toBeNull();
+    });
+  });
+});
+
+describe("tagDoParceiro", () => {
+  it("⭐ monta a tag a partir do campo 'parceiro', minúscula e sem acento", () => {
+    expect(tagDoParceiro({ parceiro: "Barbearia Acontece" })).toBe("parceiro:barbearia-acontece");
+  });
+
+  it("acentos e símbolos viram hífen, sem duplicar nem sobrar nas pontas", () => {
+    expect(tagDoParceiro({ parceiro: "Salão & Cia — Ltda!!" })).toBe("parceiro:salao-cia-ltda");
+  });
+
+  it("sem campo 'parceiro' (ou vazio/espaços) devolve null — não é lead de parceria", () => {
+    expect(tagDoParceiro({})).toBeNull();
+    expect(tagDoParceiro({ parceiro: "" })).toBeNull();
+    expect(tagDoParceiro({ parceiro: "   " })).toBeNull();
   });
 });
 

@@ -467,4 +467,51 @@ describe("POST /api/v1/webhooks/in/[token] (Task 6)", () => {
   // unit test em lib/ai/dispatcher/rate-limit.ts. Provar o 429 aqui exigiria
   // 61 chamadas sequenciais só pra exercitar um path já testado; pulado.
   it.skip("rate limit 429 após estourar a janela — coberto por unit test do fallback in-memory", () => {});
+
+  /**
+   * Achado ao vivo (RevitaFio Mossoró): a landing page de parceria manda
+   * `origem`/`parceiro`/`parceiro_codigo`/`parceiro_responsavel`/
+   * `parceiro_whatsapp` no payload real — antes disso o lead nascia com
+   * `source = 'webhook'` fixo e sem tag nenhuma, e a atendente não tinha
+   * como saber que era indicação de parceiro.
+   */
+  it("caso 8 — ⭐ payload de indicação de parceiro: origem real, tag do parceiro, dados preservados em custom_fields", async () => {
+    const body = {
+      nome: "Cliente Indicado",
+      whatsapp: "11988887777",
+      origem: "Parceria",
+      parceiro: "Barbearia Acontece",
+      parceiro_codigo: "NXMVDUQJ",
+      parceiro_responsavel: "Dagley Weyber",
+      parceiro_whatsapp: "11983389030",
+    };
+    const res = await POST(jsonReq(TOKEN_JSON, body), reqCtx(TOKEN_JSON));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { lead_id: string } };
+
+    const leadRows = rows(`select * from public.crm_leads where id = '${json.data.lead_id}'`);
+    expect(leadRows.length).toBe(1);
+    const lead = leadRows[0]!;
+    expect(lead.source).toBe("parceria");
+    expect(lead.tags).toEqual(["parceiro:barbearia-acontece"]);
+    const cf = lead.custom_fields as Record<string, unknown>;
+    expect(cf.parceiro).toBe("Barbearia Acontece");
+    expect(cf.parceiro_codigo).toBe("NXMVDUQJ");
+    expect(cf.parceiro_responsavel).toBe("Dagley Weyber");
+    expect(cf.parceiro_whatsapp).toBe("11983389030");
+    // "origem" foi CONSUMIDO pra virar a coluna `source` — não sobra
+    // duplicado dentro de custom_fields.
+    expect(cf.origem).toBeUndefined();
+
+    const contactRows = rows(`select * from public.contacts where id = '${lead.contact_id}'`);
+    expect(contactRows[0]!.source).toBe("parceria");
+  });
+
+  it("caso 9 — sem 'origem' no payload, source continua 'webhook' (nenhum webhook existente muda de comportamento)", async () => {
+    const res = await POST(jsonReq(TOKEN_JSON, { nome: "Sem Origem", telefone: "11955552222" }), reqCtx(TOKEN_JSON));
+    expect(res.status).toBe(200);
+    const leadRows = rows(`select * from public.crm_leads where title = 'Sem Origem'`);
+    expect(leadRows[0]!.source).toBe("webhook");
+    expect(leadRows[0]!.tags).toEqual([]);
+  });
 });

@@ -16,7 +16,12 @@ import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createLeadHandler } from "@/app/api/v1/leads/_handler";
 import type { CreateLeadInput } from "@/lib/schemas";
-import { mapInboundPayload, verifyInboundSignature, type FieldMap } from "@/lib/webhooks/inbound";
+import {
+  mapInboundPayload,
+  tagDoParceiro,
+  verifyInboundSignature,
+  type FieldMap,
+} from "@/lib/webhooks/inbound";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { ApiError } from "@/lib/api/types";
 
@@ -149,25 +154,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     return ok({ lead_id: leadId }, { requestId });
   };
 
-  const findLeadByExternalId = async (): Promise<string | null> => {
-    if (!externalId) return null;
-    const { data } = await admin
-      .from("crm_leads")
-      .select("id")
-      .eq("organization_id", source.organization_id)
-      .eq("source", "webhook")
-      .eq("external_id", externalId)
-      .maybeSingle();
-    return (data?.id as string | undefined) ?? null;
-  };
-
-  const dedupedLeadId = await findLeadByExternalId();
-  if (dedupedLeadId) {
-    // Mesmo envio repetido: 200 com o lead existente, nada é recriado — a
-    // ferramenta que reenviou recebe sucesso e para de tentar.
-    return respondWithLead(dedupedLeadId);
-  }
-
   const fieldMap = (source.field_map ?? {}) as FieldMap;
   // external_id não é dado do lead — sai do payload antes do mapeamento pra
   // não virar custom_field (o log de recebimento acima preserva o original).
@@ -179,6 +165,32 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   }
   if (!mapped.name && !mapped.phone && !mapped.email) {
     return fail("invalid_request", "Nenhum campo mapeável (nome/telefone/email).", 400, { requestId });
+  }
+
+  // A própria origem que o payload manda ("origem"/"source") vira a origem
+  // real do lead — "webhook" só quando ninguém mandou nada (todo webhook de
+  // antes desta mudança continua idêntico). Precisa vir ANTES do fast-path de
+  // dedup logo abaixo: os dois lêem/gravam a MESMA coluna, e usar um literal
+  // diferente ali quebraria silenciosamente a deduplicação por external_id.
+  const leadSource = mapped.origin || "webhook";
+
+  const findLeadByExternalId = async (): Promise<string | null> => {
+    if (!externalId) return null;
+    const { data } = await admin
+      .from("crm_leads")
+      .select("id")
+      .eq("organization_id", source.organization_id)
+      .eq("source", leadSource)
+      .eq("external_id", externalId)
+      .maybeSingle();
+    return (data?.id as string | undefined) ?? null;
+  };
+
+  const dedupedLeadId = await findLeadByExternalId();
+  if (dedupedLeadId) {
+    // Mesmo envio repetido: 200 com o lead existente, nada é recriado — a
+    // ferramenta que reenviou recebe sucesso e para de tentar.
+    return respondWithLead(dedupedLeadId);
   }
 
   // Contato: upsert por telefone (se houver) — reusa a coluna E.164 canônica.
@@ -206,7 +218,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
           name: mapped.name ?? mapped.phone,
           phone_number: mapped.phone,
           email: mapped.email,
-          source: "webhook",
+          source: leadSource,
           source_metadata: { webhook_source_id: source.id, ...mapped.source_metadata },
         })
         .select("id")
@@ -242,8 +254,11 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     title: mapped.name ?? mapped.phone ?? mapped.email ?? "Lead sem nome",
     contact_id: contactId,
     currency: "BRL",
-    tags: [],
-    source: "webhook",
+    // `parceiro:<slug>` só entra quando o payload manda um `parceiro` — o
+    // filtro de tag que o Kanban já tem responde "quantos leads esse
+    // parceiro gerou" sem nenhum relatório novo.
+    tags: [tagDoParceiro(mapped.custom_fields)].filter((t): t is string => t !== null),
+    source: leadSource,
     custom_fields: mapped.custom_fields,
     source_metadata: { webhook_source_id: source.id, ...mapped.source_metadata },
     ...(externalId ? { external_id: externalId } : {}),

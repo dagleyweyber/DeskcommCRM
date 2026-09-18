@@ -25,10 +25,23 @@ const DEFAULT_FIELD_MAP: Required<FieldMap> = {
  */
 const ATTRIBUTION_KEYS = new Set(["fbclid", "fbc", "fbp", "gclid"]);
 
+/**
+ * Achado ao vivo (RevitaFio Mossoró): o MESMO webhook genérico atende a
+ * landing page de tráfego pago e a de parceria — cada uma manda seu próprio
+ * `origem` (ou `source`) no payload, e antes disso a rota gravava o literal
+ * fixo "webhook" pra qualquer uma das duas. `crm_leads.source` é vocabulário
+ * aberto (sem CHECK) e o Dashboard de Vendas já quebra receita por ele — deixar
+ * o PRÓPRIO payload dizer a origem aproveita esse relatório de graça, sem
+ * precisar de um webhook por origem.
+ */
+const ORIGIN_ALIASES = ["origem", "source", "origin"];
+
 export interface MappedLead {
   name: string | null;
   phone: string | null;
   email: string | null;
+  /** `crm_leads.source` real, quando o payload manda um `origem`/`source` — `null` = usa o default do chamador. */
+  origin: string | null;
   custom_fields: Record<string, string>;
   source_metadata: Record<string, string>;
 }
@@ -76,7 +89,13 @@ export function mapInboundPayload(
   const nameHit = firstMatch(payload, map.name);
   const phoneHit = firstMatch(payload, map.phone);
   const emailHit = firstMatch(payload, map.email);
-  const consumed = new Set([nameHit?.key, phoneHit?.key, emailHit?.key].filter(Boolean));
+  // `origem`/`source` não é configurável por field_map (não há dono de
+  // instalação que precise renomear isso) — mesmo tratamento fixo que
+  // `ATTRIBUTION_KEYS`/`utm_` já recebem logo abaixo.
+  const originHit = firstMatch(payload, ORIGIN_ALIASES);
+  const consumed = new Set(
+    [nameHit?.key, phoneHit?.key, emailHit?.key, originHit?.key].filter(Boolean),
+  );
 
   const custom_fields: Record<string, string> = {};
   const source_metadata: Record<string, string> = {};
@@ -94,9 +113,33 @@ export function mapInboundPayload(
     name: nameHit?.value ?? null,
     phone: normalizePhoneBR(phoneHit?.value),
     email: emailHit?.value ?? null,
+    // Minúsculo pra bater com o vocabulário canônico do Select de origem
+    // (`LEAD_SOURCES` em lib/leads/lead-form-shared.ts já tem "parceria") —
+    // sem isso "Parceria" (como a landing page manda) viraria uma origem
+    // solta, fora da lista, em vez de cair na opção de verdade.
+    origin: originHit ? originHit.value.trim().toLowerCase() : null,
     custom_fields,
     source_metadata,
   };
+}
+
+/**
+ * A tag `parceiro:<slug>` que deixa "quantos leads esse parceiro gerou"
+ * responder pelo filtro de tag que o Kanban JÁ TEM — sem relatório novo.
+ * Lê de `custom_fields` (não remove nada de lá: o Cartão do Lead também lê o
+ * valor bruto pra mostrar o bloco "Indicação de parceiro").
+ */
+export function tagDoParceiro(customFields: Record<string, string>): string | null {
+  const nome = customFields["parceiro"];
+  if (!nome?.trim()) return null;
+  const slug = nome
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug ? `parceiro:${slug}` : null;
 }
 
 /** HMAC SHA-256 hex do raw body. Header: X-Deskcomm-Signature. */

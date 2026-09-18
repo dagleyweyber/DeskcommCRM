@@ -58,6 +58,40 @@ function produtoInteresseDe(customFields: Record<string, unknown> | null | undef
   return typeof v === "string" ? v : "";
 }
 
+interface DadosDoParceiro {
+  parceiro: string;
+  codigo: string | null;
+  responsavel: string | null;
+  whatsapp: string | null;
+}
+
+/**
+ * Bloco só-leitura: o webhook de indicação de parceiro (RevitaFio Mossoró)
+ * grava `parceiro`/`parceiro_codigo`/`parceiro_responsavel`/`parceiro_whatsapp`
+ * em `custom_fields` (ver `lib/webhooks/inbound.ts`'s `tagDoParceiro`) — sem
+ * este bloco esses 4 campos ficavam salvos e invisíveis, e a atendente não
+ * tinha como saber que aquele lead veio de indicação.
+ */
+export function dadosDoParceiroDe(customFields: Record<string, unknown> | null | undefined): DadosDoParceiro | null {
+  const parceiro = customFields?.parceiro;
+  if (typeof parceiro !== "string" || !parceiro.trim()) return null;
+  const str = (k: string): string | null => {
+    const v = customFields?.[k];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  return {
+    parceiro: parceiro.trim(),
+    codigo: str("parceiro_codigo"),
+    responsavel: str("parceiro_responsavel"),
+    whatsapp: str("parceiro_whatsapp"),
+  };
+}
+
+/** wa.me só aceita dígitos — o campo pode chegar em qualquer formato BR. */
+export function waMeLink(rawPhone: string): string {
+  return `https://wa.me/${rawPhone.replace(/\D/g, "")}`;
+}
+
 /**
  * Os campos do lead — extraídos do `EditLeadDialog` para o dossiê usar os
  * MESMOS, em vez de uma cópia que diverge no mês.
@@ -233,6 +267,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   const ownerUserId = form.watch("owner_user_id");
   const produtoInteresse = form.watch("produtoInteresse");
   const busy = edit.isPending || createContact.isPending || updateContact.isPending;
+  const parceiro = dadosDoParceiroDe(lead.custom_fields);
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -362,6 +397,45 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           <Label htmlFor="tagsRaw">Tags (separadas por vírgula)</Label>
           <Input id="tagsRaw" placeholder="vip, recompra" {...form.register("tagsRaw")} />
         </div>
+
+        {parceiro && (
+          <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+              Indicação de parceiro
+            </p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Parceiro</p>
+                <p className="font-medium">{parceiro.parceiro}</p>
+              </div>
+              {parceiro.codigo && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Código</p>
+                  <p className="font-medium">{parceiro.codigo}</p>
+                </div>
+              )}
+              {parceiro.responsavel && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Responsável</p>
+                  <p className="font-medium">{parceiro.responsavel}</p>
+                </div>
+              )}
+              {parceiro.whatsapp && (
+                <div>
+                  <p className="text-xs text-muted-foreground">WhatsApp do responsável</p>
+                  <a
+                    href={waMeLink(parceiro.whatsapp)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-primary underline underline-offset-2"
+                  >
+                    Abrir conversa
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       <div className="flex justify-end gap-2">
         {onCancel && (
