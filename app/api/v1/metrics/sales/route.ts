@@ -88,6 +88,16 @@ interface ReceitaPorAnuncio {
   receita_cents: number;
 }
 
+interface VendaDoLead {
+  lead_id: string;
+  nome: string;
+  servico: string;
+  valor_cents: number | null;
+  data: string;
+  data_conversao: string;
+  tempo_decisao_dias: number;
+}
+
 interface SalesDashboardPayload {
   kpis: SalesKpis;
   leads_por_dia: LeadsPorDia[];
@@ -96,6 +106,7 @@ interface SalesDashboardPayload {
   principais_objecoes: PrincipalObjecao[];
   funil_agendamento: FunilAgendamento;
   receita_por_anuncio: ReceitaPorAnuncio[];
+  vendas_lista: VendaDoLead[];
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
@@ -162,6 +173,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       taxa_comparecimento_pct: null,
     },
     receita_por_anuncio: [],
+    vendas_lista: [],
   }) as unknown as SalesDashboardPayload;
 
   return ok(
@@ -176,6 +188,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       principais_objecoes: dashboard.principais_objecoes,
       funil_agendamento: dashboard.funil_agendamento,
       receita_por_anuncio: dashboard.receita_por_anuncio,
+      vendas_lista: dashboard.vendas_lista,
     },
     { requestId },
   );

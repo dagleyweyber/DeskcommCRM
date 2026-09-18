@@ -60,6 +60,17 @@ export interface ReceitaPorAnuncio {
   receita_cents: number;
 }
 
+export interface VendaDoLead {
+  lead_id: string;
+  nome: string;
+  servico: string;
+  /** `null` é o lead que fechou sem valor preenchido — a lista mostra "—", não "R$ 0,00". */
+  valor_cents: number | null;
+  data: string;
+  data_conversao: string;
+  tempo_decisao_dias: number;
+}
+
 export interface SalesDashboard {
   window: { from: string; to: string };
   pipeline_id: string | null;
@@ -71,6 +82,7 @@ export interface SalesDashboard {
   principais_objecoes: PrincipalObjecao[];
   funil_agendamento: FunilAgendamento;
   receita_por_anuncio: ReceitaPorAnuncio[];
+  vendas_lista: VendaDoLead[];
 }
 
 export interface SalesDashboardFiltros {

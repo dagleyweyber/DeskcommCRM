@@ -368,6 +368,15 @@ interface AnuncioRow {
   agendamentos: number;
   receita_cents: number;
 }
+interface VendaRow {
+  lead_id: string;
+  nome: string;
+  servico: string;
+  valor_cents: number | null;
+  data: string;
+  data_conversao: string;
+  tempo_decisao_dias: number;
+}
 interface Dashboard {
   kpis: Kpis;
   leads_por_dia: DiaRow[];
@@ -376,6 +385,7 @@ interface Dashboard {
   principais_objecoes: ObjecaoRow[];
   funil_agendamento: FunilAgendamento;
   receita_por_anuncio: AnuncioRow[];
+  vendas_lista: VendaRow[];
 }
 
 function fetchDashboard(
@@ -442,6 +452,32 @@ describe("Dashboard de Vendas, Fase 1 — fn_sales_dashboard (números exatos)",
   it("receita_por_origem: instagram leads=2, vendas=1, receita_cents=50000", () => {
     const ig = dashboard().receita_por_origem.find((o) => o.origem === "instagram");
     expect(ig).toEqual({ origem: "instagram", leads: 2, vendas: 1, receita_cents: 50_000 });
+  });
+
+  // ---- migration 0173: lista de vendas (uma linha por lead, não agregado) ----
+
+  it("⭐ vendas_lista: 4 linhas (mesmo dataset de kpis.vendas), somando receita_total_cents", () => {
+    const lista = dashboard().vendas_lista;
+    expect(lista).toHaveLength(4);
+    expect(lista.reduce((soma, v) => soma + (v.valor_cents ?? 0), 0)).toBe(1_249_900);
+  });
+
+  it("⭐ 'A won old' (criado FORA da janela, fechado DENTRO) aparece com 70 dias de decisão", () => {
+    const linha = dashboard().vendas_lista.find((v) => v.nome === "A won old");
+    expect(linha).toMatchObject({
+      valor_cents: 999_900,
+      data: "2026-05-01",
+      data_conversao: "2026-07-10",
+      tempo_decisao_dias: 70,
+    });
+  });
+
+  it("primeira linha é a venda que fechou por ÚLTIMO no período ('A won ig', ordenada por data_conversao desc)", () => {
+    expect(dashboard().vendas_lista[0]).toMatchObject({
+      nome: "A won ig",
+      data_conversao: "2026-07-21",
+      tempo_decisao_dias: 6,
+    });
   });
 
   // ---- isolamento entre orgs (obrigatório: CLAUDE.md doutrina de multi-tenancy) ----

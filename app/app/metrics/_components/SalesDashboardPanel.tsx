@@ -14,6 +14,7 @@ import { useSalesDashboard, type SalesDashboardFiltros } from "@/hooks/metrics/u
 import { OBJECTION_LABELS } from "@/lib/schemas/leads";
 import { KpiCard } from "./KpiCard";
 import { AnuncioPerformanceTable } from "./AnuncioPerformanceTable";
+import { VendasDoPeriodoTable } from "./VendasDoPeriodoTable";
 
 function rotuloObjecao(motivo: string): string {
   return OBJECTION_LABELS[motivo as keyof typeof OBJECTION_LABELS] ?? motivo;
@@ -77,6 +78,7 @@ export function SalesDashboardPanel({ filtros }: Props) {
     principais_objecoes,
     funil_agendamento,
     receita_por_anuncio,
+    vendas_lista,
   } = data.data;
   const hasLeadsPorDia = leads_por_dia.some((d) => d.criados > 0 || d.convertidos > 0);
   const hasOrigem = receita_por_origem.length > 0;
@@ -309,6 +311,13 @@ export function SalesDashboardPanel({ filtros }: Props) {
             Desempenho por Campanha, Conjunto e Anúncio
           </h3>
           {!hasAnuncio ? <EmptyChart /> : <AnuncioPerformanceTable dados={receita_por_anuncio} />}
+        </div>
+
+        <div className="rounded-lg border bg-card p-4 md:col-span-2">
+          <h3 className="mb-4 text-sm font-medium text-muted-foreground">
+            Vendas do Período
+          </h3>
+          <VendasDoPeriodoTable dados={vendas_lista} />
         </div>
       </div>
     </div>
