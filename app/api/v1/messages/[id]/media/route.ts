@@ -25,6 +25,11 @@ import { createClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 const SIGNED_URL_TTL_S = 3600;
+// Abaixo do TTL da signed URL de propósito: o navegador nunca pode reter em
+// cache um redirect pra um link que já expirou do outro lado. A margem
+// (5min) cobre latência de rede + relógio dessincronizado entre cliente e
+// servidor.
+const REDIRECT_CACHE_MAX_AGE_S = SIGNED_URL_TTL_S - 300;
 
 interface RouteCtx {
   params: Promise<{ id: string }>;
@@ -71,6 +76,15 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     if (!signErr && signed?.signedUrl) {
       const response = NextResponse.redirect(signed.signedUrl, 302);
       response.headers.set("X-Request-Id", requestId);
+      // Achado ao vivo: sem isto, o navegador nunca reaproveita nada — cada
+      // <img>/<video>/<audio> que aponta pra esta rota gera uma signed URL
+      // NOVA a cada carregamento (reabrir a conversa, dar scroll, recarregar
+      // a página), porque a URL de destino muda sempre. Resultado: egress do
+      // Storage crescendo sem limite (é o que estourou a cota da Supabase) E
+      // mídia recarregando do zero toda vez, mesmo já vista minutos antes.
+      // Mensagem/anexo nunca muda depois de criado — `private` porque é
+      // conteúdo autenticado por sessão, não pra cache compartilhado/CDN.
+      response.headers.set("Cache-Control", `private, max-age=${REDIRECT_CACHE_MAX_AGE_S}`);
       return response;
     }
     if (signErr) {
