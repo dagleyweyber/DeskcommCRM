@@ -8,7 +8,10 @@ import { formatCurrency, formatDate, formatDias } from "./VendasDoPeriodoTable";
  */
 describe("formatCurrency", () => {
   it("centavos vira reais formatado", () => {
-    expect(formatCurrency(450_000)).toBe("R$ 4.500,00");
+    // Espaço entre "R$" e o valor: `Intl.NumberFormat` usa NBSP (U+00A0) em
+    // algumas versões de ICU/Node e espaço comum em outras — normaliza antes
+    // de comparar pra o teste não depender de qual ICU rodou.
+    expect(formatCurrency(450_000).replace(/\s/g, " ")).toBe("R$ 4.500,00");
   });
 
   it("⭐ null (lead fechado sem valor) vira travessão, não R$ 0,00", () => {
