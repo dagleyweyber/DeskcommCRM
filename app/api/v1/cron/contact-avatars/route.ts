@@ -24,7 +24,12 @@ import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
-import { DEFAULT_CHANNEL_PROVIDER, getAdapter, type ChannelProvider } from "@/lib/channels";
+import {
+  CHANNEL_SESSION_REF_COLUMNS,
+  getAdapter,
+  resolveSessionRef,
+  type ChannelSessionRef,
+} from "@/lib/channels";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -125,35 +130,43 @@ async function handle(req: NextRequest): Promise<Response> {
     }
 
     try {
-      const { data: sessao } = await admin
+      // TODAS as sessões WORKING da org, não só uma — achado ao vivo
+      // (RevitaFio Mossoró): um tenant pode ter Meta Cloud API E WAHA ligados
+      // ao mesmo tempo (ex.: migrando de canal), e o `.limit(1)` sem ORDER BY
+      // de antes pegava QUALQUER uma das duas — quando calhava de vir a que
+      // não sabe buscar foto (Meta Cloud API não expõe isso, nunca; é
+      // limitação da própria plataforma), NENHUM contato da org ganhava foto,
+      // pra sempre, mesmo com uma sessão perfeitamente capaz do lado.
+      const { data: sessoes } = await admin
         .from("channel_sessions")
-        .select("waha_session_name, provider")
+        .select(CHANNEL_SESSION_REF_COLUMNS)
         .eq("organization_id", c.organization_id)
-        .eq("status", "WORKING")
-        .limit(1)
-        .maybeSingle();
-      const ref = (sessao as { waha_session_name?: string | null } | null)?.waha_session_name;
-      if (!ref) {
-        await carimbar(null);
-        semFoto++;
-        continue;
-      }
+        .eq("status", "WORKING");
 
       // Pelo adapter, nunca falando com o canal direto: a doutrina
       // `restricao-de-canal` proíbe nomear provider fora de lib/channels/, e o
       // `pnpm lint:channels` reprova o build se acontecer (foi o que pegou a
       // primeira versão desta rota). Testar a PRESENÇA do método é como se
-      // pergunta "este canal sabe fazer isso?" sem perguntar qual canal é.
-      const adapter = getAdapter(
-        (sessao as { provider?: ChannelProvider | null } | null)?.provider ??
-          DEFAULT_CHANNEL_PROVIDER,
-      );
-      if (!adapter.fetchProfilePictureUrl) {
+      // pergunta "este canal sabe fazer isso?" sem perguntar qual canal é —
+      // e é exatamente essa pergunta que decide qual das sessões usar aqui.
+      let adapterComFoto: ReturnType<typeof getAdapter> | null = null;
+      let ref: string | null = null;
+      for (const s of (sessoes ?? []) as unknown as ChannelSessionRef[]) {
+        const candidato = getAdapter(s.provider);
+        if (candidato.fetchProfilePictureUrl) {
+          adapterComFoto = candidato;
+          ref = resolveSessionRef(s);
+          break;
+        }
+      }
+
+      if (!adapterComFoto || !ref) {
         await carimbar(null);
         semFoto++;
         continue;
       }
-      const profilePictureURL = await adapter.fetchProfilePictureUrl({
+
+      const profilePictureURL = await adapterComFoto.fetchProfilePictureUrl!({
         sessionRef: ref,
         recipient: chatId,
       });

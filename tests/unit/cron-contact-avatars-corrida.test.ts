@@ -28,10 +28,11 @@ vi.mock("@/lib/env", () => ({
 }));
 
 vi.mock("@/lib/channels", () => ({
-  DEFAULT_CHANNEL_PROVIDER: "waha",
+  CHANNEL_SESSION_REF_COLUMNS: "provider, waha_session_name, meta_phone_number_id, zernio_account_id",
   getAdapter: () => ({
     fetchProfilePictureUrl: async () => "https://cdn.exemplo.invalid/foto.jpg",
   }),
+  resolveSessionRef: (s: { waha_session_name?: string | null }) => s.waha_session_name ?? "",
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -41,7 +42,7 @@ vi.mock("@/lib/supabase/admin", () => ({
         const dados =
           tabela === "contacts"
             ? [{ id: CONTATO, organization_id: ORG, wa_identity: "phone:+5511999990000", avatar_storage_path: null }]
-            : { waha_session_name: "sessao-de-teste", provider: "waha" };
+            : [{ waha_session_name: "sessao-de-teste", provider: "waha" }];
         const proxy: Record<string, unknown> = new Proxy(
           {},
           {
