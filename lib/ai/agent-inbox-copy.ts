@@ -54,6 +54,7 @@ export const KIND_LABEL = {
   promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém ficou responsável",
   contact_proposal_expired:
     "Uma informação que o assistente ouviu de um cliente venceu sem ninguém conferir",
+  ia_sem_resposta: "O agente de IA parou de responder mensagens de cliente",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 
