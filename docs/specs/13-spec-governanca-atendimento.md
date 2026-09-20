@@ -422,10 +422,10 @@ como escopo/role a afetam. Implementação: `fn_attendant_metrics()` (SQL
 ### 6.6 Tempo até 1ª resposta por assignee (acceptance 2)
 
 - **Definição**: por conversa atribuída ao atendente, o intervalo entre a
-  **primeira mensagem inbound** (cliente) e a **primeira mensagem outbound de um
-  atendente HUMANO** — a resposta do bot/IA **não** conta. Métrica = **média (em
-  segundos)** desse intervalo sobre as conversas cuja 1ª resposta humana caiu na
-  janela.
+  **mensagem inbound (cliente) mais recente ANTES da 1ª resposta humana** e essa
+  **primeira mensagem outbound de um atendente HUMANO** — a resposta do bot/IA
+  **não** conta. Métrica = **média (em segundos)** desse intervalo sobre as
+  conversas cuja 1ª resposta humana caiu na janela.
 - **Coluna que distingue humano de bot**: **`messages.sent_by_user_id`** — é o
   usuário que enviou; `NOT NULL` ⇒ atendente humano. A resposta do bot/IA tem
   `sent_via = 'ai'` e `sent_by_user_id IS NULL` (CHECK `messages_sent_via_check`
@@ -434,14 +434,28 @@ como escopo/role a afetam. Implementação: `fn_attendant_metrics()` (SQL
   ambiguidade; a coluna existe e distingue). Se no futuro o bot passar a gravar
   `sent_by_user_id`, este filtro precisa de um discriminador adicional
   (`sent_via <> 'ai'`) — registrado aqui como ponto de atenção.
+- **Forward-fix (migration 0174) — por que "mais recente ANTES", não "primeira
+  de todas":** a versão original (0037) usava `t0 = min(inbound)` — o primeiro
+  inbound de TODA a história da conversa. Medido em produção (RevitaFio
+  Mossoró, 2026-09-19): leads que mandam uma mensagem, entram numa automação de
+  reengajamento que dispara templates por dias, e só recebem resposta humana
+  quando reagem a um desses templates — o `t0` antigo ancorava no inbound
+  ORIGINAL, e a métrica contava os dias inteiros de nutrição automática como
+  "tempo de resposta do atendente". Uma atendente com respostas de minutos
+  aparecia com média de **668 minutos**; recalculado com a âncora correta caiu
+  para **125 minutos**. `t0 = max(inbound)` com `sent_at < t1` mede o que a
+  tela promete: quanto tempo o cliente esperou pela resposta humana, contado a
+  partir da ÚLTIMA coisa que ele disse antes dela chegar — não do início da
+  conversa inteira.
 - **Fórmula** (por conversa `c` com `assigned_to_user_id = X`):
-  `t0 = min(messages.sent_at) where conversation_id = c and direction = 'inbound'`;
   `t1 = min(messages.sent_at) where conversation_id = c and direction = 'outbound'
-  and sent_by_user_id is not null`. TTFR da conversa `= t1 - t0`, **somente** se
-  `t0` e `t1` existem e `t1 > t0` (respostas anteriores ao 1º inbound — conversa
-  iniciada pelo atendente — são descartadas: não há "tempo de resposta"). A
-  métrica é `avg(extract(epoch from (t1 - t0)))` sobre as conversas do atendente
-  com `t1 ∈ [from, to)`.
+  and sent_by_user_id is not null`; `t0 = max(messages.sent_at) where
+  conversation_id = c and direction = 'inbound' and sent_at < t1`. TTFR da
+  conversa `= t1 - t0`, **somente** se `t0` e `t1` existem e `t1 > t0`
+  (respostas anteriores ao 1º inbound — conversa iniciada pelo atendente — são
+  descartadas: não há "tempo de resposta"). A métrica é
+  `avg(extract(epoch from (t1 - t0)))` sobre as conversas do atendente com
+  `t1 ∈ [from, to)`.
 - **Fonte**: `messages.direction`, `messages.sent_by_user_id`, `messages.sent_at`
   (timestamp da mensagem; `NOT NULL default now()`), `messages.conversation_id`;
   `conversations.assigned_to_user_id`. Atribuído ao `assigned_to_user_id` da

@@ -28,22 +28,33 @@ const C_A1 = "d4040404-3333-4000-8000-000000000001";
 const C_A2 = "d4040404-3333-4000-8000-000000000002";
 const C_B = "d4040404-3333-4000-8000-000000000003";
 const C_A_OLD = "d4040404-3333-4000-8000-000000000004";
+const C_STALE = "d4040404-3333-4000-8000-000000000005";
 const CONV_A1 = "d4040404-4444-4000-8000-000000000001";
 const CONV_A2 = "d4040404-4444-4000-8000-000000000002";
 const CONV_B = "d4040404-4444-4000-8000-000000000003";
 const CONV_A_OLD = "d4040404-4444-4000-8000-000000000004";
+const CONV_STALE = "d4040404-4444-4000-8000-000000000005";
+const AGENT_STALE = "d4040404-1111-4000-8000-000000000004";
 
 // Janela do teste e âncora temporal (tudo dentro dela salvo o marcado "OLD").
 const FROM = "2026-07-01T00:00:00+00";
 const TO = "2026-07-31T00:00:00+00";
 const IN = "2026-07-10T12:00:00+00"; // 1º inbound / closed_at / assigned_at (in-window)
 const OLD = "2026-05-01T12:00:00+00"; // fora da janela
+// CONV_STALE (regressão 0174): 1º inbound de TODOS é de dias antes de t1 — o
+// lead mandou uma mensagem, ficou em automação de reengajamento e só reagiu
+// (2º inbound) perto da resposta humana. t0 CORRETO ancora no 2º inbound
+// (11:59:00), não no 1º (dias antes): TTFR = 100s, não ~9 dias.
+const STALE_FIRST_IN = "2026-07-01T00:00:00+00";
+const STALE_LAST_IN = "2026-07-10T11:59:00+00";
+const STALE_HUMAN_OUT = "2026-07-10T12:00:40+00";
 
 beforeAll(() => {
   sql(`
     insert into auth.users (id, email) values
       ('${AGENT_A}', 'm4-agent-a@invariant.test'),
       ('${AGENT_B}', 'm4-agent-b@invariant.test'),
+      ('${AGENT_STALE}', 'm4-agent-stale@invariant.test'),
       ('${MANAGER}', 'm4-manager@invariant.test')
     on conflict do nothing;
 
@@ -54,6 +65,7 @@ beforeAll(() => {
     insert into public.user_organizations (user_id, organization_id, role, accepted_at) values
       ('${AGENT_A}', '${ORG}', 'agent',   now()),
       ('${AGENT_B}', '${ORG}', 'agent',   now()),
+      ('${AGENT_STALE}', '${ORG}', 'agent', now()),
       ('${MANAGER}', '${ORG}', 'manager', now())
     on conflict do nothing;
 
@@ -73,7 +85,8 @@ beforeAll(() => {
       ('${C_A1}',    '${ORG}', 'M4 Contato A1'),
       ('${C_A2}',    '${ORG}', 'M4 Contato A2'),
       ('${C_B}',     '${ORG}', 'M4 Contato B'),
-      ('${C_A_OLD}', '${ORG}', 'M4 Contato A old')
+      ('${C_A_OLD}', '${ORG}', 'M4 Contato A old'),
+      ('${C_STALE}', '${ORG}', 'M4 Contato stale')
     on conflict do nothing;
 
     -- LEADS won/lost (janela = closed_at). owner A: 3 won + 1 lost in-window,
@@ -95,11 +108,13 @@ beforeAll(() => {
       values ('${ORG}', '${PIPELINE}', '${STAGE_2}', 'B open', 'open', '${AGENT_B}');
 
     -- CONVERSAS (janela = assigned_at). A: 2 in-window + 1 OLD (não conta). B: 1.
+    -- STALE: assignee dedicado — isola a regressão 0174 das médias de A/B acima.
     insert into public.conversations (id, organization_id, contact_id, channel_session_id, status, assigned_to_user_id, assigned_at, assignee_kind) values
       ('${CONV_A1}',    '${ORG}', '${C_A1}',    '${SESSION}', 'claimed', '${AGENT_A}', '${IN}',  'user'),
       ('${CONV_A2}',    '${ORG}', '${C_A2}',    '${SESSION}', 'claimed', '${AGENT_A}', '${IN}',  'user'),
       ('${CONV_B}',     '${ORG}', '${C_B}',     '${SESSION}', 'claimed', '${AGENT_B}', '${IN}',  'user'),
-      ('${CONV_A_OLD}', '${ORG}', '${C_A_OLD}', '${SESSION}', 'claimed', '${AGENT_A}', '${OLD}', 'user')
+      ('${CONV_A_OLD}', '${ORG}', '${C_A_OLD}', '${SESSION}', 'claimed', '${AGENT_A}', '${OLD}', 'user'),
+      ('${CONV_STALE}', '${ORG}', '${C_STALE}', '${SESSION}', 'claimed', '${AGENT_STALE}', '${IN}', 'user')
     on conflict do nothing;
 
     -- MENSAGENS (TTFR). Cada conv: inbound + resposta humana. CONV_A1 tem também
@@ -115,7 +130,13 @@ beforeAll(() => {
       ('${ORG}', '${CONV_A2}', '${SESSION}', '${C_A2}', 'text', 'outbound', 'user','${AGENT_A}',  '2026-07-10T12:02:00+00'),
       -- CONV_B
       ('${ORG}', '${CONV_B}',  '${SESSION}', '${C_B}',  'text', 'inbound',  'crm', null,          '${IN}'),
-      ('${ORG}', '${CONV_B}',  '${SESSION}', '${C_B}',  'text', 'outbound', 'user','${AGENT_B}',  '2026-07-10T12:00:30+00');
+      ('${ORG}', '${CONV_B}',  '${SESSION}', '${C_B}',  'text', 'outbound', 'user','${AGENT_B}',  '2026-07-10T12:00:30+00'),
+      -- CONV_STALE (regressão 0174): 1º inbound é de DIAS antes de t1; um 2º
+      -- inbound chega perto da resposta humana. t0 correto = 2º inbound
+      -- (STALE_LAST_IN), não o 1º (STALE_FIRST_IN) — gap = 100s, não ~9 dias.
+      ('${ORG}', '${CONV_STALE}', '${SESSION}', '${C_STALE}', 'text', 'inbound',  'crm', null,             '${STALE_FIRST_IN}'),
+      ('${ORG}', '${CONV_STALE}', '${SESSION}', '${C_STALE}', 'text', 'inbound',  'crm', null,             '${STALE_LAST_IN}'),
+      ('${ORG}', '${CONV_STALE}', '${SESSION}', '${C_STALE}', 'text', 'outbound', 'user','${AGENT_STALE}', '${STALE_HUMAN_OUT}');
   `);
 
   // ANALYZE depois dos seeds: este arquivo tem um teste que mede ESCOLHA DE
@@ -233,16 +254,20 @@ const Q_CONV = `
   group by assigned_to_user_id`;
 const Q_TTFR = `
   select c.assigned_to_user_id,
-    avg(extract(epoch from (fr.first_human_out - fr.first_in)))
+    avg(extract(epoch from (fh.first_human_out - li.last_in_before)))
   from public.conversations c
   cross join lateral (
-    select min(m.sent_at) filter (where m.direction='inbound') as first_in,
-           min(m.sent_at) filter (where m.direction='outbound' and m.sent_by_user_id is not null) as first_human_out
+    select min(m.sent_at) filter (where m.direction='outbound' and m.sent_by_user_id is not null) as first_human_out
     from public.messages m where m.conversation_id = c.id
-  ) fr
+  ) fh
+  cross join lateral (
+    select max(m2.sent_at) as last_in_before
+    from public.messages m2
+    where m2.conversation_id = c.id and m2.direction='inbound' and m2.sent_at < fh.first_human_out
+  ) li
   where c.organization_id='${ORG}' and c.assigned_to_user_id is not null
-    and fr.first_in is not null and fr.first_human_out is not null
-    and fr.first_human_out > fr.first_in
+    and fh.first_human_out is not null and li.last_in_before is not null
+    and fh.first_human_out > li.last_in_before
   group by c.assigned_to_user_id`;
 
 describe("G4-04 — métricas por responsável (números exatos)", () => {
@@ -266,6 +291,13 @@ describe("G4-04 — métricas por responsável (números exatos)", () => {
   it("manager: filtro owner=A retorna só A (B ausente)", () => {
     expect(metricRow(MANAGER, AGENT_A, AGENT_A)).toEqual(["3", "1", "2", "90"]);
     expect(metricRow(MANAGER, AGENT_B, AGENT_A)).toEqual([]);
+  });
+
+  // ---- regressão 0174: TTFR ancora o inbound MAIS RECENTE antes de t1 ----
+  // Prova por si só contra o comportamento antigo: t0 = min(inbound) daria
+  // ~820840s (9+ dias, STALE_FIRST_IN → STALE_HUMAN_OUT), não 100.
+  it("manager: TTFR ancora no 2º inbound (100s), não no 1º de dias antes", () => {
+    expect(metricRow(MANAGER, AGENT_STALE)).toEqual(["0", "0", "1", "100"]);
   });
 
   // ---- agent A: RLS own-scope — vê só a si mesmo ----

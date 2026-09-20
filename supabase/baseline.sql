@@ -14301,6 +14301,130 @@ revoke all on function public.fn_due_appointment_reminders(uuid, uuid, timestamp
 revoke execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from anon;
 grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) to service_role;
 
+
+-- ---- fn_attendant_metrics: TTFR ancora último inbound (migration 0174) ----
+-- Ver o cabeçalho da migration 0174: t0 (§6.6) era min(inbound) — o PRIMEIRO
+-- inbound de toda a conversa — e uma automação de reengajamento de dias entre
+-- o contato original e a resposta humana virava "tempo de resposta do
+-- atendente" (668min medido em produção, deveria ser 125min). t0 passa a ser
+-- o inbound mais recente antes de t1 (1ª resposta humana). create or replace,
+-- mesma função (0037) — nenhum índice novo, nenhuma tabela nova.
+
+create or replace function public.fn_attendant_metrics(
+  p_org uuid,
+  p_from timestamptz,
+  p_to timestamptz,
+  p_owner uuid default null
+) returns jsonb
+language sql stable
+set search_path = public
+as $$
+  with
+  lead_agg as (
+    select
+      owner_user_id as user_id,
+      count(*) filter (where status = 'won')  as won,
+      count(*) filter (where status = 'lost') as lost
+    from public.crm_leads
+    where organization_id = p_org
+      and status in ('won', 'lost')
+      and closed_at >= p_from and closed_at < p_to
+      and owner_user_id is not null
+      and (p_owner is null or owner_user_id = p_owner)
+    group by owner_user_id
+  ),
+  conv_agg as (
+    select
+      assigned_to_user_id as user_id,
+      count(*) as conversations_handled
+    from public.conversations
+    where organization_id = p_org
+      and assigned_to_user_id is not null
+      and assigned_at >= p_from and assigned_at < p_to
+      and (p_owner is null or assigned_to_user_id = p_owner)
+    group by assigned_to_user_id
+  ),
+  ttfr as (
+    select
+      c.assigned_to_user_id as user_id,
+      avg(extract(epoch from (fh.first_human_out - li.last_in_before))) as avg_first_response_seconds
+    from public.conversations c
+    cross join lateral (
+      select
+        min(m.sent_at) filter (
+          where m.direction = 'outbound' and m.sent_by_user_id is not null
+        ) as first_human_out
+      from public.messages m
+      where m.conversation_id = c.id
+    ) fh
+    cross join lateral (
+      select max(m2.sent_at) as last_in_before
+      from public.messages m2
+      where m2.conversation_id = c.id
+        and m2.direction = 'inbound'
+        and m2.sent_at < fh.first_human_out
+    ) li
+    where c.organization_id = p_org
+      and c.assigned_to_user_id is not null
+      and (p_owner is null or c.assigned_to_user_id = p_owner)
+      and fh.first_human_out is not null
+      and li.last_in_before is not null
+      and fh.first_human_out > li.last_in_before
+      and fh.first_human_out >= p_from and fh.first_human_out < p_to
+    group by c.assigned_to_user_id
+  ),
+  attendant_ids as (
+    select user_id from lead_agg
+    union select user_id from conv_agg
+    union select user_id from ttfr
+  )
+  select jsonb_build_object(
+    'funnel', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'stage_id', s.id,
+          'stage_name', s.name,
+          'position', s.position,
+          'count', coalesce(l.cnt, 0)
+        ) order by s.position, s.name
+      )
+      from public.crm_stages s
+      left join (
+        select stage_id, count(*) as cnt
+        from public.crm_leads
+        where organization_id = p_org
+          and status = 'open'
+          and (p_owner is null or owner_user_id = p_owner)
+        group by stage_id
+      ) l on l.stage_id = s.id
+      where s.organization_id = p_org
+        and s.is_archived = false
+    ), '[]'::jsonb),
+    'attendants', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'user_id', a.user_id,
+          'won', coalesce(la.won, 0),
+          'lost', coalesce(la.lost, 0),
+          'conversations_handled', coalesce(ca.conversations_handled, 0),
+          'avg_first_response_seconds', tf.avg_first_response_seconds
+        ) order by coalesce(la.won, 0) desc, a.user_id
+      )
+      from attendant_ids a
+      left join lead_agg la on la.user_id = a.user_id
+      left join conv_agg ca on ca.user_id = a.user_id
+      left join ttfr tf on tf.user_id = a.user_id
+    ), '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.fn_attendant_metrics(uuid, timestamptz, timestamptz, uuid) from public;
+revoke execute on function public.fn_attendant_metrics(uuid, timestamptz, timestamptz, uuid) from anon;
+grant execute on function public.fn_attendant_metrics(uuid, timestamptz, timestamptz, uuid)
+  to authenticated, service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
@@ -14574,3 +14698,4 @@ comment on column public.channel_sessions.meta_app_id is
   'App ID da Meta dono da WABA — necessário pra Resumable Upload API (imagem de cabeçalho de template). Nullable: canais conectados antes desta coluna continuam funcionando pra template sem imagem.';
 
 notify pgrst, 'reload schema';
+
