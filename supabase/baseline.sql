@@ -14574,3 +14574,65 @@ comment on column public.channel_sessions.meta_app_id is
   'App ID da Meta dono da WABA — necessário pra Resumable Upload API (imagem de cabeçalho de template). Nullable: canais conectados antes desta coluna continuam funcionando pra template sem imagem.';
 
 notify pgrst, 'reload schema';
+
+-- ---- RBAC na base de conhecimento da IA (migration 0174) ----
+-- Ver o cabeçalho da migration 0174: ai_knowledge_sources e
+-- ai_knowledge_versions só isolavam por organização na escrita, sem checar
+-- papel — qualquer membro, inclusive "viewer", podia alterar ou apagar o
+-- material que o agente de IA usa pra responder cliente. Alinha ao mesmo
+-- piso que toda rota de mutação já exige ("manager"), no mesmo padrão que
+-- ai_agents/ai_agent_versions já usa.
+
+drop policy if exists "tenant_isolation_ai_knowledge_sources_all" on "public"."ai_knowledge_sources";
+
+create policy "tenant_isolation_ai_knowledge_sources_select" on "public"."ai_knowledge_sources"
+  for select
+  using (
+    (organization_id in (select public.fn_user_org_ids()))
+    or public.fn_is_platform_admin()
+  );
+
+create policy "tenant_isolation_ai_knowledge_sources_write" on "public"."ai_knowledge_sources"
+  for all
+  using (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  )
+  with check (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  );
+
+drop policy if exists "tenant_isolation_ai_kbv_all" on "public"."ai_knowledge_versions";
+
+create policy "tenant_isolation_ai_kbv_select" on "public"."ai_knowledge_versions"
+  for select
+  using (
+    (organization_id in (select public.fn_user_org_ids()))
+    or public.fn_is_platform_admin()
+  );
+
+create policy "tenant_isolation_ai_kbv_write" on "public"."ai_knowledge_versions"
+  for all
+  using (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  )
+  with check (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  );
+
+notify pgrst, 'reload schema';

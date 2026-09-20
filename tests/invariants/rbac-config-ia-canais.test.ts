@@ -28,6 +28,8 @@ import {
 
 const AGENTE_CONFIG = "eeeeeeee-1111-4000-8000-000000000001";
 const CRED_CONFIG = "eeeeeeee-2222-4000-8000-000000000001";
+const KB_SOURCE_CONFIG = "eeeeeeee-3333-4000-8000-000000000001";
+const KB_VERSION_CONFIG = "eeeeeeee-4444-4000-8000-000000000001";
 
 function seedConfig(): void {
   sql(`
@@ -38,6 +40,12 @@ function seedConfig(): void {
       (id, organization_id, provider, label, api_key_encrypted, api_key_iv, api_key_tag, api_key_last4)
       values ('${CRED_CONFIG}', '${GOV_ORG}', 'anthropic', 'Chave principal',
               '\\x01'::bytea, '\\x02'::bytea, '\\x03'::bytea, '9999')
+      on conflict do nothing;
+    insert into public.ai_knowledge_sources (id, organization_id, agent_id, source_type, name, status)
+      values ('${KB_SOURCE_CONFIG}', '${GOV_ORG}', '${AGENTE_CONFIG}', 'faq', 'FAQ Config', 'ready')
+      on conflict do nothing;
+    insert into public.ai_knowledge_versions (id, organization_id, agent_id, version_number, status)
+      values ('${KB_VERSION_CONFIG}', '${GOV_ORG}', '${AGENTE_CONFIG}', 1, 'building')
       on conflict do nothing;
   `);
 }
@@ -123,6 +131,67 @@ describe("0150 — escrita de config de IA/canais exige admin", () => {
   });
 });
 
+/**
+ * Migration 0174 — mesmo defeito do 0150, achado auditando o CHANGELOG do
+ * fornecedor atrás de correção de segurança não puxada pelo fork: a base de
+ * conhecimento (o material que o agente cita pro cliente) só isolava por
+ * organização, sem checar papel. Piso é `manager` (não `admin` como
+ * ai_agents) — é o mesmo piso que toda rota de mutação já exige em
+ * app/api/v1/ai/knowledge/sources/**.
+ */
+describe("0174 — escrita na base de conhecimento da IA exige manager", () => {
+  it("viewer NÃO apaga uma fonte de conhecimento", () => {
+    expect(
+      writeCountAs(
+        GOV_VIEWER,
+        `delete from public.ai_knowledge_sources where id = '${KB_SOURCE_CONFIG}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("viewer NÃO altera uma versão da base de conhecimento", () => {
+    expect(
+      writeCountAs(
+        GOV_VIEWER,
+        `update public.ai_knowledge_versions set status = 'ready' where id = '${KB_VERSION_CONFIG}'`,
+      ),
+    ).toBe(0);
+  });
+
+  it("CONTROLE POSITIVO: manager altera a fonte de conhecimento", () => {
+    expect(
+      writeCountAs(
+        GOV_MANAGER,
+        `update public.ai_knowledge_sources set name = 'FAQ Renomeada' where id = '${KB_SOURCE_CONFIG}'`,
+      ),
+    ).toBe(1);
+  });
+
+  it("CONTROLE POSITIVO: manager altera a versão da base de conhecimento", () => {
+    expect(
+      writeCountAs(
+        GOV_MANAGER,
+        `update public.ai_knowledge_versions set status = 'ready' where id = '${KB_VERSION_CONFIG}'`,
+      ),
+    ).toBe(1);
+  });
+
+  it("CONTROLE POSITIVO: viewer continua LENDO a base de conhecimento (senão a tela quebra)", () => {
+    expect(
+      countAs(
+        GOV_VIEWER,
+        `select count(*) from public.ai_knowledge_sources where id = '${KB_SOURCE_CONFIG}';`,
+      ),
+    ).toBe(1);
+    expect(
+      countAs(
+        GOV_VIEWER,
+        `select count(*) from public.ai_knowledge_versions where id = '${KB_VERSION_CONFIG}';`,
+      ),
+    ).toBe(1);
+  });
+});
+
 describe("0150 — o segredo cifrado some da superfície do browser", () => {
   // O SELECT foi revogado POR COLUNA: as três colunas do segredo saem, as doze
   // que a view consome ficam. Por isso o que se mede aqui é o acesso à COLUNA,
@@ -180,7 +249,7 @@ describe("0150 — o segredo cifrado some da superfície do browser", () => {
  */
 const DIVIDA_RBAC_CONHECIDA = new Set([
   "agent_cases", "agent_inbox_items", "ai_agent_runs", "ai_chunks", "ai_faq_items",
-  "ai_invocations", "ai_knowledge_sources", "ai_knowledge_versions", "ai_router_decisions",
+  "ai_invocations", "ai_router_decisions",
   "before_send_traces", "channel_knobs", "channel_session_health", "channel_session_warmup",
   "contact_field_proposals", "contacts", "crm_lead_reactivations", "crm_lead_risk_states",
   "crm_lead_scores", "cron_jobs", "demanda_conversas", "demandas",
@@ -199,10 +268,11 @@ const DIVIDA_RBAC_CONHECIDA = new Set([
 ]);
 
 describe("0150 — a dívida de RBAC não cresce", () => {
-  it("as 8 tabelas corrigidas pela 0150 têm policy de escrita com fn_role_at_least", () => {
+  it("as 10 tabelas corrigidas pela 0150 e pela 0174 têm policy de escrita com fn_role_at_least", () => {
     const corrigidas = [
       "channel_sessions", "ai_agents", "ai_agent_versions", "ai_budgets",
       "ai_routers", "ai_router_members", "ai_purpose_bindings", "ai_provider_credentials",
+      "ai_knowledge_sources", "ai_knowledge_versions",
     ];
     const semRole = sql(`
       select coalesce(string_agg(distinct tablename, ','), '') from pg_policies
