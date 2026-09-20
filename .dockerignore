@@ -15,3 +15,6 @@ docs
 tasks
 scratchpad
 .vercel
+# pnpm-store local (cache do pnpm) — 1.3GB+ que só inflava o contexto de
+# build, achado ao vivo num build que demorou o triplo do normal.
+.pnpm-store
