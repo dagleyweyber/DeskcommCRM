@@ -69,7 +69,15 @@ ENV NODE_ENV=production \
 # ffmpeg: a derivação de vídeo (Onda 3.1) roda no processo do app — o cron
 # event-log-drain executa o media_derive handler, que chama `ffmpeg` via spawn
 # pra extrair áudio+frames. Sem o binário, todo vídeo recebido falha a derivação.
-RUN apk add --no-cache ffmpeg
+#
+# poppler-utils (pdftotext): mesma razão, pro PDF. Extrair texto de PDF
+# IN-PROCESS (pdf-parse/pdfjs-dist) pode estourar memória com um arquivo
+# adversário — e esse processo é o MESMO `app` que atende toda a instalação,
+# não um worker isolado. `pdftotext` roda como processo à parte via spawn:
+# se travar ou estourar memória, só ele morre, o app continua de pé. Sem o
+# binário, a extração cai direto pro fallback in-process (mais arriscado,
+# só pra arquivo pequeno — ver lib/ai/rag/extractors/pdf.ts).
+RUN apk add --no-cache ffmpeg poppler-utils
 # non-root
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 # O output standalone NÃO inclui public/ nem .next/static — copiar explicitamente,

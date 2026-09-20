@@ -16,20 +16,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const FIXTURE = join(process.cwd(), "tests/fixtures/sample-text.pdf");
 const TEXTO_ESPERADO = "DeskcommCRM RAG fixture";
 
+/**
+ * Todo teste aqui injeta `runPdftotext` — nunca deixa o poppler REAL decidir
+ * o caminho. Sem isto, os testes ficariam dependentes de o binário estar
+ * instalado (ou não) na máquina que roda `pnpm test:unit`: verde por sorte
+ * de ambiente, não por contrato. A ausência do binário em produção já está
+ * coberta por "poppler indisponível" abaixo — é o mesmo erro que `spawn`
+ * devolve de verdade quando falta.
+ */
+const popplerIndisponivel = async (): Promise<never> => {
+  throw new Error("pdftotext_spawn_failed: spawn pdftotext ENOENT");
+};
+
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock("pdf-parse");
 });
 
 describe("extractPdfText", () => {
-  it("extrai texto de um PDF real", async () => {
+  it("extrai texto de um PDF real (via pdf-parse, com poppler indisponível)", async () => {
     const { extractPdfText } = await import("@/lib/ai/rag/extractors/pdf");
-    const texto = await extractPdfText(readFileSync(FIXTURE));
+    const texto = await extractPdfText(readFileSync(FIXTURE), { runPdftotext: popplerIndisponivel });
     expect(texto).toContain(TEXTO_ESPERADO);
   });
 
-  it("cai no fallback do pdfjs quando o pdf-parse falha, e ainda extrai", async () => {
-    // Sabota só o caminho primário. Se o fallback estiver quebrado, isto fica
+  it("⭐ usa o pdftotext quando disponível, sem tocar pdf-parse/pdfjs (processo isolado é o caminho primário)", async () => {
+    const { extractPdfText } = await import("@/lib/ai/rag/extractors/pdf");
+    const texto = await extractPdfText(readFileSync(FIXTURE), {
+      runPdftotext: async () => "texto vindo do pdftotext isolado",
+    });
+    expect(texto).toBe("texto vindo do pdftotext isolado");
+  });
+
+  it("cai no fallback do pdfjs quando pdftotext falta E o pdf-parse falha, e ainda extrai", async () => {
+    // Sabota o primário in-process. Se o fallback estiver quebrado, isto fica
     // vermelho — que é exatamente o que não acontecia antes desta correção.
     vi.doMock("pdf-parse", () => ({
       default: () => {
@@ -39,7 +59,7 @@ describe("extractPdfText", () => {
     vi.resetModules();
 
     const { extractPdfText } = await import("@/lib/ai/rag/extractors/pdf");
-    const texto = await extractPdfText(readFileSync(FIXTURE));
+    const texto = await extractPdfText(readFileSync(FIXTURE), { runPdftotext: popplerIndisponivel });
     expect(texto).toContain(TEXTO_ESPERADO);
   });
 
@@ -64,15 +84,30 @@ describe("extractPdfText", () => {
     vi.resetModules();
 
     const { extractPdfText, PdfExtractError } = await import("@/lib/ai/rag/extractors/pdf");
-    await expect(extractPdfText(readFileSync(FIXTURE))).rejects.toThrow(PdfExtractError);
-    await expect(extractPdfText(readFileSync(FIXTURE))).rejects.toThrow(/@napi-rs\/canvas/);
+    await expect(
+      extractPdfText(readFileSync(FIXTURE), { runPdftotext: popplerIndisponivel }),
+    ).rejects.toThrow(PdfExtractError);
+    await expect(
+      extractPdfText(readFileSync(FIXTURE), { runPdftotext: popplerIndisponivel }),
+    ).rejects.toThrow(/@napi-rs\/canvas/);
     vi.doUnmock("pdfjs-dist/legacy/build/pdf.mjs");
   });
 
   it("lança PdfExtractError quando o buffer não é PDF", async () => {
     const { extractPdfText, PdfExtractError } = await import("@/lib/ai/rag/extractors/pdf");
-    await expect(extractPdfText(Buffer.from("isto não é um pdf"))).rejects.toBeInstanceOf(
-      PdfExtractError,
-    );
+    await expect(
+      extractPdfText(Buffer.from("isto não é um pdf"), { runPdftotext: popplerIndisponivel }),
+    ).rejects.toBeInstanceOf(PdfExtractError);
+  });
+
+  it("⭐ sem pdftotext, recusa PDF grande em vez de arriscar o processo do app (não cai pro pdf-parse)", async () => {
+    const { extractPdfText, PdfExtractError } = await import("@/lib/ai/rag/extractors/pdf");
+    const grande = Buffer.alloc(9 * 1024 * 1024, 0x25); // 9MB > teto de 8MB do caminho de reserva
+    await expect(
+      extractPdfText(grande, { runPdftotext: popplerIndisponivel }),
+    ).rejects.toThrow(PdfExtractError);
+    await expect(
+      extractPdfText(grande, { runPdftotext: popplerIndisponivel }),
+    ).rejects.toThrow(/grande demais/);
   });
 });
