@@ -123,12 +123,12 @@ beforeAll(() => {
     -- ORG_SEM_ATIV: mensagem de cliente há 20min, NENHUMA atividade depois. Silêncio de verdade.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at, created_at)
-      values ('${ORG_SEM_ATIV}', '${convId(2)}', '${sessionId(2)}', '${contatoId(2)}', 'text', 'inbound', 'received', 'contact', now() - interval '20 minutes', now() - interval '20 minutes');
+      values ('${ORG_SEM_ATIV}', '${convId(2)}', '${sessionId(2)}', '${contatoId(2)}', 'text', 'inbound', 'received', 'system', now() - interval '20 minutes', now() - interval '20 minutes');
 
     -- ORG_COM_ATIV: mensagem de cliente há 20min, E uma execução registrada depois dela. Não é silêncio.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at, created_at)
-      values ('${ORG_COM_ATIV}', '${convId(3)}', '${sessionId(3)}', '${contatoId(3)}', 'text', 'inbound', 'received', 'contact', now() - interval '20 minutes', now() - interval '20 minutes');
+      values ('${ORG_COM_ATIV}', '${convId(3)}', '${sessionId(3)}', '${contatoId(3)}', 'text', 'inbound', 'received', 'system', now() - interval '20 minutes', now() - interval '20 minutes');
     insert into public.ai_agent_runs
       (id, organization_id, agent_id, agent_version_id, status, tokens_in, tokens_out, cost_cents, steps_count, tool_calls, is_dry_run, started_at, created_at)
       values (gen_random_uuid(), '${ORG_COM_ATIV}', '${agentId(3)}', '${versionId(3)}', 'completed', 0, 0, 0, 1, '[]'::jsonb, false, now() - interval '10 minutes', now() - interval '10 minutes');
@@ -136,7 +136,7 @@ beforeAll(() => {
     -- ORG_MSG_FRESCA: mensagem de cliente há só 2min — dentro da carência de 5min, não conta ainda.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at, created_at)
-      values ('${ORG_MSG_FRESCA}', '${convId(6)}', '${sessionId(6)}', '${contatoId(6)}', 'text', 'inbound', 'received', 'contact', now() - interval '2 minutes', now() - interval '2 minutes');
+      values ('${ORG_MSG_FRESCA}', '${convId(6)}', '${sessionId(6)}', '${contatoId(6)}', 'text', 'inbound', 'received', 'system', now() - interval '2 minutes', now() - interval '2 minutes');
   `);
 });
 

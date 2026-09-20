@@ -50,6 +50,10 @@ export type InboxKind =
   | 'midia_nao_lida'
   | 'promise_unfulfilled'
   | 'contact_proposal_expired'
+  // (migration 0175) Agente de IA publicado e ativo sem responder ninguém —
+  // versão publicada sem credencial, ou tráfego real sem nenhuma atividade
+  // correspondente. Achado auditando o CHANGELOG do fornecedor.
+  | 'ia_sem_resposta'
   | 'other';
 
 export interface InboxItemRow {

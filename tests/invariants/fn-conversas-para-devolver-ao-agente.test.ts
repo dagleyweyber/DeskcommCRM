@@ -30,11 +30,11 @@ function ids(prefixo: string, org: string): { agent: string; version: string; se
   };
 }
 
-const D = ids("eaaad", ORG_DEVIDA);
-const R = ids("eaaar", ORG_SINAL_RECENTE);
-const P = ids("eaaap", ORG_PRAZO_DESLIGADO);
-const S = ids("eaaas", ORG_SEM_AGENTE);
-const F = ids("eaaaf", ORG_FECHADA);
+const D = ids("eaad", ORG_DEVIDA);
+const R = ids("eaar", ORG_SINAL_RECENTE);
+const P = ids("eaap", ORG_PRAZO_DESLIGADO);
+const S = ids("eaas", ORG_SEM_AGENTE);
+const F = ids("eaaf", ORG_FECHADA);
 
 function devidas(): string[] {
   const out = sql(`select conversation_id from public.fn_conversas_para_devolver_ao_agente();`);
