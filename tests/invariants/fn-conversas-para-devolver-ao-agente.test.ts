@@ -59,7 +59,7 @@ function montarOrg(args: {
 
   sql(`
     insert into public.organizations (id, slug, legal_name, display_name, settings) values
-      ('${org}', '${org.slice(0, 8)}', 'Org', 'Org', ${settingsJson}::jsonb)
+      ('${org}', '${org}', 'Org', 'Org', ${settingsJson}::jsonb)
       on conflict do nothing;
 
     insert into public.ai_agents (id, organization_id, name, system_prompt, is_active) values
