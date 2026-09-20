@@ -25,7 +25,7 @@
  * Todos falham → throws PdfExtractError.
  */
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -82,7 +82,8 @@ async function runPdftotext(buffer: Buffer): Promise<string> {
       proc.on("close", (code) => {
         clearTimeout(timer);
         if (liquidado) return;
-        code === 0 ? resolve(out.trim()) : reject(new Error(`pdftotext_exit_${code}: ${erro}`));
+        if (code === 0) resolve(out.trim());
+        else reject(new Error(`pdftotext_exit_${code}: ${erro}`));
       });
     });
   } finally {
