@@ -30,11 +30,13 @@ function ids(prefixo: string, org: string): { agent: string; version: string; se
   };
 }
 
-const D = ids("eaad", ORG_DEVIDA);
-const R = ids("eaar", ORG_SINAL_RECENTE);
-const P = ids("eaap", ORG_PRAZO_DESLIGADO);
-const S = ids("eaas", ORG_SEM_AGENTE);
-const F = ids("eaaf", ORG_FECHADA);
+// Prefixos de 4 dígitos HEX (0-9a-f) — UUID não aceita outra coisa no
+// primeiro grupo, e foi exatamente isso que quebrou aqui na primeira versão.
+const D = ids("ea01", ORG_DEVIDA);
+const R = ids("ea02", ORG_SINAL_RECENTE);
+const P = ids("ea03", ORG_PRAZO_DESLIGADO);
+const S = ids("ea04", ORG_SEM_AGENTE);
+const F = ids("ea05", ORG_FECHADA);
 
 function devidas(): string[] {
   const out = sql(`select conversation_id from public.fn_conversas_para_devolver_ao_agente();`);
