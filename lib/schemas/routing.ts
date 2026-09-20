@@ -25,6 +25,16 @@ export const routingConfigSchema = z.object({
   mode: z.enum(ROUTING_MODES).default("manual"),
   max_retries: z.number().int().min(0).max(20).default(5),
   backoff_seconds: z.number().int().min(1).max(3600).default(60),
+  /**
+   * Minutos sem NENHUM sinal da equipe (assumir, responder pela tela ou pelo
+   * celular) antes da conversa voltar sozinha ao agente de IA. `0` = desligado
+   * — o padrão, inclusive pra quem já tem o sistema instalado (achado
+   * auditando o CHANGELOG do fornecedor: medido lá que 12 de 31 conversas
+   * ativas num dia ficavam paradas com humano, ninguém devolvia). Cron
+   * `ai-handoff-timeout-watcher` lê este valor via
+   * `fn_conversas_para_devolver_ao_agente`.
+   */
+  human_handoff_timeout_minutes: z.number().int().min(0).max(1440).default(0),
 });
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
 

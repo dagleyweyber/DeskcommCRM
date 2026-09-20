@@ -22,6 +22,7 @@ export interface AtendimentoConfig {
   mode: RoutingMode;
   max_retries: number;
   backoff_seconds: number;
+  human_handoff_timeout_minutes: number;
   visibility_mode: VisibilityMode;
 }
 
@@ -191,6 +192,43 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
             </div>
           </div>
         ) : null}
+      </Card>
+
+      <Card className="space-y-4 p-4">
+        <div>
+          <h2 className="text-sm font-semibold">Conversa esquecida com um atendente</h2>
+          <p className="text-xs text-muted-foreground">
+            Quando alguém assume uma conversa, o agente de IA para de responder nela até ser
+            devolvido. Se ninguém der mais nenhum sinal — nem assumir, nem responder pela tela
+            ou pelo celular —, ela pode voltar sozinha para o agente depois de um tempo.
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="human_handoff_timeout_minutes">
+              Devolver ao agente depois de (minutos)
+            </Label>
+            <Input
+              id="human_handoff_timeout_minutes"
+              type="number"
+              min={0}
+              max={1440}
+              value={form.human_handoff_timeout_minutes}
+              disabled={isPending}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  human_handoff_timeout_minutes: Number(e.target.value),
+                }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              <strong>0 = desligado</strong> (o padrão). De 5 minutos a 24 horas (1440) quando
+              ligado. Um atendimento longo com a pessoa respondendo não é interrompido — o
+              prazo só conta a partir do último sinal da equipe.
+            </p>
+          </div>
+        </div>
       </Card>
 
       <Card className="space-y-4 p-4">
