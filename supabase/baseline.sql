@@ -14308,6 +14308,132 @@ revoke all on function public.fn_due_appointment_reminders(uuid, uuid, timestamp
 revoke execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from anon;
 grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) to service_role;
 
+notify pgrst, 'reload schema';
+
+-- ---- fn_ia_organizacoes_silenciosas (migration 0175) ----
+-- Ver o cabeçalho da migration 0175: resolve "quem precisa de alerta agora"
+-- pro watcher de IA silenciosa — agente publicado/ativo sem credencial na
+-- versão publicada, ou com tráfego real recente e nenhuma atividade
+-- correspondente (ai_agent_runs/ai_invocations) na mesma janela.
+--
+-- Entra ANTES da VARREDURA anon (migration 0116, logo abaixo) de propósito:
+-- é `security definer`, e um bloco colado depois dela nasceria exposto pra
+-- `anon` em quem ATUALIZA, sem mais nada no arquivo pra corrigir isso.
+create or replace function public.fn_ia_organizacoes_silenciosas(p_janela_minutos int default 60)
+returns table(organization_id uuid, motivo text, agent_id uuid)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with agentes_publicados as (
+    select a.id as agent_id, a.organization_id, av.credential_id
+    from public.ai_agents a
+    join public.ai_agent_versions av on av.id = a.published_version_id
+    where a.is_active = true
+      and a.published_version_id is not null
+      and a.archived_at is null
+  ),
+  sem_credencial as (
+    select organization_id, 'sem_credencial'::text as motivo, agent_id
+    from agentes_publicados
+    where credential_id is null
+  ),
+  trafego_recente as (
+    select distinct organization_id
+    from public.messages
+    where direction = 'inbound'
+      and created_at >= now() - (p_janela_minutos || ' minutes')::interval
+      and created_at <= now() - interval '5 minutes'
+  ),
+  atividade_recente as (
+    select organization_id from public.ai_agent_runs
+      where created_at >= now() - (p_janela_minutos || ' minutes')::interval
+        and is_dry_run = false
+    union
+    select organization_id from public.ai_invocations
+      where created_at >= now() - (p_janela_minutos || ' minutes')::interval
+  ),
+  sem_atividade as (
+    select ap.organization_id, 'sem_atividade'::text as motivo, ap.agent_id
+    from agentes_publicados ap
+    join trafego_recente t on t.organization_id = ap.organization_id
+    where ap.credential_id is not null
+      and ap.organization_id not in (select organization_id from atividade_recente)
+  )
+  select * from sem_credencial
+  union all
+  select * from sem_atividade;
+$$;
+
+revoke execute on function public.fn_ia_organizacoes_silenciosas(int) from public, anon;
+grant execute on function public.fn_ia_organizacoes_silenciosas(int) to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- fn_conversas_para_devolver_ao_agente (migration 0176) ----
+-- Ver o cabeçalho da migration 0176: resolve "quem está devida" pro watcher
+-- de devolução automática — conversa com humano, prazo ligado na org
+-- (settings.routing.human_handoff_timeout_minutes), último sinal da equipe
+-- vencido, e só onde existe agente publicado pro canal daquela conversa.
+-- Mesma razão de entrar ANTES da VARREDURA anon logo abaixo.
+create or replace function public.fn_conversas_para_devolver_ao_agente()
+returns table(conversation_id uuid, organization_id uuid)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with orgs_com_prazo as (
+    select o.id as organization_id,
+           ((o.settings #>> '{routing,human_handoff_timeout_minutes}')::int) as prazo_minutos
+    from public.organizations o
+    where (o.settings #>> '{routing,human_handoff_timeout_minutes}') is not null
+      and ((o.settings #>> '{routing,human_handoff_timeout_minutes}')::int) > 0
+  ),
+  candidatas as (
+    select c.id as conversation_id, c.organization_id, c.channel_session_id,
+           c.assigned_at, p.prazo_minutos
+    from public.conversations c
+    join orgs_com_prazo p on p.organization_id = c.organization_id
+    where c.assignee_kind = 'user'
+      and c.status not in ('closed', 'archived')
+      and c.assigned_at is not null
+  ),
+  ultimo_sinal as (
+    select cd.conversation_id, cd.organization_id, cd.channel_session_id, cd.prazo_minutos,
+           greatest(
+             cd.assigned_at,
+             coalesce(
+               (select max(m.created_at) from public.messages m
+                 where m.organization_id = cd.organization_id
+                   and m.conversation_id = cd.conversation_id
+                   and m.direction = 'outbound'
+                   and m.sent_via in ('user', 'external_device')),
+               cd.assigned_at
+             )
+           ) as sinal_em
+    from candidatas cd
+  )
+  select us.conversation_id, us.organization_id
+  from ultimo_sinal us
+  where us.sinal_em <= now() - (us.prazo_minutos || ' minutes')::interval
+    and exists (
+      select 1
+      from public.ai_agents a
+      join public.ai_agent_versions v on v.id = a.published_version_id
+      where a.organization_id = us.organization_id
+        and a.is_active = true
+        and a.archived_at is null
+        and v.channel_session_id = us.channel_session_id
+    );
+$$;
+
+revoke execute on function public.fn_conversas_para_devolver_ao_agente() from public, anon;
+grant execute on function public.fn_conversas_para_devolver_ao_agente() to service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
@@ -14641,124 +14767,5 @@ create policy "tenant_isolation_ai_kbv_write" on "public"."ai_knowledge_versions
     )
     or public.fn_is_platform_admin()
   );
-
-notify pgrst, 'reload schema';
-
--- ---- fn_ia_organizacoes_silenciosas (migration 0175) ----
--- Ver o cabeçalho da migration 0175: resolve "quem precisa de alerta agora"
--- pro watcher de IA silenciosa — agente publicado/ativo sem credencial na
--- versão publicada, ou com tráfego real recente e nenhuma atividade
--- correspondente (ai_agent_runs/ai_invocations) na mesma janela.
-create or replace function public.fn_ia_organizacoes_silenciosas(p_janela_minutos int default 60)
-returns table(organization_id uuid, motivo text, agent_id uuid)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  with agentes_publicados as (
-    select a.id as agent_id, a.organization_id, av.credential_id
-    from public.ai_agents a
-    join public.ai_agent_versions av on av.id = a.published_version_id
-    where a.is_active = true
-      and a.published_version_id is not null
-      and a.archived_at is null
-  ),
-  sem_credencial as (
-    select organization_id, 'sem_credencial'::text as motivo, agent_id
-    from agentes_publicados
-    where credential_id is null
-  ),
-  trafego_recente as (
-    select distinct organization_id
-    from public.messages
-    where direction = 'inbound'
-      and created_at >= now() - (p_janela_minutos || ' minutes')::interval
-      and created_at <= now() - interval '5 minutes'
-  ),
-  atividade_recente as (
-    select organization_id from public.ai_agent_runs
-      where created_at >= now() - (p_janela_minutos || ' minutes')::interval
-        and is_dry_run = false
-    union
-    select organization_id from public.ai_invocations
-      where created_at >= now() - (p_janela_minutos || ' minutes')::interval
-  ),
-  sem_atividade as (
-    select ap.organization_id, 'sem_atividade'::text as motivo, ap.agent_id
-    from agentes_publicados ap
-    join trafego_recente t on t.organization_id = ap.organization_id
-    where ap.credential_id is not null
-      and ap.organization_id not in (select organization_id from atividade_recente)
-  )
-  select * from sem_credencial
-  union all
-  select * from sem_atividade;
-$$;
-
-revoke execute on function public.fn_ia_organizacoes_silenciosas(int) from public, anon;
-grant execute on function public.fn_ia_organizacoes_silenciosas(int) to service_role;
-
-notify pgrst, 'reload schema';
-
--- ---- fn_conversas_para_devolver_ao_agente (migration 0176) ----
--- Ver o cabeçalho da migration 0176: resolve "quem está devida" pro watcher
--- de devolução automática — conversa com humano, prazo ligado na org
--- (settings.routing.human_handoff_timeout_minutes), último sinal da equipe
--- vencido, e só onde existe agente publicado pro canal daquela conversa.
-create or replace function public.fn_conversas_para_devolver_ao_agente()
-returns table(conversation_id uuid, organization_id uuid)
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  with orgs_com_prazo as (
-    select o.id as organization_id,
-           ((o.settings #>> '{routing,human_handoff_timeout_minutes}')::int) as prazo_minutos
-    from public.organizations o
-    where (o.settings #>> '{routing,human_handoff_timeout_minutes}') is not null
-      and ((o.settings #>> '{routing,human_handoff_timeout_minutes}')::int) > 0
-  ),
-  candidatas as (
-    select c.id as conversation_id, c.organization_id, c.channel_session_id,
-           c.assigned_at, p.prazo_minutos
-    from public.conversations c
-    join orgs_com_prazo p on p.organization_id = c.organization_id
-    where c.assignee_kind = 'user'
-      and c.status not in ('closed', 'archived')
-      and c.assigned_at is not null
-  ),
-  ultimo_sinal as (
-    select cd.conversation_id, cd.organization_id, cd.channel_session_id, cd.prazo_minutos,
-           greatest(
-             cd.assigned_at,
-             coalesce(
-               (select max(m.created_at) from public.messages m
-                 where m.organization_id = cd.organization_id
-                   and m.conversation_id = cd.conversation_id
-                   and m.direction = 'outbound'
-                   and m.sent_via in ('user', 'external_device')),
-               cd.assigned_at
-             )
-           ) as sinal_em
-    from candidatas cd
-  )
-  select us.conversation_id, us.organization_id
-  from ultimo_sinal us
-  where us.sinal_em <= now() - (us.prazo_minutos || ' minutes')::interval
-    and exists (
-      select 1
-      from public.ai_agents a
-      join public.ai_agent_versions v on v.id = a.published_version_id
-      where a.organization_id = us.organization_id
-        and a.is_active = true
-        and a.archived_at is null
-        and v.channel_session_id = us.channel_session_id
-    );
-$$;
-
-revoke execute on function public.fn_conversas_para_devolver_ao_agente() from public, anon;
-grant execute on function public.fn_conversas_para_devolver_ao_agente() to service_role;
 
 notify pgrst, 'reload schema';
