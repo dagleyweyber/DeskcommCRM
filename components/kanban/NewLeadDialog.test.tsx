@@ -143,8 +143,12 @@ describe("NewLeadDialog — aviso de lead duplicado (contato já tem um aberto n
   });
 
   it("⭐ «Criar mesmo assim» reenvia com confirm_duplicate — sem recriar o contato", async () => {
+    // `contact_id` passa por `createLeadSchema` (exige uuid) antes de chegar
+    // no envio — um id fake tipo "contato-1" reprova ali, silenciosamente
+    // (é o mesmo `toast.error` + return de "Dados inválidos"), e o teste
+    // nunca chegaria a exercitar o aviso.
     criarContato.mockResolvedValue({
-      data: { contact: { id: "contato-1" }, action: "created" },
+      data: { contact: { id: CONTACT_ID }, action: "created" },
     });
     criarLead
       .mockRejectedValueOnce(
@@ -171,7 +175,7 @@ describe("NewLeadDialog — aviso de lead duplicado (contato já tem um aberto n
 
     await waitFor(() => expect(criarLead).toHaveBeenCalledTimes(2));
     expect(criarLead).toHaveBeenLastCalledWith(
-      expect.objectContaining({ contact_id: "contato-1", confirm_duplicate: true }),
+      expect.objectContaining({ contact_id: CONTACT_ID, confirm_duplicate: true }),
     );
     // Reenviar não pede o contato de novo — reusa o que já foi resolvido.
     expect(criarContato).toHaveBeenCalledTimes(1);
