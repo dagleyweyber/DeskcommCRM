@@ -58,6 +58,13 @@ const COPY: Record<string, { variant: Variant; msg: string }> = {
     variant: "warning",
     msg: "Já existe um contato com este telefone nesta organização.",
   },
+  // `NewLeadDialog` trata este código à parte (mostra o aviso com o botão
+  // "Criar mesmo assim" em vez de só um toast) — esta entrada é o piso pra
+  // qualquer OUTRO chamador que ainda não tenha esse tratamento dedicado.
+  duplicate_open_lead: {
+    variant: "warning",
+    msg: "Este contato já tem um lead aberto neste pipeline.",
+  },
   contact_duplicate_email: {
     variant: "warning",
     msg: "Já existe um contato com este e-mail nesta organização.",

@@ -189,6 +189,15 @@ export const createLeadSchema = z.object({
   tags: z.array(z.string()).default([]),
   source: z.string().min(1).default("manual"),
   custom_fields: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Criação manual não passa pelo mesmo dedup do caminho automático
+   * (`garantirLeadDaConversa`, "um lead por contato") — é ação humana
+   * deliberada, e um contato pode ter negócios legítimos em paralelo. O
+   * handler recusa com `duplicate_open_lead` quando o contato já tem lead
+   * aberto NESTE pipeline; este flag é o "sim, mesmo assim" explícito de
+   * quem confirmou o aviso na tela.
+   */
+  confirm_duplicate: z.boolean().optional(),
 });
 export type CreateLeadInput = z.infer<typeof createLeadSchema>;
 

@@ -13,10 +13,11 @@
  * sem sobrar rastro nenhum pro usuário perceber.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "@/lib/api/types";
 import type { Stage } from "@/lib/kanban/types";
 import { NewLeadDialog } from "./NewLeadDialog";
 
@@ -100,6 +101,105 @@ describe("NewLeadDialog — telefone digitado precisa virar contact_id do lead",
     expect(criarContato).not.toHaveBeenCalled();
     expect(criarLead).toHaveBeenCalledWith(
       expect.not.objectContaining({ contact_id: expect.anything() }),
+    );
+  });
+});
+
+/**
+ * Achado ao vivo (RevitaFio Mossoró, mesmo caso do Francisco/Filgueira Neto):
+ * dois leads nasceram pro mesmo contato no mesmo pipeline, ~2h de diferença —
+ * o "+ Novo lead" nunca checava se o contato já tinha um aberto. O servidor
+ * agora recusa com `duplicate_open_lead`; a tela precisa virar isso num
+ * aviso com "Criar mesmo assim", não um erro mudo.
+ */
+describe("NewLeadDialog — aviso de lead duplicado (contato já tem um aberto neste pipeline)", () => {
+  beforeEach(() => {
+    criarLead.mockReset();
+    criarContato.mockReset();
+  });
+
+  it("⭐ mostra o aviso com o título do lead existente, e não reseta o formulário", async () => {
+    criarLead.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        "duplicate_open_lead",
+        { existing_lead_id: "lead-existente", existing_lead_title: "Francisco" },
+        "req-1",
+        'Este contato já tem um lead aberto neste pipeline: "Francisco".',
+      ),
+    );
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Filgueira Neto");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+
+    const aviso = await screen.findByTestId("aviso-lead-duplicado");
+    expect(aviso).toHaveTextContent("Francisco");
+    // O formulário continua preenchido — a pessoa não perde o que digitou
+    // por causa de um aviso que ela ainda vai decidir o que fazer.
+    expect(screen.getByLabelText("Título")).toHaveValue("Filgueira Neto");
+  });
+
+  it("⭐ «Criar mesmo assim» reenvia com confirm_duplicate — sem recriar o contato", async () => {
+    criarContato.mockResolvedValue({
+      data: { contact: { id: "contato-1" }, action: "created" },
+    });
+    criarLead
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          "duplicate_open_lead",
+          { existing_lead_id: "lead-existente", existing_lead_title: "Francisco" },
+          "req-1",
+        ),
+      )
+      .mockResolvedValueOnce({ data: { id: "lead-novo" } });
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Filgueira Neto");
+    await user.type(screen.getByLabelText("Telefone"), "(84) 92145-4902");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+    await screen.findByTestId("aviso-lead-duplicado");
+
+    expect(criarContato).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Criar mesmo assim" }));
+
+    await waitFor(() => expect(criarLead).toHaveBeenCalledTimes(2));
+    expect(criarLead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ contact_id: "contato-1", confirm_duplicate: true }),
+    );
+    // Reenviar não pede o contato de novo — reusa o que já foi resolvido.
+    expect(criarContato).toHaveBeenCalledTimes(1);
+  });
+
+  it("submeter de novo (não «Criar mesmo assim») some com o aviso anterior", async () => {
+    criarLead
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          "duplicate_open_lead",
+          { existing_lead_id: "lead-existente", existing_lead_title: "Francisco" },
+          "req-1",
+        ),
+      )
+      .mockResolvedValueOnce({ data: { id: "lead-novo" } });
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Tentativa 1");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+    await screen.findByTestId("aviso-lead-duplicado");
+
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("aviso-lead-duplicado")).not.toBeInTheDocument(),
     );
   });
 });

@@ -252,6 +252,45 @@ export async function createLeadHandler(
     );
   }
 
+  // Achado ao vivo: o caminho automático (garantirLeadDaConversa, "um lead por
+  // contato") nunca deixa um contato ficar com dois leads abertos — mas a
+  // criação MANUAL insere direto, sem checar nada, e é o único lugar onde isso
+  // acontecia. Dois leads nasceram pro mesmo cliente (mesmo telefone) no MESMO
+  // pipeline com 2h de diferença: um pela tela, sem repetir a checagem, e cada
+  // um fechou "Ganho" separadamente — o card sem valor mascarando o que já
+  // tinha fechado com valor real.
+  //
+  // Aviso, não bloqueio: um contato pode ter negócio aberto legítimo em MAIS
+  // DE UM pipeline ao mesmo tempo (aluguel + venda, por exemplo), e forçar a
+  // checagem pro pipeline inteiro do contato quebraria esse caso real. Escopo
+  // fica no MESMO pipeline — é exatamente o padrão do incidente, e é onde dois
+  // leads abertos juntos quase nunca faz sentido de verdade. `confirm_duplicate`
+  // é o "sim, mesmo assim" de quem já viu o aviso na tela.
+  if (input.contact_id && !input.confirm_duplicate) {
+    const { data: existente, error: dupErr } = await supabase
+      .from("crm_leads")
+      .select("id, title")
+      .eq("organization_id", ctx.organization_id)
+      .eq("contact_id", input.contact_id)
+      .eq("pipeline_id", input.pipeline_id)
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+
+    if (dupErr) {
+      throw new ApiError(500, "internal_error", undefined, ctx.requestId, dupErr.message);
+    }
+    if (existente) {
+      throw new ApiError(
+        409,
+        "duplicate_open_lead",
+        { existing_lead_id: existente.id, existing_lead_title: existente.title },
+        ctx.requestId,
+        `Este contato já tem um lead aberto neste pipeline: "${existente.title}".`,
+      );
+    }
+  }
+
   // next position_in_stage = MAX + 1000.
   const { data: maxRow, error: maxErr } = await supabase
     .from("crm_leads")

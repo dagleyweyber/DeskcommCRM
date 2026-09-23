@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { ApiError } from "@/lib/api/types";
 import {
   Dialog,
   DialogContent,
@@ -66,6 +67,13 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   const { data: serviceOptionsRes } = useServiceOptions(pipelineId);
   const serviceOptions = serviceOptionsRes?.data.service_options ?? [];
   const initialStage = useMemo(() => defaultStageId(stages), [stages]);
+  // Achado ao vivo: dois leads pro mesmo contato, no mesmo pipeline, um sem
+  // valor escondendo o outro que fechou de verdade — a criação manual nunca
+  // avisava. `duplicidade` guarda o lead já aberto que o servidor encontrou;
+  // `payloadPendente` é o mesmo payload já montado (contato já resolvido),
+  // pronto pra reenviar com `confirm_duplicate: true` sem recriar o contato.
+  const [duplicidade, setDuplicidade] = useState<{ leadId: string; titulo: string } | null>(null);
+  const [payloadPendente, setPayloadPendente] = useState<CreateLeadInput | null>(null);
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -91,6 +99,12 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   }, [initialStage, form]);
 
   async function onSubmit(values: FormShape) {
+    // Submissão nova (não o clique em "Criar mesmo assim") sempre refaz a
+    // checagem do zero — um aviso de uma tentativa anterior não pode continuar
+    // valendo pra dados que a pessoa já mudou.
+    setDuplicidade(null);
+    setPayloadPendente(null);
+
     const tags = values.tagsRaw
       .split(",")
       .map((s) => s.trim())
@@ -160,26 +174,56 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
       return;
     }
 
+    await enviar(parsed.data as CreateLeadInput);
+  }
+
+  function resetForm() {
+    form.reset({
+      title: "",
+      description: "",
+      stage_id: initialStage,
+      valueReais: "",
+      tagsRaw: "",
+      expected_close_date: "",
+      phone: "",
+      email: "",
+      owner_user_id: NO_OWNER,
+      produtoInteresse: "",
+      source: "manual",
+    });
+    setDuplicidade(null);
+    setPayloadPendente(null);
+  }
+
+  async function enviar(input: CreateLeadInput) {
     try {
-      await create.mutateAsync(parsed.data as CreateLeadInput);
+      await create.mutateAsync(input);
       toast.success("Lead criado");
-      form.reset({
-        title: "",
-        description: "",
-        stage_id: initialStage,
-        valueReais: "",
-        tagsRaw: "",
-        expected_close_date: "",
-        phone: "",
-        email: "",
-        owner_user_id: NO_OWNER,
-        produtoInteresse: "",
-        source: "manual",
-      });
+      resetForm();
       onOpenChange(false);
-    } catch {
-      // toast already shown
+    } catch (err) {
+      // Achado ao vivo: sem este desvio, o mesmo cliente ganhava um SEGUNDO
+      // lead aberto no mesmo pipeline, um dos dois sem valor escondendo o
+      // outro que fechou de verdade. O servidor já recusa com
+      // `duplicate_open_lead`; aqui a tela vira a recusa numa pergunta.
+      if (err instanceof ApiError && err.code === "duplicate_open_lead") {
+        const detalhes = err.details as
+          | { existing_lead_id?: string; existing_lead_title?: string }
+          | undefined;
+        setDuplicidade({
+          leadId: detalhes?.existing_lead_id ?? "",
+          titulo: detalhes?.existing_lead_title ?? "outro lead",
+        });
+        setPayloadPendente(input);
+        return;
+      }
+      // outros erros: toast já mostrado pelo hook (onError: showApiError)
     }
+  }
+
+  function criarMesmoAssim() {
+    if (!payloadPendente) return;
+    void enviar({ ...payloadPendente, confirm_duplicate: true });
   }
 
   const stageId = form.watch("stage_id");
@@ -362,11 +406,38 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
             />
           </div>
 
+          {duplicidade ? (
+            <div
+              data-testid="aviso-lead-duplicado"
+              className="rounded-md border border-amber-500/40 bg-amber-50/60 p-3 text-xs dark:bg-amber-900/10"
+            >
+              Este contato já tem um lead aberto neste pipeline:{" "}
+              <strong>&ldquo;{duplicidade.titulo}&rdquo;</strong>. Criar outro deixa dois
+              negócios abertos pro mesmo cliente ao mesmo tempo — confira se não é o
+              mesmo antes de continuar.
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={criarMesmoAssim}
+                  disabled={busy}
+                >
+                  Criar mesmo assim
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <DialogFooter>
             <Button
               type="button"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={() => {
+                onOpenChange(false);
+                setDuplicidade(null);
+                setPayloadPendente(null);
+              }}
               disabled={busy}
             >
               Cancelar
