@@ -110,6 +110,23 @@ export async function listConversationsHandler(
   if (q.channel_session_id) query = query.eq("channel_session_id", q.channel_session_id);
   if (q.tag) query = query.contains("tags", [q.tag]); // tags @> array[tag] (GIN)
 
+  // Aba "IA": não é coluna de `conversations` — os dois motores de resposta
+  // não convergem em nenhum campo de estado comum (ver cabeçalho da
+  // migration 0177). `.in("id", [])` devolve lista vazia corretamente
+  // quando a função não acha nada, em vez de cair pro "sem filtro" que um
+  // array vazio provocaria num `.in()` direto.
+  if (q.ai_ativa) {
+    const { data: ativas, error: ativasErr } = await supabase.rpc(
+      "fn_conversas_ia_ativa" as never,
+      { p_organization_id: ctx.organization_id } as never,
+    );
+    if (ativasErr) {
+      throw new ApiError(500, "internal_error", undefined, ctx.requestId, ativasErr.message);
+    }
+    const ids = ((ativas ?? []) as Array<{ conversation_id: string }>).map((r) => r.conversation_id);
+    query = query.in("id", ids.length > 0 ? ids : ["00000000-0000-0000-0000-000000000000"]);
+  }
+
   if (q.assigned_to === "me") {
     if (ctx.actor.type !== "user") {
       throw new ApiError(

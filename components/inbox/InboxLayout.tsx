@@ -39,7 +39,14 @@ export function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<Conversation
     case "closed":
       return { status: "closed" };
     case "ai":
-      return { status: "ai_handling" };
+      // Achado ao vivo (RevitaFio Mossoro): `status: "ai_handling"` é valor
+      // LEGADO (migration 0032) que nada no fluxo atual escreve mais — a
+      // aba sempre mostrava zero, mesmo com o agente respondendo de
+      // verdade. `ai_ativa` é resolvido pela ÚLTIMA mensagem enviada em
+      // cada conversa (`fn_conversas_ia_ativa`, migration 0177), não por um
+      // campo de estado — os dois motores de resposta usados hoje não
+      // convergem em nenhuma coluna comum.
+      return { ai_ativa: true };
     case "all":
     default:
       return {};

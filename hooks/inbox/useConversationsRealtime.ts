@@ -56,6 +56,8 @@ export interface ConversationsFilters {
   /** Esconde fechadas/arquivadas — ver `exclude_finished` no schema da rota. */
   exclude_finished?: boolean;
   assigned_to?: "me" | "unassigned" | string;
+  /** Aba "IA" — ver `fn_conversas_ia_ativa` (migration 0177). */
+  ai_ativa?: boolean;
   search?: string;
   channel_session_id?: string;
   tag?: string;
@@ -81,6 +83,7 @@ export function useConversationsRealtime(
       if (filters.status) qs.set("status", filters.status);
       if (filters.exclude_finished) qs.set("exclude_finished", "true");
       if (filters.assigned_to) qs.set("assigned_to", filters.assigned_to);
+      if (filters.ai_ativa) qs.set("ai_ativa", "true");
       if (filters.search) qs.set("search", filters.search);
       if (filters.channel_session_id) qs.set("channel_session_id", filters.channel_session_id);
       if (filters.tag) qs.set("tag", filters.tag);

@@ -14434,6 +14434,41 @@ grant execute on function public.fn_conversas_para_devolver_ao_agente() to servi
 
 notify pgrst, 'reload schema';
 
+-- ---- fn_conversas_ia_ativa (migration 0177) ----
+-- Ver o cabeçalho da migration 0177: a aba "IA" do Inbox filtrava por um
+-- status legado que nada escreve mais, e `assignee_kind='ai'` sozinho
+-- também não basta — o motor que de fato atende hoje
+-- (lib/agent-engine/agent/inbound-turn.ts) nunca toca essa coluna. Resolve
+-- pela ÚLTIMA mensagem outbound de cada conversa (sent_via='ai'), não por
+-- um campo de estado que só um dos dois motores mantém.
+create or replace function public.fn_conversas_ia_ativa(p_organization_id uuid)
+returns table(conversation_id uuid)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.id
+  from public.conversations c
+  where c.organization_id = p_organization_id
+    and p_organization_id in (select public.fn_user_org_ids())
+    and c.status not in ('closed', 'archived')
+    and coalesce(c.assignee_kind, '') <> 'user'
+    and (
+      select m.sent_via
+      from public.messages m
+      where m.conversation_id = c.id
+        and m.direction = 'outbound'
+      order by m.sent_at desc
+      limit 1
+    ) = 'ai';
+$$;
+
+revoke execute on function public.fn_conversas_ia_ativa(uuid) from public, anon;
+grant execute on function public.fn_conversas_ia_ativa(uuid) to authenticated, service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

@@ -38,6 +38,14 @@ describe("tabToFilter — o que cada aba significa", () => {
     expect(tabToFilter("all").exclude_finished).toBeUndefined();
     expect(tabToFilter("ai").exclude_finished).toBeUndefined();
   });
+
+  it("⭐ IA pede ai_ativa — não mais o status legado 'ai_handling' que nada escreve", () => {
+    // Achado ao vivo (RevitaFio Mossoro): a aba sempre mostrava zero, mesmo
+    // com o agente respondendo de verdade. `ai_handling` é valor legado da
+    // migration 0032; `assignee_kind='ai'` sozinho também não bastava — o
+    // motor real (lib/agent-engine) nunca toca essa coluna.
+    expect(tabToFilter("ai")).toEqual({ ai_ativa: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -135,6 +143,79 @@ describe("listConversationsHandler — predicado", () => {
 // ---------------------------------------------------------------------------
 // o badge tem que espelhar a aba
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// elo 4 — a aba IA chama a função, não filtra por coluna
+// ---------------------------------------------------------------------------
+
+/** Mesmo double de cima, com `.rpc()` — a aba IA não passa por `.from()`. */
+function fakeSupabaseComRpc(idsAtivas: string[]) {
+  const chamadas: { metodo: string; args: unknown[] }[] = [];
+  const rpcChamadas: { fn: string; args: unknown }[] = [];
+  const proxy: Record<string, unknown> = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "then") {
+          return (ok: (v: unknown) => unknown) => ok({ data: [], error: null });
+        }
+        return (...args: unknown[]) => {
+          chamadas.push({ metodo: String(prop), args });
+          return proxy;
+        };
+      },
+    },
+  ) as Record<string, unknown>;
+  return {
+    client: {
+      from: () => proxy,
+      rpc: (fn: string, args: unknown) => {
+        rpcChamadas.push({ fn, args });
+        return Promise.resolve({
+          data: idsAtivas.map((conversation_id) => ({ conversation_id })),
+          error: null,
+        });
+      },
+    } as never,
+    chamadas,
+    rpcChamadas,
+  };
+}
+
+describe("listConversationsHandler — aba IA chama fn_conversas_ia_ativa", () => {
+  it("⭐ passa a organização certa pra função, e filtra pelos ids que ela devolve", async () => {
+    const { client, chamadas, rpcChamadas } = fakeSupabaseComRpc(["conv-a", "conv-b"]);
+    await listConversationsHandler(client, ctx, { limit: 50, ai_ativa: true } as never);
+
+    expect(rpcChamadas).toEqual([
+      { fn: "fn_conversas_ia_ativa", args: { p_organization_id: "org-1" } },
+    ]);
+    expect(
+      chamadas.some(
+        (c) => c.metodo === "in" && c.args[0] === "id" && Array.isArray(c.args[1]) &&
+          (c.args[1] as string[]).includes("conv-a") && (c.args[1] as string[]).includes("conv-b"),
+      ),
+    ).toBe(true);
+  });
+
+  it("⭐ nenhuma conversa ativa: filtra por um id que não existe, nunca 'sem filtro'", async () => {
+    // Um `.in("id", [])` vazio se comporta de um jeito perigoso de assumir —
+    // esta é a garantia de que "zero devolvidas" vira ZERO resultados, não a
+    // lista inteira por engano.
+    const { client, chamadas } = fakeSupabaseComRpc([]);
+    await listConversationsHandler(client, ctx, { limit: 50, ai_ativa: true } as never);
+
+    const chamadaIn = chamadas.find((c) => c.metodo === "in" && c.args[0] === "id");
+    expect(chamadaIn).toBeDefined();
+    expect((chamadaIn!.args[1] as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("sem ai_ativa, não chama a função — as outras abas continuam sem esse custo", async () => {
+    const { client, rpcChamadas } = fakeSupabaseComRpc([]);
+    await listConversationsHandler(client, ctx, { limit: 50, assigned_to: "me" } as never);
+    expect(rpcChamadas).toEqual([]);
+  });
+});
 
 describe("contador de Minhas", () => {
   it("usa o mesmo conjunto de estados terminais que a aba", async () => {

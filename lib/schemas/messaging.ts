@@ -136,6 +136,15 @@ export const listConversationsQuerySchema = z.object({
    */
   exclude_finished: z.boolean().optional(),
   assigned_to: z.union([z.string().uuid(), z.literal("me"), z.literal("unassigned")]).optional(),
+  /**
+   * Aba "IA" do Inbox. Resolvido por `fn_conversas_ia_ativa` (migration
+   * 0177) — não é uma coluna de `conversations`: os dois motores de resposta
+   * usados hoje (lib/agent-engine e lib/ai/runtime) não convergem em nenhum
+   * campo de estado comum, então o sinal real é a ÚLTIMA mensagem outbound
+   * de cada conversa. Nome deliberadamente diferente de `assignee_kind` pra
+   * não sugerir que é um filtro de coluna.
+   */
+  ai_ativa: z.boolean().optional(),
   channel_session_id: z.string().uuid().optional(),
   tag: conversationTagSchema.optional(),
   search: z.string().optional(),

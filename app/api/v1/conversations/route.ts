@@ -37,6 +37,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     status: url.searchParams.get("status") ?? undefined,
     exclude_finished: url.searchParams.get("exclude_finished") === "true" ? true : undefined,
     assigned_to: url.searchParams.get("assigned_to") ?? undefined,
+    ai_ativa: url.searchParams.get("ai_ativa") === "true" ? true : undefined,
     // O `tag` era o único param que o schema aceitava, o hook serializava e o
     // handler implementava — e que esta linha não lia. A cadeia rompia AQUI, no
     // meio: `InboxFilters` mostra o select "Filtrar por tag" sempre que a org tem

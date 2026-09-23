@@ -3,8 +3,19 @@
  * RunsTable — tabela de execuções com Realtime (S-13.12).
  *
  * Mostra a página mais recente (limit 25). Click numa row → drawer com trace.
+ *
+ * ⚠️ Só cobre agentes que passam pelo motor via `ai_agent_runs`
+ * (lib/ai/runtime/agent.ts). Achado ao vivo (RevitaFio Mossoro, agente
+ * "Mariana"): o OUTRO motor de produção (lib/agent-engine/agent/
+ * inbound-turn.ts, processo `workers/agent-worker/main.ts`) nunca escreve
+ * nessa tabela — ele registra em `llm_calls`, que é o que alimenta a tela
+ * geral "Agente de IA › Execuções" (`/app/ai/runs`). Um agente real,
+ * respondendo cliente, pode legitimamente mostrar "nenhuma execução" AQUI
+ * — daí o aviso no estado vazio abaixo apontar pra lá, em vez de deixar
+ * a pessoa concluir que o agente está parado.
  */
 import * as React from "react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,8 +105,16 @@ export function RunsTable({ agentId, active }: Props) {
           <TableBody>
             {rows.length === 0 && !isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
-                  Nenhuma execução ainda.
+                <TableCell colSpan={8} className="p-4 text-center text-sm text-muted-foreground">
+                  <p>Nenhuma execução aqui ainda.</p>
+                  <p className="mt-1 text-xs">
+                    Se este agente já está respondendo cliente de verdade e não aparece
+                    nada acima, confira{" "}
+                    <Link href="/app/ai/runs" className="underline underline-offset-2">
+                      Agente de IA › Execuções (visão geral)
+                    </Link>{" "}
+                    — alguns agentes registram lá, não aqui.
+                  </p>
                 </TableCell>
               </TableRow>
             ) : null}
