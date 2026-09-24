@@ -100,12 +100,20 @@ describe("fn_conversas_ia_ativa", () => {
   it("⭐ isolamento entre organizações: pedir o org de outro tenant devolve vazio, não vaza", () => {
     // GOV_VIEWER não é membro de nenhuma outra organização — pedir qualquer
     // outro id tem que devolver vazio, nunca as conversas de quem pediu.
+    //
+    // `out.trim()` sozinho não serve: `-tA` também ecoa o "SET" do `set role`
+    // e o retorno do `set_config` — ruído de duas linhas que sempre aparece,
+    // vazamento ou não. O que prova ausência de vazamento é NENHUMA das
+    // conversas conhecidas aparecer, mesmo linha suja no meio.
     const outroOrg = "dddddddd-0000-4000-8000-000000000099";
     const out = sql(`
       set role authenticated;
       select set_config('request.jwt.claims', '{"sub":"${GOV_VIEWER}"}', false);
       select conversation_id from public.fn_conversas_ia_ativa('${outroOrg}');
     `);
-    expect(out.trim()).toBe("");
+    const linhas = out ? out.split("\n") : [];
+    expect(linhas).not.toContain(CONV_ULTIMA_IA);
+    expect(linhas).not.toContain(CONV_HUMANO_RETOMOU);
+    expect(linhas).not.toContain(CONV_FECHADA);
   });
 });
