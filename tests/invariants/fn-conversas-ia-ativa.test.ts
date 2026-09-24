@@ -1,6 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { GOV_CONTACT_2, GOV_CONTACT_3, GOV_CONTACT_PROBE, GOV_ORG, GOV_SESSION, GOV_VIEWER, seedGov, sql } from "./gov-helpers";
+import { GOV_ORG, GOV_SESSION, GOV_VIEWER, seedGov, sql } from "./gov-helpers";
+
+// Contatos PRÓPRIOS deste arquivo, não os `GOV_CONTACT_*` compartilhados —
+// esses já têm conversa 1:1 criada por outros harnesses (unique
+// `(organization_id, contact_id, channel_session_id)`, migration 0027), e um
+// segundo `insert` pra mesma dupla silenciaria em "on conflict do nothing"
+// sem criar a conversa que este arquivo espera.
+const CONTATO_ULTIMA_IA = "cccccccc-7788-4000-8000-000000000001";
+const CONTATO_HUMANO_RETOMOU = "cccccccc-7788-4000-8000-000000000002";
+const CONTATO_FECHADA = "cccccccc-7788-4000-8000-000000000003";
 
 /**
  * Migration 0177 — `fn_conversas_ia_ativa`.
@@ -31,33 +40,40 @@ beforeAll(() => {
   seedGov();
 
   sql(`
+    insert into public.contacts (id, organization_id)
+      values
+        ('${CONTATO_ULTIMA_IA}', '${GOV_ORG}'),
+        ('${CONTATO_HUMANO_RETOMOU}', '${GOV_ORG}'),
+        ('${CONTATO_FECHADA}', '${GOV_ORG}')
+      on conflict do nothing;
+
     insert into public.conversations (id, organization_id, contact_id, channel_session_id, status)
       values
-        ('${CONV_ULTIMA_IA}', '${GOV_ORG}', '${GOV_CONTACT_2}', '${GOV_SESSION}', 'open'),
-        ('${CONV_HUMANO_RETOMOU}', '${GOV_ORG}', '${GOV_CONTACT_3}', '${GOV_SESSION}', 'open'),
-        ('${CONV_FECHADA}', '${GOV_ORG}', '${GOV_CONTACT_PROBE}', '${GOV_SESSION}', 'closed')
+        ('${CONV_ULTIMA_IA}', '${GOV_ORG}', '${CONTATO_ULTIMA_IA}', '${GOV_SESSION}', 'open'),
+        ('${CONV_HUMANO_RETOMOU}', '${GOV_ORG}', '${CONTATO_HUMANO_RETOMOU}', '${GOV_SESSION}', 'open'),
+        ('${CONV_FECHADA}', '${GOV_ORG}', '${CONTATO_FECHADA}', '${GOV_SESSION}', 'closed')
       on conflict do nothing;
 
     -- CONV_ULTIMA_IA: última outbound é da IA. Devida.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at)
       values
-        ('${GOV_ORG}', '${CONV_ULTIMA_IA}', '${GOV_SESSION}', '${GOV_CONTACT_2}', 'text', 'inbound', 'received', 'crm', now() - interval '10 minutes'),
-        ('${GOV_ORG}', '${CONV_ULTIMA_IA}', '${GOV_SESSION}', '${GOV_CONTACT_2}', 'text', 'outbound', 'sent', 'ai', now() - interval '9 minutes');
+        ('${GOV_ORG}', '${CONV_ULTIMA_IA}', '${GOV_SESSION}', '${CONTATO_ULTIMA_IA}', 'text', 'inbound', 'received', 'crm', now() - interval '10 minutes'),
+        ('${GOV_ORG}', '${CONV_ULTIMA_IA}', '${GOV_SESSION}', '${CONTATO_ULTIMA_IA}', 'text', 'outbound', 'sent', 'ai', now() - interval '9 minutes');
 
     -- CONV_HUMANO_RETOMOU: a IA respondeu primeiro, mas o atendente assumiu
     -- e respondeu DEPOIS — a ÚLTIMA outbound é humana. Não devida.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at)
       values
-        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${GOV_CONTACT_3}', 'text', 'inbound', 'received', 'crm', now() - interval '20 minutes'),
-        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${GOV_CONTACT_3}', 'text', 'outbound', 'sent', 'ai', now() - interval '19 minutes'),
-        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${GOV_CONTACT_3}', 'text', 'outbound', 'sent', 'user', now() - interval '5 minutes');
+        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${CONTATO_HUMANO_RETOMOU}', 'text', 'inbound', 'received', 'crm', now() - interval '20 minutes'),
+        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${CONTATO_HUMANO_RETOMOU}', 'text', 'outbound', 'sent', 'ai', now() - interval '19 minutes'),
+        ('${GOV_ORG}', '${CONV_HUMANO_RETOMOU}', '${GOV_SESSION}', '${CONTATO_HUMANO_RETOMOU}', 'text', 'outbound', 'sent', 'user', now() - interval '5 minutes');
 
     -- CONV_FECHADA: última outbound é da IA, mas a conversa está fechada. Não devida.
     insert into public.messages
       (organization_id, conversation_id, channel_session_id, contact_id, type, direction, status, sent_via, sent_at)
-      values ('${GOV_ORG}', '${CONV_FECHADA}', '${GOV_SESSION}', '${GOV_CONTACT_PROBE}', 'text', 'outbound', 'sent', 'ai', now() - interval '1 minutes');
+      values ('${GOV_ORG}', '${CONV_FECHADA}', '${GOV_SESSION}', '${CONTATO_FECHADA}', 'text', 'outbound', 'sent', 'ai', now() - interval '1 minutes');
   `);
 });
 
