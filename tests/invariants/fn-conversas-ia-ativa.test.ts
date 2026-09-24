@@ -45,11 +45,18 @@ function ativas(): string[] {
 beforeAll(() => {
   seedGov();
 
+  // `auth.users` numa chamada própria: `platform_admins.granted_by` tem FK
+  // pra lá, e uma corrida foi observada ao vivo misturando os dois no MESMO
+  // script — separar garante que o INSERT de baixo só roda depois do de
+  // cima ter comprometido.
   sql(`
     insert into auth.users (id, email) values
       ('${IMPERSONATE_ADMIN}', 'impersonate-admin@invariant.test'),
       ('${OUTSIDER}', 'outsider@invariant.test')
       on conflict do nothing;
+  `);
+
+  sql(`
     insert into public.platform_admins (user_id, granted_by, scope, mfa_required, reason)
       values ('${IMPERSONATE_ADMIN}', '${IMPERSONATE_ADMIN}', 'full', true, 'invariant test')
       on conflict do nothing;
