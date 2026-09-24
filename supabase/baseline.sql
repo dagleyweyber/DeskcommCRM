@@ -14469,6 +14469,50 @@ grant execute on function public.fn_conversas_ia_ativa(uuid) to authenticated, s
 
 notify pgrst, 'reload schema';
 
+-- ---- IA visível no Modo Impersonate (migration 0178) ----
+-- Ver o cabeçalho da migration 0178: quem opera via impersonate é PLATFORM
+-- ADMIN, não membro de verdade em `user_organizations` — `fn_conversas_ia_ativa`
+-- (0177) e a RLS de `llm_calls` (preexistente) checavam só `fn_user_org_ids()`,
+-- sem o fallback `fn_is_platform_admin()` que o resto do produto já usa
+-- (ver `fn_can_view_conversation`).
+create or replace function public.fn_conversas_ia_ativa(p_organization_id uuid)
+returns table(conversation_id uuid)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.id
+  from public.conversations c
+  where c.organization_id = p_organization_id
+    and (public.fn_is_platform_admin() or p_organization_id in (select public.fn_user_org_ids()))
+    and c.status not in ('closed', 'archived')
+    and coalesce(c.assignee_kind, '') <> 'user'
+    and (
+      select m.sent_via
+      from public.messages m
+      where m.conversation_id = c.id
+        and m.direction = 'outbound'
+      order by m.sent_at desc
+      limit 1
+    ) = 'ai';
+$$;
+
+drop policy if exists "tenant_isolation_llm_calls_all" on "public"."llm_calls";
+
+create policy "tenant_isolation_llm_calls_all" on "public"."llm_calls"
+  for all
+  using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids()))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids()))
+  );
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

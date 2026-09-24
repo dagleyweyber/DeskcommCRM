@@ -2,6 +2,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { GOV_ORG, GOV_SESSION, GOV_VIEWER, seedGov, sql } from "./gov-helpers";
 
+// Migration 0178: quem opera via impersonate é PLATFORM ADMIN, nunca membro
+// de verdade em `user_organizations` do tenant que está vendo (mesmo padrão
+// de `impersonate-bypass-completo.test.ts`).
+const IMPERSONATE_ADMIN = "cccccccc-7799-4000-8000-000000000001";
+const OUTSIDER = "cccccccc-7799-4000-8000-000000000002";
+
 // Contatos PRÓPRIOS deste arquivo, não os `GOV_CONTACT_*` compartilhados —
 // esses já têm conversa 1:1 criada por outros harnesses (unique
 // `(organization_id, contact_id, channel_session_id)`, migration 0027), e um
@@ -40,6 +46,14 @@ beforeAll(() => {
   seedGov();
 
   sql(`
+    insert into auth.users (id, email) values
+      ('${IMPERSONATE_ADMIN}', 'impersonate-admin@invariant.test'),
+      ('${OUTSIDER}', 'outsider@invariant.test')
+      on conflict do nothing;
+    insert into public.platform_admins (user_id, granted_by, scope, mfa_required, reason)
+      values ('${IMPERSONATE_ADMIN}', '${IMPERSONATE_ADMIN}', 'full', true, 'invariant test')
+      on conflict do nothing;
+
     insert into public.contacts (id, organization_id)
       values
         ('${CONTATO_ULTIMA_IA}', '${GOV_ORG}'),
@@ -95,6 +109,30 @@ describe("fn_conversas_ia_ativa", () => {
       select has_function_privilege('anon', 'public.fn_conversas_ia_ativa(uuid)', 'execute');
     `);
     expect(out.trim()).toBe("f");
+  });
+
+  it("⭐ admin de plataforma sem membership (impersonate) enxerga do mesmo jeito", () => {
+    // Achado ao vivo (migration 0178): Dagley Weyber, impersonando a
+    // RevitaFio Mossoro, via a aba "IA" vazia mesmo com a função da 0177 já
+    // no ar — ele é platform admin, nunca membro de verdade de
+    // `user_organizations` da RevitaFio.
+    const out = sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${IMPERSONATE_ADMIN}"}', false);
+      select conversation_id from public.fn_conversas_ia_ativa('${GOV_ORG}');
+    `);
+    const linhas = out ? out.split("\n") : [];
+    expect(linhas).toContain(CONV_ULTIMA_IA);
+  });
+
+  it("CONTROLE: gente comum sem acesso continua barrada — o fix não afrouxa isolamento pra mais ninguém", () => {
+    const out = sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${OUTSIDER}"}', false);
+      select conversation_id from public.fn_conversas_ia_ativa('${GOV_ORG}');
+    `);
+    const linhas = out ? out.split("\n") : [];
+    expect(linhas).not.toContain(CONV_ULTIMA_IA);
   });
 
   it("⭐ isolamento entre organizações: pedir o org de outro tenant devolve vazio, não vaza", () => {
