@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { LoginForm } from "@/components/auth/LoginForm";
 import { branding } from "@/lib/branding";
+import { inviteTokenFromNext } from "@/lib/auth/invite-next";
 
 export const metadata = { title: "Entrar" };
 
@@ -11,6 +12,11 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; reset?: string; error?: string }>;
 }) {
   const { next, reset, error } = await searchParams;
+  // Quem chega aqui com next=/team/accept-invite/<token> e ainda não tem conta
+  // precisa continuar levando o convite pro signup — senão "Criar conta" abre
+  // uma organização nova em vez de aceitar o convite que já existe.
+  const inviteToken = inviteTokenFromNext(next);
+  const signupHref = inviteToken ? `/signup?invite=${encodeURIComponent(inviteToken)}` : "/signup";
   return (
     <div className="space-y-6">
       <div className="space-y-1.5 text-center">
@@ -67,7 +73,7 @@ export default async function LoginPage({
         <p className="text-muted-foreground">
           Não tem conta?{" "}
           <Link
-            href="/signup"
+            href={signupHref}
             className="font-medium text-foreground underline underline-offset-4"
           >
             Criar conta
