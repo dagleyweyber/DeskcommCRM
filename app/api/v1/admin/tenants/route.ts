@@ -9,6 +9,7 @@ import { env } from "@/lib/env";
 import { signInviteToken, INVITE_TTL_SECONDS } from "@/lib/auth/invite-token";
 import { buildInviteEmail } from "@/lib/email/templates/invite";
 import { sendEmail } from "@/lib/email/resend";
+import { tenantPlanSchema } from "@/lib/schemas/tenant-plan";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -30,7 +31,7 @@ const createSchema = z.object({
     .regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
   legal_name: z.string().min(2).max(255).optional(),
   cnpj: z.string().optional(),
-  plan: z.enum(["standard", "pro", "enterprise"]).default("standard"),
+  plan: tenantPlanSchema.default("standard"),
   owner_email: z.string().email(),
 });
 

@@ -4,6 +4,7 @@ import { useTenantDetail } from "@/hooks/useTenantDetail";
 import { TenantOverview } from "@/components/admin/tenants/TenantOverview";
 import { TenantActions } from "@/components/admin/tenants/TenantActions";
 import { SuspendedBanner } from "@/components/admin/tenants/SuspendedBanner";
+import { tenantPlanFromSettings } from "@/lib/schemas/tenant-plan";
 
 interface TenantOverviewClientProps {
   id: string;
@@ -35,6 +36,7 @@ export function TenantOverviewClient({ id }: TenantOverviewClientProps) {
   }
 
   const { organization, counts, integrations } = data.data;
+  const currentPlan = tenantPlanFromSettings(organization.settings);
 
   return (
     <div className="space-y-6">
@@ -52,6 +54,7 @@ export function TenantOverviewClient({ id }: TenantOverviewClientProps) {
           organizationId={organization.id}
           status={organization.status}
           displayName={organization.display_name}
+          currentPlan={currentPlan}
         />
       </div>
     </div>

@@ -6,6 +6,7 @@ import type {
   TenantCounts,
   TenantIntegrations,
 } from "@/hooks/useTenantDetail";
+import { TENANT_PLAN_LABEL, tenantPlanFromSettings } from "@/lib/schemas/tenant-plan";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,7 +91,8 @@ interface TenantOverviewProps {
 // ---------------------------------------------------------------------------
 
 export function TenantOverview({ organization, counts, integrations }: TenantOverviewProps) {
-  const plan = (organization.settings as { plan?: string } | null)?.plan ?? "—";
+  const planKey = tenantPlanFromSettings(organization.settings);
+  const plan = planKey ? TENANT_PLAN_LABEL[planKey] : "—";
 
   const nuvemshopStatus = integrations.nuvemshop_status;
   // Valor fora do vocabulário conhecido continua aparecendo cru de propósito:

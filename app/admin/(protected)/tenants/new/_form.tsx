@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useCreateTenant } from "@/hooks/useCreateTenant";
 import { ApiError } from "@/lib/api/types";
+import { TENANT_PLANS, TENANT_PLAN_LABEL, type TenantPlan } from "@/lib/schemas/tenant-plan";
 
 // ---------------------------------------------------------------------------
 // Schema (mirrors server Zod; client keeps it in sync)
@@ -32,7 +33,7 @@ const formSchema = z.object({
     .regex(/^[a-z0-9-]+$/, "Apenas letras minúsculas, números e hífens"),
   legal_name: z.string().min(2).max(255).optional().or(z.literal("")),
   cnpj: z.string().optional().or(z.literal("")),
-  plan: z.enum(["standard", "pro", "enterprise"]),
+  plan: z.enum(TENANT_PLANS),
   owner_email: z.string().email("E-mail inválido"),
 });
 
@@ -232,17 +233,17 @@ export function NewTenantForm() {
               <Label htmlFor="plan">Plano</Label>
               <Select
                 value={planValue}
-                onValueChange={(v) =>
-                  setValue("plan", v as "standard" | "pro" | "enterprise")
-                }
+                onValueChange={(v) => setValue("plan", v as TenantPlan)}
               >
                 <SelectTrigger id="plan" aria-label="Plano">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="pro">Pro</SelectItem>
-                  <SelectItem value="enterprise">Enterprise</SelectItem>
+                  {TENANT_PLANS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {TENANT_PLAN_LABEL[p]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               {errors.plan && (
