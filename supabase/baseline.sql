@@ -14513,6 +14513,91 @@ create policy "tenant_isolation_llm_calls_all" on "public"."llm_calls"
 
 notify pgrst, 'reload schema';
 
+-- ---- crm_tasks (migration 0179) ----
+-- Ver o cabeçalho da migration 0179: lembrete de trabalho INTERNO, distinto de
+-- compromisso agendado com o cliente. Entra ANTES da VARREDURA anon de
+-- propósito, pela mesma razão dos blocos acima.
+create table if not exists public.crm_tasks (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  title text not null,
+  description text,
+  due_date timestamptz,
+  priority text not null default 'medium',
+  status text not null default 'pending',
+  lead_id uuid references public.crm_leads(id) on delete set null,
+  contact_id uuid references public.contacts(id) on delete set null,
+  assigned_to uuid references auth.users(id) on delete set null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint crm_tasks_titulo_nao_vazio check (length(btrim(title)) > 0),
+  constraint crm_tasks_priority_check check (priority in ('low','medium','high','urgent')),
+  constraint crm_tasks_status_check check (status in ('pending','in_progress','done','cancelled'))
+);
+
+create index if not exists crm_tasks_org_due_idx on public.crm_tasks (organization_id, due_date);
+create index if not exists crm_tasks_org_status_idx on public.crm_tasks (organization_id, status);
+create index if not exists crm_tasks_lead_idx on public.crm_tasks (lead_id) where lead_id is not null;
+
+alter table public.crm_tasks enable row level security;
+
+drop policy if exists crm_tasks_select on public.crm_tasks;
+create policy crm_tasks_select on public.crm_tasks
+  for select using (
+    (organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists crm_tasks_write on public.crm_tasks;
+create policy crm_tasks_write on public.crm_tasks
+  using (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'agent'))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'agent'))
+  );
+
+revoke all on public.crm_tasks from anon;
+grant select, insert, update, delete on public.crm_tasks to authenticated;
+grant all on public.crm_tasks to service_role;
+
+drop trigger if exists trg_crm_tasks_updated_at on public.crm_tasks;
+create trigger trg_crm_tasks_updated_at
+  before update on public.crm_tasks
+  for each row execute function public.fn_set_updated_at();
+
+create or replace function public.fn_redigir_tarefas_do_contato_anonimizado()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.crm_tasks
+     set title       = 'Tarefa anonimizada',
+         description = null
+   where organization_id = new.organization_id
+     and contact_id = new.id;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_redigir_tarefas_do_contato_anonimizado() from public, anon, authenticated;
+grant  execute on function public.fn_redigir_tarefas_do_contato_anonimizado() to service_role;
+
+drop trigger if exists trg_redigir_tarefas_ao_anonimizar on public.contacts;
+create trigger trg_redigir_tarefas_ao_anonimizar
+  after update of is_anonymized on public.contacts
+  for each row
+  when (new.is_anonymized is true and old.is_anonymized is distinct from true)
+  execute function public.fn_redigir_tarefas_do_contato_anonimizado();
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

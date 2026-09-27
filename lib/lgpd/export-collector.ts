@@ -89,6 +89,24 @@ export interface ActivityRow {
   performed_at: string;
 }
 
+/**
+ * Tarefas ligadas ao contato (`lib/tarefas/`), lidas direto de `crm_tasks` —
+ * não só as que têm negócio vinculado. Uma tarefa solta ("ligar pra Fulano
+ * confirmar o orçamento") só existe nesta tabela: sem esta consulta, `title`/
+ * `description` (dado pessoal quando aponta pro contato) nunca apareceria no
+ * relatório de acesso, mesmo com a trigger de redação (0179) cobrindo a
+ * anonimização — as duas coisas são independentes.
+ */
+export interface TaskRow {
+  id: string;
+  lead_id: string | null;
+  title: string;
+  description: string | null;
+  due_date: string | null;
+  status: string;
+  created_at: string;
+}
+
 export interface AuditRow {
   id: string;
   action: string;
@@ -110,6 +128,7 @@ export interface ExportPayload {
   leads: LeadRow[];
   orders: OrderRow[];
   activities: ActivityRow[];
+  tasks: TaskRow[];
   audit_log_extract: AuditRow[];
 }
 
@@ -368,6 +387,25 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  let tasks: TaskRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("crm_tasks")
+      .select("id, lead_id, title, description, due_date, status, created_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      logger.warn("[lgpd-export-worker] tasks load failed", {
+        request_id: requestId,
+        error: error.message,
+      });
+    } else if (data) {
+      tasks = data;
+    }
+  }
+
   // Audit log extract (best-effort: rows where metadata.contact_id matches).
   let audit_log_extract: AuditRow[] = [];
   if (contactId) {
@@ -407,6 +445,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     leads,
     orders,
     activities,
+    tasks,
     audit_log_extract,
   };
 }
@@ -425,6 +464,7 @@ function emptyPayload(requestId: string, organizationId: string): ExportPayload 
     leads: [],
     orders: [],
     activities: [],
+    tasks: [],
     audit_log_extract: [],
   };
 }

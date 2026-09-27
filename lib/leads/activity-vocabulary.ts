@@ -65,7 +65,13 @@ export type ActivityType =
    */
   | "meeting_scheduled"
   /** Sempre associado ao `meeting_scheduled` mais recente — ver payload.outcome. */
-  | "meeting_outcome";
+  | "meeting_outcome"
+  /**
+   * Tarefa combinada/concluída vinculada a este negócio (`lib/tarefas/`). Sem
+   * negócio vinculado a tarefa não gera timeline — vive só na tela de Tarefas.
+   */
+  | "task_created"
+  | "task_completed";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou pelo WhatsApp",
@@ -135,6 +141,8 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   objection: "Objeção registrada",
   meeting_scheduled: "Visita/reunião agendada",
   meeting_outcome: "Presença registrada",
+  task_created: "Tarefa combinada",
+  task_completed: "Tarefa concluída",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */

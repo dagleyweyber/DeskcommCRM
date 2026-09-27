@@ -204,6 +204,14 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     minRole: "manager",
     sidebar: true,
   },
+  {
+    href: "/app/tasks",
+    label: "Tarefas",
+    description: "Lembretes e pendências, com ou sem negócio vinculado.",
+    icon: ListChecks,
+    group: "crm",
+    sidebar: true,
+  },
 
   // ---- Agente de IA — montar, ensinar, acompanhar ----
   {
