@@ -187,6 +187,22 @@ const PARES: Array<{
     arquivo: "hooks/followup/useFollowupQueue.ts",
     simbolo: "FollowupEnrollmentStatus",
   },
+  {
+    tabela: "crm_tasks",
+    coluna: "priority",
+    // lib/tarefas/tipos.ts → PRIORIDADES_DA_TAREFA (tupla `as const` — o Zod da
+    // rota usa `z.enum(PRIORIDADES_DA_TAREFA)` direto, então o array É a fonte
+    // única; um `type` ao lado seria a terceira lista).
+    arquivo: "lib/tarefas/tipos.ts",
+    simbolo: "PRIORIDADES_DA_TAREFA",
+  },
+  {
+    tabela: "crm_tasks",
+    coluna: "status",
+    // lib/tarefas/tipos.ts → SITUACOES_DA_TAREFA (tupla `as const`, mesmo motivo).
+    arquivo: "lib/tarefas/tipos.ts",
+    simbolo: "SITUACOES_DA_TAREFA",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */
@@ -310,12 +326,38 @@ function literaisDoUnionType(arquivo: string, simbolo: string): string[] {
     );
   }
 
-  const decl = new RegExp(`type\\s+${simbolo}\\s*=([^;]*);`, "s").exec(fonte);
+  // ⚠️ COMENTÁRIOS SAEM ANTES DE PROCURAR A DECLARAÇÃO, e a ordem é o conserto.
+  //
+  // A versão anterior recortava `type X =([^;]*);` do fonte CRU e só então
+  // limpava comentários. Como `[^;]*` para no primeiro ponto e vírgula, um `;`
+  // escrito dentro de um comentário NO MEIO do union truncaria a lista — e os
+  // membros abaixo dele sumiriam sem que nada estourasse. O modo de falha é o
+  // pior possível para um gate: ele acusaria o CÓDIGO por um defeito do
+  // INSTRUMENTO, com mensagem convincente. Prosa em português tem ponto e
+  // vírgula; o extrator é que não podia depender de a prosa não ter.
+  const semComentarios = fonte.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
+
+  // DUAS FORMAS, e as duas são vocabulário legítimo neste repo:
+  //
+  //   type X = "a" | "b";                 ← union puro
+  //   const X = ["a", "b"] as const;      ← tupla congelada
+  //
+  // A segunda existe porque o Zod precisa do ARRAY em runtime (`z.enum(X)`), e
+  // escrever o union ao lado seria a terceira lista — exatamente o que este
+  // invariante existe para proibir (ver `lib/tarefas/tipos.ts`,
+  // `PRIORIDADES_DA_TAREFA`/`SITUACOES_DA_TAREFA`). As duas formas caem no
+  // MESMO caminho de comparação abaixo.
+  const decl =
+    new RegExp(`type\\s+${simbolo}\\s*=([^;]*);`, "s").exec(semComentarios) ??
+    new RegExp(`const\\s+${simbolo}\\s*=\\s*(\\[[^\\]]*\\])\\s*as\\s+const`, "s").exec(
+      semComentarios,
+    );
   if (!decl) {
     throw new Error(
-      `extrator de vocabulário: não achei \`type ${simbolo} = ...;\` em ${arquivo}. ` +
-        `Se o tipo virou \`const ... as const\` ou mudou de nome, ENSINE O EXTRATOR — ` +
-        `deixar isto falhar em silêncio devolveria lista vazia e o par passaria sem ler nada.`,
+      `extrator de vocabulário: não achei \`type ${simbolo} = ...;\` nem ` +
+        `\`const ${simbolo} = [...] as const\` em ${arquivo}. Se o símbolo mudou de nome ou ` +
+        `de forma, ENSINE O EXTRATOR — deixar isto falhar em silêncio devolveria lista vazia ` +
+        `e o par passaria sem ler nada.`,
     );
   }
 
