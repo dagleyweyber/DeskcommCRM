@@ -31,8 +31,12 @@ export interface LeadFilters {
    * Filtro rápido por `created_at` — "quando o lead entrou", não quando teve a
    * última atividade (`last_activity_at` conta outra pergunta: engajamento,
    * não aquisição). `undefined` = todo período, mesmo comportamento de hoje.
+   * `"personalizado"` ativa `dateFrom`/`dateTo` em vez de um corte fixo.
    */
-  dateRange?: "hoje" | "7d" | "30d";
+  dateRange?: "hoje" | "7d" | "30d" | "personalizado";
+  /** `YYYY-MM-DD`, inclusive. Só lidos quando `dateRange === "personalizado"`. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 /**
@@ -59,7 +63,14 @@ export function filtersFromParams(
     search: search ?? undefined,
     overdueOnly: sp.get("overdue") === "1" || undefined,
     dateRange:
-      dateRange === "hoje" || dateRange === "7d" || dateRange === "30d" ? dateRange : undefined,
+      dateRange === "hoje" ||
+      dateRange === "7d" ||
+      dateRange === "30d" ||
+      dateRange === "personalizado"
+        ? dateRange
+        : undefined,
+    dateFrom: sp.get("from") ?? undefined,
+    dateTo: sp.get("to") ?? undefined,
   };
 }
 
@@ -72,11 +83,15 @@ export function filtersToParams(f: LeadFilters): string {
   if (f.search?.trim()) p.set("q", f.search.trim());
   if (f.overdueOnly) p.set("overdue", "1");
   if (f.dateRange) p.set("date", f.dateRange);
+  if (f.dateRange === "personalizado") {
+    if (f.dateFrom) p.set("from", f.dateFrom);
+    if (f.dateTo) p.set("to", f.dateTo);
+  }
   return p.toString();
 }
 
 /** Início do corte de cada preset, em epoch ms — extraída para ser testável sem mockar `Date`. */
-export function dateRangeCutoff(range: NonNullable<LeadFilters["dateRange"]>, now = new Date()): number {
+export function dateRangeCutoff(range: "hoje" | "7d" | "30d", now = new Date()): number {
   if (range === "hoje") {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   }
@@ -119,7 +134,15 @@ export function applyFilters(leads: Lead[], f: LeadFilters): Lead[] {
       if (l.status !== "open") return false;
       if (!l.expected_close_date || l.expected_close_date >= today) return false;
     }
-    if (f.dateRange && new Date(l.created_at).getTime() < dateRangeCutoff(f.dateRange)) return false;
+    if (f.dateRange === "personalizado") {
+      // Mesmo corte de dia (UTC) que `today` usa duas linhas acima, pra não
+      // introduzir uma segunda noção de "dia" dentro do mesmo filtro.
+      const criadoEm = l.created_at.slice(0, 10);
+      if (f.dateFrom && criadoEm < f.dateFrom) return false;
+      if (f.dateTo && criadoEm > f.dateTo) return false;
+    } else if (f.dateRange && new Date(l.created_at).getTime() < dateRangeCutoff(f.dateRange)) {
+      return false;
+    }
     return true;
   });
 }

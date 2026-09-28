@@ -27,7 +27,14 @@ const DATE_RANGE_OPTIONS: Array<{ value: LeadFilters["dateRange"]; label: string
   { value: "hoje", label: "Hoje" },
   { value: "7d", label: "Últimos 7 dias" },
   { value: "30d", label: "Últimos 30 dias" },
+  { value: "personalizado", label: "Personalizado" },
 ];
+
+/** `2026-09-28` → `28/09` — o suficiente pra reconhecer o intervalo no botão. */
+function diaCurto(iso: string): string {
+  const [, mes, dia] = iso.split("-");
+  return `${dia}/${mes}`;
+}
 import { cn } from "@/lib/utils";
 
 interface FilterBarProps {
@@ -130,7 +137,11 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
   const sourceLabelText = filters.source ? sourceLabel(filters.source) : "Origem: todas";
 
   const dateRangeLabel =
-    DATE_RANGE_OPTIONS.find((o) => o.value === filters.dateRange)?.label ?? "Todo período";
+    filters.dateRange === "personalizado"
+      ? filters.dateFrom || filters.dateTo
+        ? `${filters.dateFrom ? diaCurto(filters.dateFrom) : "…"} – ${filters.dateTo ? diaCurto(filters.dateTo) : "…"}`
+        : "Personalizado"
+      : (DATE_RANGE_OPTIONS.find((o) => o.value === filters.dateRange)?.label ?? "Todo período");
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-2">
@@ -216,6 +227,28 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {filters.dateRange === "personalizado" && (
+        <div className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
+          <Input
+            type="date"
+            aria-label="Criado a partir de"
+            value={filters.dateFrom ?? ""}
+            max={filters.dateTo}
+            onChange={(e) => onChange({ ...filters, dateFrom: e.target.value || undefined })}
+            className="h-7 w-[136px] text-xs"
+          />
+          <span className="text-xs text-muted-foreground">até</span>
+          <Input
+            type="date"
+            aria-label="Criado até"
+            value={filters.dateTo ?? ""}
+            min={filters.dateFrom}
+            onChange={(e) => onChange({ ...filters, dateTo: e.target.value || undefined })}
+            className="h-7 w-[136px] text-xs"
+          />
+        </div>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

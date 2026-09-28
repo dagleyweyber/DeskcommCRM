@@ -76,6 +76,27 @@ describe("filtersFromParams / filtersToParams — dateRange", () => {
   it("sem dateRange, filtersToParams não adiciona o param", () => {
     expect(filtersToParams({ status: "all" })).not.toContain("date=");
   });
+
+  it("⭐ 'personalizado' faz round-trip com from/to", () => {
+    const f = filtersFromParams(
+      params({ date: "personalizado", from: "2026-08-01", to: "2026-08-15" }),
+    );
+    expect(f.dateRange).toBe("personalizado");
+    expect(f.dateFrom).toBe("2026-08-01");
+    expect(f.dateTo).toBe("2026-08-15");
+    const qs = filtersToParams(f);
+    expect(qs).toContain("date=personalizado");
+    expect(qs).toContain("from=2026-08-01");
+    expect(qs).toContain("to=2026-08-15");
+  });
+
+  it("from/to só são serializados quando dateRange é 'personalizado'", () => {
+    // Um dateFrom deixado no objeto de estado (ex.: usuário trocou de volta pro
+    // preset "7 dias" sem limpar os campos) não pode vazar pra URL — a query
+    // string tem que refletir o que está ATIVO, não o que já foi digitado.
+    const qs = filtersToParams({ status: "all", dateRange: "7d", dateFrom: "2026-08-01" });
+    expect(qs).not.toContain("from=");
+  });
 });
 
 describe("applyFilters — dateRange", () => {
@@ -119,6 +140,41 @@ describe("applyFilters — dateRange", () => {
     ];
     const out = applyFilters(misto, { dateRange: "hoje", status: "open" });
     expect(out.map((l) => l.id)).toEqual(["hoje-open"]);
+  });
+});
+
+describe("applyFilters — dateRange personalizado", () => {
+  const leads = [
+    lead({ id: "antes", created_at: "2026-07-31T23:00:00.000Z" }),
+    lead({ id: "inicio", created_at: "2026-08-01T00:00:00.000Z" }),
+    lead({ id: "meio", created_at: "2026-08-10T12:00:00.000Z" }),
+    lead({ id: "fim", created_at: "2026-08-15T23:59:00.000Z" }),
+    lead({ id: "depois", created_at: "2026-08-16T00:00:00.000Z" }),
+  ];
+
+  it("⭐ intervalo fechado inclui as duas pontas, exclui fora", () => {
+    const out = applyFilters(leads, {
+      dateRange: "personalizado",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-15",
+    });
+    expect(out.map((l) => l.id).sort()).toEqual(["fim", "inicio", "meio"].sort());
+  });
+
+  it("só dateFrom — intervalo aberto pra frente", () => {
+    const out = applyFilters(leads, { dateRange: "personalizado", dateFrom: "2026-08-10" });
+    expect(out.map((l) => l.id).sort()).toEqual(["depois", "fim", "meio"].sort());
+  });
+
+  it("só dateTo — intervalo aberto pra trás", () => {
+    const out = applyFilters(leads, { dateRange: "personalizado", dateTo: "2026-08-01" });
+    expect(out.map((l) => l.id).sort()).toEqual(["antes", "inicio"].sort());
+  });
+
+  it("nenhum dos dois preenchido ainda: 'personalizado' sem from/to não filtra nada", () => {
+    // Estado transitório — usuário clicou "Personalizado" e ainda não escolheu
+    // nenhuma data. Não pode esconder o board inteiro nesse meio-tempo.
+    expect(applyFilters(leads, { dateRange: "personalizado" })).toHaveLength(5);
   });
 });
 
