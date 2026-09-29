@@ -207,3 +207,115 @@ describe("NewLeadDialog — aviso de lead duplicado (contato já tem um aberto n
     );
   });
 });
+
+/**
+ * Achado ao vivo (RevitaFio Mossoró): criar lead manual pra um telefone que já
+ * é contato — o caso comum numa base vinda do WhatsApp — parava sem NENHUM
+ * jeito de continuar. `createContact` recusa com `contact_duplicate_phone`
+ * (409); a tela precisa virar isso num "usar este contato?", não um beco sem
+ * saída.
+ */
+describe("NewLeadDialog — telefone já é de outro contato (contact_duplicate_phone)", () => {
+  beforeEach(() => {
+    criarLead.mockReset();
+    criarContato.mockReset();
+    criarLead.mockResolvedValue({ data: { id: "lead-1" } });
+  });
+
+  it("⭐ mostra o aviso com o nome do contato existente, sem criar o lead", async () => {
+    criarContato.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        "contact_duplicate_phone",
+        { existing_contact_id: CONTACT_ID, existing_contact_name: "Leonardo Nailson" },
+        "req-1",
+        "Já existe um contato com este telefone nesta organização.",
+      ),
+    );
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Leonardo Nailson");
+    await user.type(screen.getByLabelText("Telefone"), "(84) 95926-6458");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+
+    const aviso = await screen.findByTestId("aviso-contato-existente");
+    expect(aviso).toHaveTextContent("Leonardo Nailson");
+    expect(criarLead).not.toHaveBeenCalled();
+  });
+
+  it("⭐ «Usar este contato» cria o lead com o contact_id existente, sem tentar criar contato de novo", async () => {
+    criarContato.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        "contact_duplicate_phone",
+        { existing_contact_id: CONTACT_ID, existing_contact_name: "Leonardo Nailson" },
+        "req-1",
+      ),
+    );
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Leonardo Nailson");
+    await user.type(screen.getByLabelText("Telefone"), "(84) 95926-6458");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+    await screen.findByTestId("aviso-contato-existente");
+
+    expect(criarContato).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Usar este contato" }));
+
+    await waitFor(() => expect(criarLead).toHaveBeenCalledTimes(1));
+    expect(criarLead).toHaveBeenCalledWith(expect.objectContaining({ contact_id: CONTACT_ID }));
+    expect(criarContato).toHaveBeenCalledTimes(1);
+  });
+
+  it("resposta sem existing_contact_id não quebra a tela — só o toast genérico do hook", async () => {
+    // Defensivo: se o servidor não mandar o id (versão antiga, ou outra rota
+    // que ainda não populou `details`), a tela não pode estourar tentando usar
+    // um contato que ela não conhece.
+    criarContato.mockRejectedValueOnce(
+      new ApiError(409, "contact_duplicate_phone", undefined, "req-1"),
+    );
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Sem detalhe");
+    await user.type(screen.getByLabelText("Telefone"), "(84) 95926-6458");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+
+    await waitFor(() => expect(criarContato).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("aviso-contato-existente")).not.toBeInTheDocument();
+    expect(criarLead).not.toHaveBeenCalled();
+  });
+
+  it("submeter de novo (não «Usar este contato») some com o aviso anterior", async () => {
+    criarContato
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          "contact_duplicate_phone",
+          { existing_contact_id: CONTACT_ID, existing_contact_name: "Leonardo Nailson" },
+          "req-1",
+        ),
+      )
+      .mockResolvedValueOnce({ data: { contact: { id: "outro-contato" }, action: "created" } });
+
+    const user = userEvent.setup({ delay: null });
+    montar();
+
+    await user.type(screen.getByLabelText("Título"), "Tentativa 1");
+    await user.type(screen.getByLabelText("Telefone"), "(84) 95926-6458");
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+    await screen.findByTestId("aviso-contato-existente");
+
+    await user.click(screen.getByRole("button", { name: "Criar lead" }));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("aviso-contato-existente")).not.toBeInTheDocument(),
+    );
+  });
+});

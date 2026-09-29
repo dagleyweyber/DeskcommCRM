@@ -74,6 +74,17 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   // pronto pra reenviar com `confirm_duplicate: true` sem recriar o contato.
   const [duplicidade, setDuplicidade] = useState<{ leadId: string; titulo: string } | null>(null);
   const [payloadPendente, setPayloadPendente] = useState<CreateLeadInput | null>(null);
+  // Achado ao vivo (RevitaFio Mossoró): criar lead manual pra um telefone que já
+  // é contato — o caso comum numa base que veio do WhatsApp — parava aqui sem
+  // NENHUM jeito de continuar. `createContact` recusava com 409, o catch só
+  // repassava o toast e abortava, e o lead nunca nascia. `contatoExistente`
+  // guarda quem o servidor achou; `valoresPendentes` é o formulário no instante
+  // da tentativa, pra remontar o payload sem pedir pra pessoa preencher de novo.
+  const [contatoExistente, setContatoExistente] = useState<{
+    id: string;
+    nome: string | null;
+  } | null>(null);
+  const [valoresPendentes, setValoresPendentes] = useState<FormShape | null>(null);
 
   const form = useForm<FormShape>({
     defaultValues: {
@@ -98,13 +109,14 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
     }
   }, [initialStage, form]);
 
-  async function onSubmit(values: FormShape) {
-    // Submissão nova (não o clique em "Criar mesmo assim") sempre refaz a
-    // checagem do zero — um aviso de uma tentativa anterior não pode continuar
-    // valendo pra dados que a pessoa já mudou.
-    setDuplicidade(null);
-    setPayloadPendente(null);
-
+  /**
+   * Os campos do lead que não dependem de contato resolvido, mais o telefone já
+   * normalizado (quem chama decide o que fazer com ele). `null` = validação
+   * falhou e já marcou o erro no campo certo — quem chama só precisa parar.
+   */
+  function montarPayload(
+    values: FormShape,
+  ): { payload: Record<string, unknown>; phoneE164: string | null } | null {
     const tags = values.tagsRaw
       .split(",")
       .map((s) => s.trim())
@@ -116,7 +128,7 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
       valueCents = parseReaisToCents(reais);
       if (valueCents === null) {
         form.setError("valueReais", { message: "Valor inválido" });
-        return;
+        return null;
       }
     }
 
@@ -125,9 +137,41 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
       phoneE164 = normalizePhoneBR(values.phone);
       if (!phoneE164) {
         form.setError("phone", { message: "Telefone inválido" });
-        return;
+        return null;
       }
     }
+
+    const payload: Record<string, unknown> = {
+      pipeline_id: pipelineId,
+      stage_id: values.stage_id,
+      title: values.title.trim(),
+      currency: "BRL",
+      source: values.source,
+      tags,
+    };
+    if (values.description.trim()) payload.description = values.description.trim();
+    if (valueCents !== null) payload.value_cents = valueCents;
+    if (values.expected_close_date) payload.expected_close_date = values.expected_close_date;
+    if (values.owner_user_id !== NO_OWNER) payload.owner_user_id = values.owner_user_id;
+    if (values.produtoInteresse.trim()) {
+      payload.custom_fields = { produto_interesse: values.produtoInteresse.trim() };
+    }
+
+    return { payload, phoneE164 };
+  }
+
+  async function onSubmit(values: FormShape) {
+    // Submissão nova (não "Criar mesmo assim"/"Usar este contato") sempre
+    // refaz a checagem do zero — um aviso de uma tentativa anterior não pode
+    // continuar valendo pra dados que a pessoa já mudou.
+    setDuplicidade(null);
+    setPayloadPendente(null);
+    setContatoExistente(null);
+    setValoresPendentes(null);
+
+    const montado = montarPayload(values);
+    if (!montado) return;
+    const { payload, phoneE164 } = montado;
 
     // Cria (ou reaproveita, via contactId de prop) o contato ANTES do lead —
     // o lead referencia contact_id, não guarda telefone/e-mail direto.
@@ -144,28 +188,33 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
         // comentário em `useCreateContact.ts`. `res.data.id` sempre foi
         // `undefined` aqui, e o lead nascia sem telefone vinculado.
         resolvedContactId = res.data.contact.id;
-      } catch {
+      } catch (err) {
+        // Achado ao vivo: telefone/e-mail já é de OUTRO contato (comum numa
+        // base que veio do WhatsApp — a pessoa já escreveu antes). Sem este
+        // desvio a criação simplesmente parava aqui, com o toast dizendo "já
+        // existe" e nenhum jeito de a pessoa continuar — nem pra ligar o lead
+        // ao contato que o próprio servidor já identificou.
+        if (
+          err instanceof ApiError &&
+          (err.code === "contact_duplicate_phone" || err.code === "contact_duplicate_email")
+        ) {
+          const detalhes = err.details as
+            | { existing_contact_id?: string; existing_contact_name?: string | null }
+            | undefined;
+          if (detalhes?.existing_contact_id) {
+            setContatoExistente({
+              id: detalhes.existing_contact_id,
+              nome: detalhes.existing_contact_name ?? null,
+            });
+            setValoresPendentes(values);
+          }
+        }
         // erro já mostrado pelo toast do hook; aborta sem criar lead órfão de intenção
         return;
       }
     }
 
-    const payload: Record<string, unknown> = {
-      pipeline_id: pipelineId,
-      stage_id: values.stage_id,
-      title: values.title.trim(),
-      currency: "BRL",
-      source: values.source,
-      tags,
-    };
     if (resolvedContactId) payload.contact_id = resolvedContactId;
-    if (values.description.trim()) payload.description = values.description.trim();
-    if (valueCents !== null) payload.value_cents = valueCents;
-    if (values.expected_close_date) payload.expected_close_date = values.expected_close_date;
-    if (values.owner_user_id !== NO_OWNER) payload.owner_user_id = values.owner_user_id;
-    if (values.produtoInteresse.trim()) {
-      payload.custom_fields = { produto_interesse: values.produtoInteresse.trim() };
-    }
 
     const parsed = createLeadSchema.safeParse(payload);
     if (!parsed.success) {
@@ -193,6 +242,8 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
     });
     setDuplicidade(null);
     setPayloadPendente(null);
+    setContatoExistente(null);
+    setValoresPendentes(null);
   }
 
   async function enviar(input: CreateLeadInput) {
@@ -224,6 +275,23 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
   function criarMesmoAssim() {
     if (!payloadPendente) return;
     void enviar({ ...payloadPendente, confirm_duplicate: true });
+  }
+
+  async function usarContatoExistente() {
+    if (!contatoExistente || !valoresPendentes) return;
+    const montado = montarPayload(valoresPendentes);
+    if (!montado) return;
+    montado.payload.contact_id = contatoExistente.id;
+
+    const parsed = createLeadSchema.safeParse(montado.payload);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      toast.error(first?.message ?? "Dados inválidos");
+      return;
+    }
+    setContatoExistente(null);
+    setValoresPendentes(null);
+    await enviar(parsed.data as CreateLeadInput);
   }
 
   const stageId = form.watch("stage_id");
@@ -406,6 +474,33 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
             />
           </div>
 
+          {contatoExistente ? (
+            <div
+              data-testid="aviso-contato-existente"
+              className="rounded-md border border-amber-500/40 bg-amber-50/60 p-3 text-xs dark:bg-amber-900/10"
+            >
+              Este telefone ou e-mail já é de um contato existente
+              {contatoExistente.nome ? (
+                <>
+                  {" "}
+                  — <strong>{contatoExistente.nome}</strong>
+                </>
+              ) : null}
+              . Quer criar o lead pra esse contato, em vez de um contato novo?
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={usarContatoExistente}
+                  disabled={busy}
+                >
+                  Usar este contato
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           {duplicidade ? (
             <div
               data-testid="aviso-lead-duplicado"
@@ -437,6 +532,8 @@ export function NewLeadDialog({ open, onOpenChange, pipelineId, stages, contactI
                 onOpenChange(false);
                 setDuplicidade(null);
                 setPayloadPendente(null);
+                setContatoExistente(null);
+                setValoresPendentes(null);
               }}
               disabled={busy}
             >

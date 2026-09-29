@@ -51,6 +51,36 @@ function decodeCursor(raw: string): CursorPayload | null {
   }
 }
 
+/**
+ * Quem já ocupa o telefone/e-mail que colidiu — pra quem chama poder OFERECER
+ * o contato existente em vez de só recusar. Achado ao vivo (RevitaFio
+ * Mossoró): criar lead manual pra um número que já é contato (o caso comum
+ * numa base que veio do WhatsApp) parava aqui sem nenhum jeito de continuar —
+ * a tela sabia dizer "já existe", nunca "é este aqui, quer usar?". Best-effort
+ * de propósito: se esta consulta falhar, a resposta ainda tem o código/mensagem
+ * de sempre, só sem o atalho.
+ */
+async function existingContactDetails(
+  supabase: SB,
+  organizationId: string,
+  column: "phone_number" | "email",
+  value: string | null | undefined,
+): Promise<{ existing_contact_id: string; existing_contact_name: string | null } | undefined> {
+  if (!value) return undefined;
+  const { data } = await supabase
+    .from("contacts")
+    .select("id, name, display_name")
+    .eq("organization_id", organizationId)
+    .eq(column, value)
+    .is("is_merged_into", null)
+    .maybeSingle();
+  if (!data) return undefined;
+  return {
+    existing_contact_id: data.id as string,
+    existing_contact_name: (data.display_name as string | null) ?? (data.name as string | null),
+  };
+}
+
 function actorAuditPayload(actor: Actor): {
   actorUserId: string | null;
   metadataActor: Record<string, unknown>;
@@ -296,7 +326,7 @@ export async function createContactHandler(
         throw new ApiError(
           409,
           "contact_duplicate_phone",
-          undefined,
+          await existingContactDetails(supabase, ctx.organization_id, "phone_number", input.phone_number),
           ctx.requestId,
           "Já existe um contato com este telefone nesta organização.",
         );
@@ -305,7 +335,7 @@ export async function createContactHandler(
         throw new ApiError(
           409,
           "contact_duplicate_email",
-          undefined,
+          await existingContactDetails(supabase, ctx.organization_id, "email", input.email),
           ctx.requestId,
           "Já existe um contato com este e-mail nesta organização.",
         );

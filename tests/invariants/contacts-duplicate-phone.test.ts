@@ -71,6 +71,32 @@ describe("createContactHandler — telefone/e-mail duplicado vira mensagem amig�
     });
   });
 
+  it("⭐ o 409 leva o id do contato que já existe em `details` — sem isso a tela não tem como oferecer 'usar este contato'", async () => {
+    // Achado ao vivo (RevitaFio Mossoró): criar lead manual pra um telefone
+    // que já é contato parava aqui sem NENHUM jeito de continuar, porque
+    // `details` vinha `undefined` e a tela não tinha o id de quem reaproveitar.
+    const { contact: original } = await createContactHandler(db, ctx, {
+      name: "Leonardo Nailson",
+      phone_number: "+5511966665555",
+      source: "manual",
+    });
+
+    let capturado: unknown;
+    try {
+      await createContactHandler(db, ctx, {
+        phone_number: "+5511966665555",
+        source: "manual",
+      });
+    } catch (e) {
+      capturado = e;
+    }
+    expect(capturado).toBeInstanceOf(ApiError);
+    expect((capturado as ApiError).details).toMatchObject({
+      existing_contact_id: original.id,
+      existing_contact_name: "Leonardo Nailson",
+    });
+  });
+
   it("mesmo telefone em ORGANIZAÇÃO DIFERENTE não colide — a constraint é por org", async () => {
     const outraOrg = "6e7ac10d-0000-4000-8000-000000000003";
     await pool.query(
@@ -105,6 +131,7 @@ describe("createContactHandler — telefone/e-mail duplicado vira mensagem amig�
     ).rejects.toMatchObject({
       status: 409,
       code: "contact_duplicate_email",
+      details: expect.objectContaining({ existing_contact_id: expect.any(String) }),
     });
   });
 
