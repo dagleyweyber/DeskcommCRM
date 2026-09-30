@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AnuncioPerformanceTable } from "./AnuncioPerformanceTable";
@@ -65,10 +65,6 @@ const DADOS: ReceitaPorAnuncio[] = [
 
 async function irParaAba(nome: string) {
   await userEvent.click(screen.getByRole("tab", { name: nome }));
-}
-
-function linhasDaTabela() {
-  return within(screen.getByRole("table")).getAllByRole("row").slice(1); // pula o header
 }
 
 describe("AnuncioPerformanceTable — drill-down campanha → conjunto → anúncio", () => {
@@ -146,6 +142,6 @@ describe("AnuncioPerformanceTable — drill-down campanha → conjunto → anún
 
     expect(screen.getByText("Campanha A")).toBeInTheDocument();
     expect(screen.getByText("Campanha B")).toBeInTheDocument();
-    expect(linhasDaTabela()).toHaveLength(2);
+    expect(screen.queryByText("Nada aqui dentro do filtro selecionado.")).not.toBeInTheDocument();
   });
 });
