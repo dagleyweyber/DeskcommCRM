@@ -1,6 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -11,6 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ReceitaPorAnuncio } from "@/hooks/metrics/useSalesDashboard";
+import { X } from "@/lib/ui/icons";
+import { cn } from "@/lib/utils";
 
 export type Nivel = "campanha" | "conjunto" | "anuncio";
 
@@ -27,6 +31,11 @@ export interface LinhaAgregada {
   vendas: number;
   agendamentos: number;
   receita_cents: number;
+}
+
+interface Selecao {
+  chave: string;
+  nome: string;
 }
 
 /**
@@ -80,9 +89,32 @@ interface Props {
   dados: ReceitaPorAnuncio[];
 }
 
+/**
+ * Drill-down tipo Gerenciador de Anúncios Meta: selecionar uma campanha na
+ * aba "Campanha" escopa as abas "Conjunto de anúncios" e "Anúncio" só aos
+ * dados dela; selecionar um conjunto escopa "Anúncio" só a ele. A seleção é
+ * só um filtro pra frente (campanha → conjunto → anúncio) — nunca pra trás —
+ * e trocar a campanha selecionada limpa o conjunto (ele pertencia ao
+ * contexto antigo).
+ */
 export function AnuncioPerformanceTable({ dados }: Props) {
   const [nivel, setNivel] = useState<Nivel>("anuncio");
-  const linhas = useMemo(() => agregarPorNivel(dados, nivel), [dados, nivel]);
+  const [campanhaSelecionada, setCampanhaSelecionada] = useState<Selecao | null>(null);
+  const [conjuntoSelecionado, setConjuntoSelecionado] = useState<Selecao | null>(null);
+
+  const dadosDoNivel = useMemo(() => {
+    if (nivel === "campanha") return dados;
+    let base = dados;
+    if (campanhaSelecionada) {
+      base = base.filter((l) => (l.campaign_id ?? "sem-campanha") === campanhaSelecionada.chave);
+    }
+    if (nivel === "anuncio" && conjuntoSelecionado) {
+      base = base.filter((l) => (l.adset_id ?? "sem-conjunto") === conjuntoSelecionado.chave);
+    }
+    return base;
+  }, [dados, nivel, campanhaSelecionada, conjuntoSelecionado]);
+
+  const linhas = useMemo(() => agregarPorNivel(dadosDoNivel, nivel), [dadosDoNivel, nivel]);
 
   if (dados.length === 0) {
     return (
@@ -91,6 +123,19 @@ export function AnuncioPerformanceTable({ dados }: Props) {
       </div>
     );
   }
+
+  function selecionarLinha(l: LinhaAgregada) {
+    if (nivel === "campanha") {
+      setCampanhaSelecionada((atual) => (atual?.chave === l.chave ? null : { chave: l.chave, nome: l.nome }));
+      setConjuntoSelecionado(null);
+    } else if (nivel === "conjunto") {
+      setConjuntoSelecionado((atual) => (atual?.chave === l.chave ? null : { chave: l.chave, nome: l.nome }));
+    }
+  }
+
+  const linhaClicavel = nivel === "campanha" || nivel === "conjunto";
+  const mostraFiltroCampanha = nivel !== "campanha" && campanhaSelecionada;
+  const mostraFiltroConjunto = nivel === "anuncio" && conjuntoSelecionado;
 
   return (
     <div className="flex flex-col gap-3">
@@ -104,6 +149,50 @@ export function AnuncioPerformanceTable({ dados }: Props) {
         </TabsList>
       </Tabs>
 
+      {(mostraFiltroCampanha || mostraFiltroConjunto) && (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>Filtrando por:</span>
+          {mostraFiltroCampanha && (
+            <Badge variant="info" className="gap-1 pr-1">
+              {campanhaSelecionada!.nome}
+              <button
+                type="button"
+                onClick={() => {
+                  setCampanhaSelecionada(null);
+                  setConjuntoSelecionado(null);
+                }}
+                aria-label={`Remover filtro de campanha ${campanhaSelecionada!.nome}`}
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </Badge>
+          )}
+          {mostraFiltroConjunto && (
+            <Badge variant="info" className="gap-1 pr-1">
+              {conjuntoSelecionado!.nome}
+              <button
+                type="button"
+                onClick={() => setConjuntoSelecionado(null)}
+                aria-label={`Remover filtro de conjunto ${conjuntoSelecionado!.nome}`}
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs"
+            onClick={() => {
+              setCampanhaSelecionada(null);
+              setConjuntoSelecionado(null);
+            }}
+          >
+            Limpar
+          </Button>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
@@ -116,17 +205,50 @@ export function AnuncioPerformanceTable({ dados }: Props) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {linhas.map((l) => (
-              <TableRow key={l.chave}>
-                <TableCell className="max-w-[220px] truncate" title={l.nome}>
-                  {l.nome}
+            {linhas.map((l) => {
+              const selecionada =
+                (nivel === "campanha" && campanhaSelecionada?.chave === l.chave) ||
+                (nivel === "conjunto" && conjuntoSelecionado?.chave === l.chave);
+              return (
+                <TableRow
+                  key={l.chave}
+                  data-testid={linhaClicavel ? `linha-${nivel}-${l.chave}` : undefined}
+                  className={cn(
+                    linhaClicavel && "cursor-pointer",
+                    selecionada && "bg-accent-soft hover:bg-accent-soft",
+                  )}
+                  tabIndex={linhaClicavel ? 0 : undefined}
+                  role={linhaClicavel ? "button" : undefined}
+                  aria-pressed={linhaClicavel ? selecionada : undefined}
+                  onClick={linhaClicavel ? () => selecionarLinha(l) : undefined}
+                  onKeyDown={
+                    linhaClicavel
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            selecionarLinha(l);
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  <TableCell className="max-w-[220px] truncate" title={l.nome}>
+                    {l.nome}
+                  </TableCell>
+                  <TableCell className="text-right">{formatInt(l.leads)}</TableCell>
+                  <TableCell className="text-right">{formatInt(l.agendamentos)}</TableCell>
+                  <TableCell className="text-right">{formatInt(l.vendas)}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(l.receita_cents)}</TableCell>
+                </TableRow>
+              );
+            })}
+            {linhas.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                  Nada aqui dentro do filtro selecionado.
                 </TableCell>
-                <TableCell className="text-right">{formatInt(l.leads)}</TableCell>
-                <TableCell className="text-right">{formatInt(l.agendamentos)}</TableCell>
-                <TableCell className="text-right">{formatInt(l.vendas)}</TableCell>
-                <TableCell className="text-right">{formatCurrency(l.receita_cents)}</TableCell>
               </TableRow>
-            ))}
+            )}
           </TableBody>
         </Table>
       </div>
