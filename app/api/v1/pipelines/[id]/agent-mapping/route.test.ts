@@ -243,7 +243,13 @@ describe("GET /api/v1/pipelines/[id]/agent-mapping", () => {
 
     const body = (await res.json()) as {
       data: {
-        etapas: Array<{ id: string; name: string; is_won: boolean; is_lost: boolean }>;
+        etapas: Array<{
+          id: string;
+          name: string;
+          is_won: boolean;
+          is_lost: boolean;
+          meta_capi_event_name: string | null;
+        }>;
         mapeamento: Record<string, string | null>;
       };
     };
@@ -261,6 +267,9 @@ describe("GET /api/v1/pipelines/[id]/agent-mapping", () => {
       name: "Novo",
       is_won: false,
       is_lost: false,
+      // Sinal pro Meta CAPI (migration 0180) — `null` na fixture, mesmo
+      // raciocínio da autoria: estado honesto de etapa sem configuração.
+      meta_capi_event_name: null,
       last_change_actor_kind: null,
       last_change_at: null,
     });
