@@ -22,6 +22,7 @@ import { respostaDeRecusa } from "@/lib/api/recusa";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { arquivarEtapa, atualizarEtapa } from "@/lib/leads/stage-operations";
+import { EVENTOS_META_CAPI_DE_ETAPA } from "@/lib/meta-ads/stage-event-vocabulary";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ const bodySchema = z
     name: z.string().min(1).max(80).optional(),
     is_won: z.boolean().optional(),
     is_lost: z.boolean().optional(),
+    meta_capi_event_name: z.enum(EVENTOS_META_CAPI_DE_ETAPA).nullable().optional(),
     depois_de: z.string().min(1).nullable().optional(),
   })
   .strict()

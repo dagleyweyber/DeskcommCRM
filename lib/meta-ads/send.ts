@@ -63,7 +63,11 @@ export async function sendMetaCapiEvent(
     });
     if (res.ok) return { status: "sent" };
     const text = await res.text().catch(() => "");
-    return { status: "failed", error: `http_${res.status}: ${text.slice(0, 300)}` };
+    // 300 chars cortava o corpo do erro bem onde a Meta explica o motivo
+    // (ex.: subcode 2804131 "nenhuma Página associada..." some no meio da
+    // frase) — achado ao vivo depurando falhas reais da RevitaFio Mossoró.
+    // 2000 ainda tem teto pra não gravar corpo patológico.
+    return { status: "failed", error: `http_${res.status}: ${text.slice(0, 2000)}` };
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : String(err) };
   }

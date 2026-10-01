@@ -38,6 +38,7 @@ import {
   type UpdateDeMarcacao,
 } from "@/lib/leads/stage-editing";
 import { autoriaDaMudanca } from "@/lib/operacao/autoria";
+import type { EventoMetaCapiDeEtapa } from "@/lib/meta-ads/stage-event-vocabulary";
 
 type SB = SupabaseClient;
 
@@ -51,7 +52,7 @@ export interface DepsDeEtapa {
 
 /** As colunas que a tela e as regras usam. `position` entra: a reordenação calcula em cima dela. */
 const COLUNAS =
-  "id, name, slug, position, is_won, is_lost, is_archived, agent_stage_hint, last_change_actor_kind, last_change_at";
+  "id, name, slug, position, is_won, is_lost, is_archived, agent_stage_hint, meta_capi_event_name, last_change_actor_kind, last_change_at";
 
 /** A etapa como sai para quem lê — inclui a autoria da última mudança de configuração. */
 export interface EtapaVisivel {
@@ -61,12 +62,15 @@ export interface EtapaVisivel {
   position: number;
   is_won: boolean;
   is_lost: boolean;
+  /** Evento do Meta CAPI disparado quando um lead ENTRA nesta etapa (migration 0180). `null` = nenhum. */
+  meta_capi_event_name: string | null;
   /** `user` | `ai` | `system` — `null` nas etapas anteriores a esta coluna. */
   last_change_actor_kind: string | null;
   last_change_at: string | null;
 }
 
 type EtapaLida = EtapaEditavel & {
+  meta_capi_event_name: string | null;
   last_change_actor_kind: string | null;
   last_change_at: string | null;
 };
@@ -119,6 +123,7 @@ export function corpo(etapas: EtapaLida[]): { etapas: EtapaVisivel[] } {
         position: e.position,
         is_won: e.is_won,
         is_lost: e.is_lost,
+        meta_capi_event_name: e.meta_capi_event_name ?? null,
         last_change_actor_kind: e.last_change_actor_kind ?? null,
         last_change_at: e.last_change_at ?? null,
       })),
@@ -276,6 +281,8 @@ export interface PedidoDeEdicao {
   name?: string;
   is_won?: boolean;
   is_lost?: boolean;
+  /** `null` desliga o sinal pra esta etapa. */
+  meta_capi_event_name?: EventoMetaCapiDeEtapa | null;
   /**
    * O vizinho da ESQUERDA (`null` = primeira coluna), não um número de posição:
    * quem arrasta a coluna sabe onde ela caiu, não qual fração de `position` isso
@@ -333,8 +340,15 @@ export async function atualizarEtapa(
     }
   }
 
-  const patchDoAlvo: PatchDeMarcacao & { name?: string; position?: number } = {};
+  const patchDoAlvo: PatchDeMarcacao & {
+    name?: string;
+    position?: number;
+    meta_capi_event_name?: EventoMetaCapiDeEtapa | null;
+  } = {};
   if (pedido.name !== undefined) patchDoAlvo.name = pedido.name.trim();
+  if (pedido.meta_capi_event_name !== undefined) {
+    patchDoAlvo.meta_capi_event_name = pedido.meta_capi_event_name;
+  }
 
   if (pedido.depois_de !== undefined) {
     // Só as ativas compõem a régua: arquivada não ocupa lugar no quadro.

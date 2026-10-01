@@ -88,6 +88,8 @@ const bodySchema = z.object({
  * a regra do mapeamento carregar um campo que ela nunca lê.
  */
 type EtapaComAutoria = EtapaDoMapa & {
+  /** Evento do Meta CAPI disparado quando um lead ENTRA nesta etapa (migration 0180). `null` = nenhum. */
+  meta_capi_event_name: string | null;
   last_change_actor_kind: string | null;
   last_change_at: string | null;
 };
@@ -111,7 +113,9 @@ async function lerFunil(
     // A autoria entra na MESMA leitura que a tela de etapas já faz. Uma segunda
     // consulta só para ela seria um round-trip por render numa tela de
     // configuração — e um caminho a mais para a lista e a autoria divergirem.
-    .select("id, name, is_won, is_lost, agent_stage_hint, last_change_actor_kind, last_change_at")
+    .select(
+      "id, name, is_won, is_lost, agent_stage_hint, meta_capi_event_name, last_change_actor_kind, last_change_at",
+    )
     .eq("organization_id", orgId)
     .eq("pipeline_id", pipelineId)
     .eq("is_archived", false)
@@ -143,6 +147,7 @@ function corpo(etapas: EtapaComAutoria[]) {
       name: e.name,
       is_won: e.is_won,
       is_lost: e.is_lost,
+      meta_capi_event_name: e.meta_capi_event_name ?? null,
       last_change_actor_kind: e.last_change_actor_kind ?? null,
       last_change_at: e.last_change_at ?? null,
     })),

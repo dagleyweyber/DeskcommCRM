@@ -36,6 +36,8 @@ export interface PatchDeEtapa {
   name?: string;
   is_won?: boolean;
   is_lost?: boolean;
+  /** Evento do Meta CAPI disparado quando um lead ENTRA nesta etapa (migration 0180). `null` desliga. */
+  meta_capi_event_name?: string | null;
   depois_de?: string | null;
 }
 

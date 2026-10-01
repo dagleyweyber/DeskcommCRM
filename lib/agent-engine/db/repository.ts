@@ -54,6 +54,10 @@ export type InboxKind =
   // versão publicada sem credencial, ou tráfego real sem nenhuma atividade
   // correspondente. Achado auditando o CHANGELOG do fornecedor.
   | 'ia_sem_resposta'
+  // (migration 0180) Meta CAPI esgotou as tentativas de reenvio
+  // (lib/event-log/drain.ts, MAX_ATTEMPTS) e ainda assim falhou — sem este
+  // aviso, a venda/sinal fica perdido pros dados do Meta em silêncio total.
+  | 'meta_capi_send_exhausted'
   | 'other';
 
 export interface InboxItemRow {

@@ -13,7 +13,10 @@ import {
 } from "@/lib/event-log/dispatcher";
 import { logger } from "@/lib/logger";
 
-const MAX_ATTEMPTS = 5;
+// Exportado: handlers que precisam saber "esta é minha última chance antes
+// do drain marcar `dead`" (ex. lib/meta-ads/send-log.ts) importam daqui em
+// vez de duplicar o número — duplicar divergiria no primeiro ajuste.
+export const MAX_ATTEMPTS = 5;
 
 export interface DrainSummary {
   scanned: number;

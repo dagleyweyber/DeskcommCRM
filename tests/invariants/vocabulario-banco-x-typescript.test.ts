@@ -203,6 +203,16 @@ const PARES: Array<{
     arquivo: "lib/tarefas/tipos.ts",
     simbolo: "SITUACOES_DA_TAREFA",
   },
+  {
+    tabela: "crm_stages",
+    coluna: "meta_capi_event_name",
+    // lib/meta-ads/stage-event-vocabulary.ts → EVENTOS_META_CAPI_DE_ETAPA
+    // (tupla `as const` — o Zod da rota de etapas usa `z.enum(...)` direto
+    // dela, mesmo motivo das tarefas acima). `null` é "etapa não dispara
+    // nada", não um valor do CHECK — por isso não entra na lista.
+    arquivo: "lib/meta-ads/stage-event-vocabulary.ts",
+    simbolo: "EVENTOS_META_CAPI_DE_ETAPA",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */

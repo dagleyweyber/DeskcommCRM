@@ -26,6 +26,11 @@ import {
 import { LEAD_STAGES, type LeadStage } from "@/lib/agent-engine/agent/lead-state";
 import { ApiError } from "@/lib/api/types";
 import { ROTULO_DO_PASSO } from "@/lib/leads/agent-mapping";
+import {
+  EVENTOS_META_CAPI_DE_ETAPA,
+  ROTULO_DO_EVENTO_META_CAPI,
+  type EventoMetaCapiDeEtapa,
+} from "@/lib/meta-ads/stage-event-vocabulary";
 import { Archive, CaretDown, CaretUp, Plus, Warning } from "@/lib/ui/icons";
 import { SeloDeAutoria } from "@/components/operacao/SeloDeAutoria";
 
@@ -177,7 +182,19 @@ type Arquivamento = {
 // varre o texto-fonte, então `sm:${...}` montado por interpolação NÃO gera CSS.
 // E o prefixo é o certo de qualquer jeito — no celular a linha empilha e largura
 // fixa espremeria os controles.
-const LARGURA = { ordem: "sm:w-[76px]", papel: "sm:w-56", arquivar: "sm:w-[104px]" } as const;
+const LARGURA = {
+  ordem: "sm:w-[76px]",
+  papel: "sm:w-56",
+  metaCapi: "sm:w-56",
+  arquivar: "sm:w-[104px]",
+} as const;
+
+/** Radix `Select` não aceita `value=""` — sentinel pro "desligado" que `patchDeEvento` traduz de volta pra `null`. */
+const NENHUM_EVENTO_META_CAPI = "nenhum";
+
+function patchDeEvento(valor: string): { meta_capi_event_name: EventoMetaCapiDeEtapa | null } {
+  return { meta_capi_event_name: valor === NENHUM_EVENTO_META_CAPI ? null : (valor as EventoMetaCapiDeEtapa) };
+}
 
 /**
  * O texto de cada rótulo, em UM lugar só — porque ele aparece em DOIS.
@@ -190,6 +207,7 @@ export const ROTULO = {
   nome: "Nome da coluna (clique para renomear)",
   ordem: "Ordem",
   papel: "O que acontece nesta coluna",
+  metaCapi: "Sinal pro Meta Ads ao entrar aqui",
 } as const;
 
 export function StagesSection({
@@ -344,6 +362,7 @@ export function StagesSection({
         <span className="min-w-0 flex-1">{ROTULO.nome}</span>
         <span className={`${LARGURA.ordem} shrink-0 text-center`}>{ROTULO.ordem}</span>
         <span className={`${LARGURA.papel} shrink-0`}>{ROTULO.papel}</span>
+        <span className={`${LARGURA.metaCapi} shrink-0`}>{ROTULO.metaCapi}</span>
         <span className={`${LARGURA.arquivar} shrink-0`} />
       </div>
 
@@ -436,6 +455,32 @@ export function StagesSection({
                       {(["nenhum", "won", "lost"] as const).map((p) => (
                         <SelectItem key={p} value={p}>
                           {ROTULO_DO_PAPEL[p]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className={`w-full shrink-0 space-y-1 ${LARGURA.metaCapi} sm:space-y-0`}>
+                  <span className="block text-xs font-medium text-text-muted sm:hidden">
+                    {ROTULO.metaCapi}
+                  </span>
+                  <Select
+                    value={etapa.meta_capi_event_name ?? NENHUM_EVENTO_META_CAPI}
+                    onValueChange={(v) => aplicar(etapa.id, patchDeEvento(v))}
+                    disabled={ocupado}
+                  >
+                    <SelectTrigger
+                      aria-label={`Sinal pro Meta Ads de «${etapa.name}»`}
+                      data-testid={`meta-capi-${etapa.id}`}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NENHUM_EVENTO_META_CAPI}>Nenhum</SelectItem>
+                      {EVENTOS_META_CAPI_DE_ETAPA.map((ev) => (
+                        <SelectItem key={ev} value={ev}>
+                          {ROTULO_DO_EVENTO_META_CAPI[ev]}
                         </SelectItem>
                       ))}
                     </SelectContent>

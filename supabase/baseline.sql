@@ -9161,6 +9161,13 @@ alter table public.agent_inbox_items
     -- confirmado ao vivo em produção. Entra NESTA lista pela mesma razão das de
     -- cima (bloco único por constraint, #159).
     'ia_sem_resposta',
+    -- (migration 0180) Meta CAPI esgotou as tentativas de reenvio
+    -- (lib/event-log/drain.ts, MAX_ATTEMPTS) e a venda/sinal de qualificação
+    -- ainda assim não chegou ao Meta Ads — sem este kind, o dado de
+    -- otimização de campanha se perde em silêncio depois de ~31min de
+    -- tentativa. Entra NESTA lista pela mesma razão das de cima (bloco único
+    -- por constraint, #159).
+    'meta_capi_send_exhausted',
     'other'
   ));
 
@@ -14595,6 +14602,29 @@ create trigger trg_redigir_tarefas_ao_anonimizar
   for each row
   when (new.is_anonymized is true and old.is_anonymized is distinct from true)
   execute function public.fn_redigir_tarefas_do_contato_anonimizado();
+
+notify pgrst, 'reload schema';
+
+-- ---- crm_stages.meta_capi_event_name (migration 0180) ----
+-- Qual evento padrão do Meta CAPI disparar quando um lead ENTRA nesta etapa
+-- (lead.stage_changed → to_stage_id). Vocabulário FECHADO de propósito — ao
+-- contrário de crm_lead_activities.type, são nomes de evento padrão do Meta
+-- (lista pequena e estável); um erro de digitação aqui vira evento que o
+-- Meta rejeita silenciosamente lá na ponta. `null` = etapa não dispara nada
+-- (a maioria). Entra ANTES da VARREDURA anon de propósito, mesma razão do
+-- crm_tasks logo acima.
+alter table public.crm_stages
+  add column if not exists meta_capi_event_name text;
+
+alter table public.crm_stages
+  drop constraint if exists crm_stages_meta_capi_event_name_check;
+
+alter table public.crm_stages
+  add constraint crm_stages_meta_capi_event_name_check check (
+    meta_capi_event_name is null or meta_capi_event_name in (
+      'Schedule', 'Lead', 'CompleteRegistration', 'InitiateCheckout', 'Contact'
+    )
+  );
 
 notify pgrst, 'reload schema';
 

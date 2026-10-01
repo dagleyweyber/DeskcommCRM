@@ -55,6 +55,10 @@ export const KIND_LABEL = {
   contact_proposal_expired:
     "Uma informação que o assistente ouviu de um cliente venceu sem ninguém conferir",
   ia_sem_resposta: "O agente de IA parou de responder mensagens de cliente",
+  // Diz o que o Meta Ads NÃO recebeu, não o mecanismo de retry por dentro —
+  // quem lê a Central precisa saber que um sinal de venda/qualificação sumiu
+  // dos dados de otimização de campanha, não quantas tentativas o sistema fez.
+  meta_capi_send_exhausted: "Um sinal de venda não chegou ao Meta Ads depois de várias tentativas",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

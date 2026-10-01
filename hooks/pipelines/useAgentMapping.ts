@@ -24,6 +24,8 @@ export interface EtapaDoFunil {
   name: string;
   is_won: boolean;
   is_lost: boolean;
+  /** Evento do Meta CAPI disparado quando um lead ENTRA nesta etapa (migration 0180). `null` = nenhum. */
+  meta_capi_event_name?: string | null;
   /** Quem mexeu nesta etapa por último (migration 0101). `null` antes dela. */
   last_change_actor_kind?: string | null;
   last_change_at?: string | null;

@@ -18,7 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { EventHandler, EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
 import { buildContext } from "@/lib/automation/engine";
 import { sendMetaCapiEvent } from "@/lib/meta-ads/send";
-import { logger } from "@/lib/logger";
+import { recordCapiSendResult } from "@/lib/meta-ads/send-log";
 
 export const META_CAPI_PURCHASE_CONSUMER_KEY = "meta-capi-purchase";
 
@@ -33,47 +33,36 @@ export async function handleLeadWonForMetaCapi(
   }
   const contact = context.contact as Record<string, unknown> | undefined;
 
+  const valueCents = lead.value_cents as number | null;
+  const currency = lead.currency as string | null;
+  // Achado ao vivo (RevitaFio Mossoró): um lead fechado sem valor preenchido
+  // ainda assim disparava Purchase, e a Meta EXIGE moeda nesse evento padrão
+  // — o envio inteiro era recusado (subcode 2804010). Não tenta o que já
+  // sabemos que vai falhar; o dado que falta é no LEAD, não no envio.
+  if (valueCents == null || !currency) {
+    return { consumer_key: META_CAPI_PURCHASE_CONSUMER_KEY, status: "skipped", detail: "no_value" };
+  }
+
   const closedAt = (lead.closed_at as string | null) ?? row.created_at ?? new Date().toISOString();
 
   const result = await sendMetaCapiEvent(admin, row.organization_id, {
     eventName: "Purchase",
     eventId: row.id,
     eventTimeSeconds: Math.floor(new Date(closedAt).getTime() / 1000),
-    valueCents: lead.value_cents as number | null,
-    currency: lead.currency as string | null,
+    valueCents,
+    currency,
     phone: (contact?.phone_number as string | null) ?? null,
     sourceMetadata: (lead.source_metadata as Record<string, unknown> | null) ?? null,
   });
 
-  // "skipped" (sem credencial) é o estado normal de quem não ativou o
-  // recurso — não vira linha de log, senão toda venda de toda org sem Meta
-  // Ads conectado encheria a tabela à toa.
-  if (result.status !== "skipped") {
-    const { error } = await admin.from("meta_capi_send_log").insert({
-      organization_id: row.organization_id,
-      lead_id: lead.id,
-      event_name: "Purchase",
-      status: result.status,
-      meta_error: result.error ?? null,
-    });
-    if (error) {
-      logger.warn("[meta-ads] falha ao gravar meta_capi_send_log", {
-        organization_id: row.organization_id,
-        lead_id: lead.id,
-        error: error.message,
-      });
-    }
-  }
-
-  if (result.status === "failed") {
-    logger.warn("[meta-ads] envio de Purchase falhou", {
-      organization_id: row.organization_id,
-      lead_id: lead.id,
-      error: result.error,
-    });
-  }
-
-  return { consumer_key: META_CAPI_PURCHASE_CONSUMER_KEY, status: "ok" };
+  return recordCapiSendResult(admin, {
+    consumerKey: META_CAPI_PURCHASE_CONSUMER_KEY,
+    organizationId: row.organization_id,
+    leadId: lead.id as string,
+    eventName: "Purchase",
+    result,
+    attemptsSoFar: row.attempts,
+  });
 }
 
 export const metaCapiPurchaseHandler: EventHandler = {
