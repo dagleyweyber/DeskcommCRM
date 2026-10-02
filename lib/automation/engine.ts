@@ -194,6 +194,47 @@ export async function runAutomationForEvent(
         resourceId: runRow?.id ?? null,
         metadata: { rule_id: rule.id, status, event_type: row.event_type },
       });
+      // Achado revisando capacidade antes de escalar pra mais clínicas: até
+      // aqui esta falha só existia em automation_rule_runs, que nenhuma tela
+      // lê — o dono do negócio nunca sabia que um webhook ou mensagem
+      // programada não saiu. NÃO é reenvio automático de propósito: ao
+      // contrário do Purchase pro Meta (idempotente por event_id do lado de
+      // lá), reexecutar esta regra reenviaria ação que já teve sucesso numa
+      // run parcial — pior que a falha silenciosa atual. Dedup por
+      // (organization_id, rule_id, status='open'): uma regra persistentemente
+      // quebrada abre UM aviso, não um por evento.
+      const { data: jaAberto } = await admin
+        .from("agent_inbox_items")
+        .select("id")
+        .eq("organization_id", row.organization_id)
+        .eq("kind", "automation_rule_failed")
+        .eq("ref_id", rule.id)
+        .eq("status", "open")
+        .maybeSingle();
+      if (!jaAberto) {
+        const { error: inboxErr } = await admin.from("agent_inbox_items").insert({
+          organization_id: row.organization_id,
+          kind: "automation_rule_failed",
+          severity: status === "failed" ? "critical" : "warn",
+          title: `A automação "${rule.name}" não terminou o que deveria fazer`,
+          body:
+            status === "failed"
+              ? `Nenhuma ação desta regra funcionou no evento "${row.event_type}". ` +
+                `Veja o histórico de execuções da regra pra entender o motivo.`
+              : `Parte das ações desta regra falhou no evento "${row.event_type}" — ` +
+                `pelo menos uma funcionou, pelo menos uma não. Veja o histórico de ` +
+                `execuções da regra pra saber qual.`,
+          ref_kind: "automation_rule",
+          ref_id: rule.id,
+        });
+        if (inboxErr) {
+          logger.error("[automation.engine] aviso na Central falhou", {
+            organization_id: row.organization_id,
+            rule_id: rule.id,
+            error: inboxErr.message,
+          });
+        }
+      }
     }
 
     // run_count sem RPC de increment: read-modify-write é aceitável aqui

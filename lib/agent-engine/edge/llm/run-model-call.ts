@@ -219,6 +219,14 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
   try {
     // `system` aceita SystemModelMessage (com providerOptions de cache) — igual
     // em v6 e v7 (smoke prova que o cacheControl continua virando cache_control).
+    //
+    // `abortSignal` — achado revisando capacidade antes de escalar pra mais
+    // clínicas: sem ele, um provedor que trava (ou uma conexão que nunca
+    // fecha) ocupa uma das `QUEUE_MAX_CONCURRENCY` vagas do worker até o
+    // `QUEUE_VISIBILITY_TIMEOUT_MS` reclamar o job — 10 minutos, por
+    // default. 90s é generoso pra um turno com várias chamadas de
+    // ferramenta (`stopWhen`/multi-step) e ainda corta o pior caso em mais
+    // de 6x.
     result = await generateText({
       // `decisao.baseUrl` só é preenchido quando o painel apontou um endpoint
       // (gateway OpenAI-compatível, ou modelo local). Providers canônicos
@@ -232,6 +240,7 @@ export async function runModelCall(db: pg.Pool, cfg: LlmEdgeConfig, input: RunMo
       topP,
       topK,
       maxOutputTokens,
+      abortSignal: AbortSignal.timeout(90_000),
     });
   } catch (err) {
     // ─── A LINHA QUE FALTAVA ────────────────────────────────────────────────

@@ -10,6 +10,17 @@
  */
 import { classificarFalhaDeAlcance, explicarFalhaDeAlcance } from "@/lib/net/alcance";
 
+/**
+ * Nenhuma chamada deste cliente tinha timeout — achado revisando capacidade
+ * antes de escalar pra mais clínicas: um WAHA travado (ou uma chamada presa
+ * esperando o WhatsApp) ocupava uma das vagas de concorrência do worker
+ * (`QUEUE_MAX_CONCURRENCY`) INDEFINIDAMENTE, já que nada aqui jamais desistia
+ * sozinho. 15s é generoso pro tráfego normal (rede interna do compose, não
+ * internet) e ainda limita o estrago de uma chamada presa — mesmo padrão já
+ * usado em `lib/automation/actions/call-webhook.ts`.
+ */
+const WAHA_TIMEOUT_MS = 15_000;
+
 export class WahaClient {
   constructor(
     private readonly baseUrl: string,
@@ -28,6 +39,7 @@ export class WahaClient {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ name, config: {} }),
+      signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
     });
     if (!createRes.ok && createRes.status !== 422 && createRes.status !== 409) {
       const body = await createRes.text().catch(() => "");
@@ -41,6 +53,7 @@ export class WahaClient {
         method: "POST",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
       },
     );
     if (!startRes.ok && startRes.status !== 422 && startRes.status !== 409) {
@@ -65,6 +78,7 @@ export class WahaClient {
         method: "POST",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
       },
     );
     if (!res.ok && ![404, 422, 409].includes(res.status)) {
@@ -93,6 +107,7 @@ export class WahaClient {
         method: "POST",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
       },
     );
     if (!res.ok && ![404, 422, 409].includes(res.status)) {
@@ -111,6 +126,7 @@ export class WahaClient {
       {
         method: "DELETE",
         headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
       },
     );
     if (!res.ok && ![404, 422, 409].includes(res.status)) {
@@ -122,6 +138,7 @@ export class WahaClient {
   async getSessionQr(name: string): Promise<{ qr?: string; status: string }> {
     const res = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`, {
       headers: { "X-Api-Key": this.apiKey },
+      signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`waha_${res.status}`);
     return (await res.json()) as { qr?: string; status: string };
@@ -144,7 +161,7 @@ export class WahaClient {
       const res = await fetch(
         `${this.baseUrl}/api/contacts/profile-picture` +
           `?session=${encodeURIComponent(session)}&contactId=${encodeURIComponent(chatId)}`,
-        { headers: { "X-Api-Key": this.apiKey } },
+        { headers: { "X-Api-Key": this.apiKey }, signal: AbortSignal.timeout(WAHA_TIMEOUT_MS) },
       );
       if (!res.ok) return null;
       const body = (await res.json()) as { profilePictureURL?: string | null };
@@ -173,7 +190,7 @@ export class WahaClient {
     try {
       const res = await fetch(
         `${this.baseUrl}/api/${encodeURIComponent(session)}/lids/${encodeURIComponent(lid)}`,
-        { headers: { "X-Api-Key": this.apiKey } },
+        { headers: { "X-Api-Key": this.apiKey }, signal: AbortSignal.timeout(WAHA_TIMEOUT_MS) },
       );
       if (!res.ok) return null;
       const body = (await res.json()) as { pn?: string | null };
@@ -196,6 +213,7 @@ export class WahaClient {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ session, chatId, text }),
+      signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`waha_${res.status}`);
     return res.json();
@@ -210,6 +228,7 @@ export class WahaClient {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({ session, chatId, ...plan.payload }),
+      signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

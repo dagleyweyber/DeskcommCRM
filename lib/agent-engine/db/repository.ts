@@ -58,6 +58,13 @@ export type InboxKind =
   // (lib/event-log/drain.ts, MAX_ATTEMPTS) e ainda assim falhou — sem este
   // aviso, a venda/sinal fica perdido pros dados do Meta em silêncio total.
   | 'meta_capi_send_exhausted'
+  // (migration 0181) Uma regra de automação (webhook/WhatsApp/mover-etapa/
+  // marcar-tag) rodou e pelo menos uma ação falhou — até aqui o motor gravava
+  // em automation_rule_runs mas sempre devolvia "ok" ao dispatcher, e nenhuma
+  // tela mostra essa tabela: a falha só existia pra quem soubesse consultar o
+  // banco direto. Achado revisando capacidade antes de escalar pra mais
+  // clínicas.
+  | 'automation_rule_failed'
   | 'other';
 
 export interface InboxItemRow {

@@ -3,12 +3,52 @@ import { cookieSecure } from "@/lib/supabase/cookie-secure";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { isPublicPath } from "@/lib/auth/public-paths";
+import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import {
   verifyImpersonateCookieEdge,
   IMPERSONATE_COOKIE_NAME_EDGE,
 } from "@/lib/impersonate/cookie-edge";
 
 const COOKIE_NAME = "sb-deskcomm-auth";
+
+/**
+ * Superfícies secretas-mas-sem-conta: crons, rotas internas, MCP e o heartbeat
+ * do agente do host. Cada uma já se defende com um bearer/secret comparado em
+ * tempo constante — o que faltava era limitar VOLUME de tentativa na frente
+ * disso (threat-model.md T1). Não há "conta" aqui pra travar por falha, então
+ * o limite é por IP, um balde por classe de rota (não por rota individual —
+ * um atacante sondando 20 crons em sequência não deveria resetar o contador a
+ * cada rota nova).
+ *
+ * Limite calibrado contra o tráfego legítimo real: `docker/scheduler/
+ * entrypoint.sh` dispara ~6-8 crons por minuto, sempre da MESMA origem (o
+ * container scheduler, direto na rede interna — sem `x-forwarded-for`, cai no
+ * balde "unknown" junto com qualquer outro chamador interno). 30/60s deixa
+ * ~4x de folga pra esse tráfego normal e ainda derruba um brute-force de
+ * verdade pra uma fração do throughput.
+ */
+const ROTAS_SECRETAS_SEM_LIMITE: Array<{ re: RegExp; balde: string }> = [
+  { re: /^\/api\/v1\/cron\//, balde: "cron" },
+  { re: /^\/api\/internal\//, balde: "internal" },
+  { re: /^\/api\/mcp(\/.*)?$/, balde: "mcp" },
+  { re: /^\/api\/v1\/system\/agent$/, balde: "system-agent" },
+];
+const LIMITE_POR_IP = 30;
+const JANELA_SEGUNDOS = 60;
+
+function respostaDeLimiteExcedido(requestId: string): NextResponse {
+  return new NextResponse(
+    JSON.stringify({ error: { code: "rate_limited", message: "Too many requests." } }),
+    {
+      status: 429,
+      headers: {
+        "content-type": "application/json",
+        "x-request-id": requestId,
+        "Retry-After": String(JANELA_SEGUNDOS),
+      },
+    },
+  );
+}
 
 export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: request.headers } });
@@ -30,6 +70,14 @@ export async function proxy(request: NextRequest) {
   const isAdminSurface = host.startsWith("admin.") || pathname.startsWith("/admin");
 
   if (isPublicPath(pathname)) {
+    const rota = ROTAS_SECRETAS_SEM_LIMITE.find((r) => r.re.test(pathname));
+    if (rota) {
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+      const rl = await checkRateLimit(`guard:${rota.balde}:${ip}`, LIMITE_POR_IP, JANELA_SEGUNDOS);
+      if (!rl.allowed) {
+        return respostaDeLimiteExcedido(requestId);
+      }
+    }
     return response;
   }
 

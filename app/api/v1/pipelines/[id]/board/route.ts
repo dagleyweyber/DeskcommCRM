@@ -385,6 +385,44 @@ async function withNextActions(
   };
 }
 
+/**
+ * Funde o resultado das 5 enriquecedoras (rodadas em paralelo contra a MESMA
+ * `base`) de volta numa lista só, por id de lead.
+ *
+ * Pura e exportada de propósito — é o pedaço que prova que paralelizar não
+ * mudou o resultado final, sem precisar montar um Supabase de mentira pra
+ * testar. `!== undefined` replica o `valor ? {...lead, campo: valor} : lead`
+ * que cada enriquecedora já fazia: nenhum dos 5 campos é um valor "falso mas
+ * presente" (todos são objeto/string quando existem), então as duas checagens
+ * sempre concordam — só a de `undefined` dá pra fazer sem reimportar a
+ * lógica de cada enriquecedora aqui.
+ */
+export function mesclaEnriquecimentos(
+  base: Lead[],
+  enriquecidos: {
+    owner: Lead[];
+    score: Lead[];
+    conversa: Lead[];
+    reuniao: Lead[];
+    acao: Lead[];
+  },
+): Lead[] {
+  const ownerById = new Map(enriquecidos.owner.map((l) => [l.id, l.owner_agent]));
+  const scoreById = new Map(enriquecidos.score.map((l) => [l.id, l.score]));
+  const conversaById = new Map(enriquecidos.conversa.map((l) => [l.id, l.conversa]));
+  const reuniaoById = new Map(enriquecidos.reuniao.map((l) => [l.id, l.next_meeting_at]));
+  const acaoById = new Map(enriquecidos.acao.map((l) => [l.id, l.next_action]));
+
+  return base.map((lead) => ({
+    ...lead,
+    ...(ownerById.get(lead.id) !== undefined ? { owner_agent: ownerById.get(lead.id) } : {}),
+    ...(scoreById.get(lead.id) !== undefined ? { score: scoreById.get(lead.id) } : {}),
+    ...(conversaById.get(lead.id) !== undefined ? { conversa: conversaById.get(lead.id) } : {}),
+    ...(reuniaoById.get(lead.id) !== undefined ? { next_meeting_at: reuniaoById.get(lead.id) } : {}),
+    ...(acaoById.get(lead.id) !== undefined ? { next_action: acaoById.get(lead.id) } : {}),
+  }));
+}
+
 export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const requestId = randomUUID();
   const { id: pipelineId } = await ctx.params;
@@ -428,63 +466,64 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   if (leadsErr) return fail("internal_error", leadsErr.message, 500, { requestId });
   if (!pipeline) return fail("resource_not_found", "Pipeline não encontrado.", 404, { requestId });
 
-  const leadsWithOwner = await withOwnerAgents(
-    supabase,
-    (pipeline as Pipeline).organization_id,
-    (leads ?? []) as Lead[],
-  );
-  if (leadsWithOwner.error) {
-    return fail("internal_error", leadsWithOwner.error, 500, { requestId });
-  }
+  // As 5 enriquecidas abaixo são independentes entre si — cada uma só lê
+  // campos da linha ORIGINAL do lead (id/contact_id/owner_kind/...) e só
+  // ACRESCENTA seu próprio campo (owner_agent/score/conversa/next_meeting_at),
+  // nunca lê o que outra escreveu. Rodavam em cadeia (6 round trips
+  // sequenciais) sem necessidade — medido como o maior ganho de latência
+  // disponível no carregamento do quadro sem mexer em schema nem em índice.
+  // A exceção é `withNextActions`, que precisa do pipeline padrão da org
+  // ANTES de rodar — essa consulta entra no MESMO Promise.all (ela também
+  // não depende de nenhuma das outras 4), e só `withNextActions` em si fica
+  // de fato sequencial, depois do grupo.
+  const orgId = (pipeline as Pipeline).organization_id;
+  const baseLeads = (leads ?? []) as Lead[];
 
-  const { data: pipelinePadrao } = await supabase
-    .from("crm_pipelines")
-    .select("id")
-    .eq("organization_id", (pipeline as Pipeline).organization_id)
-    .eq("is_default", true)
-    .maybeSingle();
+  const [
+    { data: pipelinePadrao },
+    leadsWithOwner,
+    leadsComScore,
+    leadsComConversa,
+    leadsComReuniao,
+  ] = await Promise.all([
+    supabase
+      .from("crm_pipelines")
+      .select("id")
+      .eq("organization_id", orgId)
+      .eq("is_default", true)
+      .maybeSingle(),
+    withOwnerAgents(supabase, orgId, baseLeads),
+    withScores(supabase, orgId, baseLeads),
+    withConversas(supabase, orgId, baseLeads),
+    withNextMeetings(supabase, orgId, baseLeads),
+  ]);
+  if (leadsWithOwner.error) return fail("internal_error", leadsWithOwner.error, 500, { requestId });
+  if (leadsComScore.error) return fail("internal_error", leadsComScore.error, 500, { requestId });
+  if (leadsComConversa.error) return fail("internal_error", leadsComConversa.error, 500, { requestId });
+  if (leadsComReuniao.error) return fail("internal_error", leadsComReuniao.error, 500, { requestId });
 
   const leadsComAcao = await withNextActions(
     supabase,
-    (pipeline as Pipeline).organization_id,
-    leadsWithOwner.leads,
+    orgId,
+    baseLeads,
     (pipelinePadrao as { id: string } | null)?.id ?? null,
   );
   if (leadsComAcao.error) {
     return fail("internal_error", leadsComAcao.error, 500, { requestId });
   }
 
-  const leadsComScore = await withScores(
-    supabase,
-    (pipeline as Pipeline).organization_id,
-    leadsComAcao.leads,
-  );
-  if (leadsComScore.error) {
-    return fail("internal_error", leadsComScore.error, 500, { requestId });
-  }
-
-  const leadsComConversa = await withConversas(
-    supabase,
-    (pipeline as Pipeline).organization_id,
-    leadsComScore.leads,
-  );
-  if (leadsComConversa.error) {
-    return fail("internal_error", leadsComConversa.error, 500, { requestId });
-  }
-
-  const leadsComReuniao = await withNextMeetings(
-    supabase,
-    (pipeline as Pipeline).organization_id,
-    leadsComConversa.leads,
-  );
-  if (leadsComReuniao.error) {
-    return fail("internal_error", leadsComReuniao.error, 500, { requestId });
-  }
+  const leadsEnriquecidos = mesclaEnriquecimentos(baseLeads, {
+    owner: leadsWithOwner.leads,
+    score: leadsComScore.leads,
+    conversa: leadsComConversa.leads,
+    reuniao: leadsComReuniao.leads,
+    acao: leadsComAcao.leads,
+  });
 
   const board: BoardData = {
     pipeline: pipeline as Pipeline,
     stages: (stages ?? []) as Stage[],
-    leads: leadsComReuniao.leads,
+    leads: leadsEnriquecidos,
   };
 
   return ok(board, { requestId });

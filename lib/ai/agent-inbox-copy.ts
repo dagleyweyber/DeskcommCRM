@@ -59,6 +59,11 @@ export const KIND_LABEL = {
   // quem lê a Central precisa saber que um sinal de venda/qualificação sumiu
   // dos dados de otimização de campanha, não quantas tentativas o sistema fez.
   meta_capi_send_exhausted: "Um sinal de venda não chegou ao Meta Ads depois de várias tentativas",
+  // Diz o que a regra deveria ter feito e não fez — "webhook"/"ação" é
+  // jargão de quem configurou a automação, não de quem só precisa saber que
+  // algo programado não aconteceu. O nome da regra e o motivo técnico ficam
+  // no corpo, pra quem for até lá consertar.
+  automation_rule_failed: "Uma automação configurada não conseguiu terminar o que deveria fazer",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

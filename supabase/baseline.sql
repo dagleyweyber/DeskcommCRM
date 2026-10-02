@@ -9168,6 +9168,13 @@ alter table public.agent_inbox_items
     -- tentativa. Entra NESTA lista pela mesma razão das de cima (bloco único
     -- por constraint, #159).
     'meta_capi_send_exhausted',
+    -- (migration 0181) Uma regra de automação (webhook/WhatsApp/mover-etapa/
+    -- marcar-tag) rodou e pelo menos uma ação falhou — o motor
+    -- (lib/automation/engine.ts) sempre devolvia "ok" ao dispatcher mesmo
+    -- com falha real, e automation_rule_runs (onde o status fica gravado)
+    -- não tem tela nenhuma que leia. Entra NESTA lista pela mesma razão das
+    -- de cima (bloco único por constraint, #159).
+    'automation_rule_failed',
     'other'
   ));
 
