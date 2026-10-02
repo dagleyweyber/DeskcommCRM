@@ -55,7 +55,7 @@ describe("mesclaEnriquecimentos", () => {
     ];
     const score = [
       lead({ id: "l1" }), // sem sinal suficiente
-      lead({ id: "l2", score: { probability: 0.8, reason: "r", band: "alta", factors: [], at: null } }),
+      lead({ id: "l2", score: { probability: 0.8, reason: "r", band: "quente", factors: [], at: null } }),
     ];
     const conversa = [
       lead({ id: "l1", conversa: { id: "c1", preview: "oi", last_message_at: null, unread: 2 } }),
@@ -78,7 +78,7 @@ describe("mesclaEnriquecimentos", () => {
 
     const l2 = out.find((l) => l.id === "l2")!;
     expect(l2.owner_agent).toBeUndefined();
-    expect(l2.score).toEqual({ probability: 0.8, reason: "r", band: "alta", factors: [], at: null });
+    expect(l2.score).toEqual({ probability: 0.8, reason: "r", band: "quente", factors: [], at: null });
     expect(l2.conversa).toBeUndefined();
     expect(l2.next_meeting_at).toBe("2026-10-10T12:00:00.000Z");
     expect(l2.next_action).toBeUndefined();
