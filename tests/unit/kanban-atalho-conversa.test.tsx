@@ -117,24 +117,30 @@ describe("o elo que some sem barulho", () => {
     // ninguém testou.
     const fonte = readFileSync("app/api/v1/pipelines/[id]/board/route.ts", "utf8");
     expect(fonte, "falta withConversas").toContain("withConversas");
-    expect(fonte, "withConversas não foi chamada").toMatch(
-      /leadsComConversa\s*=\s*await withConversas/,
+    // As 5 enriquecedoras (dono/score/conversa/reunião/próxima ação) rodam em
+    // PARALELO (Promise.all) desde que o carregamento do board deixou de
+    // encadeá-las em 6 round trips sequenciais — withConversas já não é
+    // `leadsComConversa = await withConversas(...)` isolado, é um dos
+    // elementos do array que alimenta o Promise.all.
+    expect(fonte, "withConversas não está no grupo paralelo").toMatch(
+      /withConversas\(supabase, orgId, baseLeads\)/,
+    );
+    expect(fonte, "leadsComConversa não foi desestruturado do Promise.all").toMatch(
+      /leadsComConversa,/,
     );
     // Chamar e não USAR o resultado é o defeito de verdade: a função roda, o
     // custo se paga, e a resposta sai sem a conversa. A primeira versão deste
     // caso só olhava a chamada e o sabote passou.
     //
-    // `leadsComConversa.leads` não é mais o campo FINAL da resposta — depois
-    // dela vem `withNextMeetings` (a data/hora da visita agendada), que
-    // reencadeia o mesmo `leads` mais uma vez. Por isso a prova virou DUAS
-    // partes: o resultado de `withConversas` precisa ALIMENTAR o próximo elo
-    // da cadeia, e o ÚLTIMO elo precisa chegar na resposta — quebrar qualquer
-    // um dos dois faz a conversa sumir da mesma forma.
-    expect(fonte, "leadsComConversa.leads não alimentou o próximo elo da cadeia").toMatch(
-      /leadsComConversa\.leads/,
+    // A prova de duas partes continua — resultado de `withConversas` precisa
+    // ALIMENTAR a fusão final (`mesclaEnriquecimentos`), e o retorno dela
+    // precisa chegar na resposta. Quebrar qualquer um dos dois faz a
+    // conversa sumir do mesmo jeito que sumia na cadeia sequencial.
+    expect(fonte, "leadsComConversa.leads não alimentou a fusão final").toMatch(
+      /conversa:\s*leadsComConversa\.leads/,
     );
-    expect(fonte, "o resultado do ÚLTIMO elo da cadeia não chegou à resposta").toMatch(
-      /leads:\s*leadsComReuniao\.leads/,
+    expect(fonte, "o resultado da fusão não chegou à resposta").toMatch(
+      /leads:\s*leadsEnriquecidos/,
     );
   });
 
