@@ -46,7 +46,32 @@ export async function sendMetaCapiEvent(
     pageId = (data?.page_id as string | null) ?? null;
   }
 
-  const payload = buildCapiPayload({ ...input, pageId });
+  // Achado ao vivo (RevitaFio Mossoró, subcode 2804131 "nenhuma Página
+  // associada ao conjunto de dados"): `page_id` certo não bastou — a Meta
+  // também queria o WABA pra resolver a associação quando o conjunto de
+  // anúncios não tem pixel/dataset configurado (comum em campanhas "Local
+  // da conversão: WhatsApp"). Mesma fonte que já alimenta os templates
+  // (`channel_sessions.meta_waba_id`, preenchida por quem conectou o Meta
+  // Cloud API oficial) — propriedade da ORGANIZAÇÃO, não do anúncio. Só
+  // consulta no ramo ctwa_clid (mesmo gate de `buildCapiPayload`): website/
+  // system_generated nunca usam esse campo, não vale o round trip.
+  const meta = (input.sourceMetadata as Record<string, unknown> | null | undefined) ?? {};
+  const isCtwa = meta.ad_click_id_type === "ctwa_clid" && typeof meta.ad_click_id === "string" && meta.ad_click_id;
+  let whatsappBusinessAccountId: string | null = null;
+  if (isCtwa) {
+    const { data: wabaRow } = await admin
+      .from("channel_sessions")
+      .select("meta_waba_id")
+      .eq("organization_id", organizationId)
+      .eq("provider", "meta_cloud")
+      .is("archived_at", null)
+      .not("meta_waba_id", "is", null)
+      .limit(1)
+      .maybeSingle();
+    whatsappBusinessAccountId = (wabaRow?.meta_waba_id as string | null) ?? null;
+  }
+
+  const payload = buildCapiPayload({ ...input, pageId, whatsappBusinessAccountId });
   const fetchFn = opts.fetchImpl ?? fetch;
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(creds.datasetId)}/events?access_token=${encodeURIComponent(creds.accessToken)}`;
 

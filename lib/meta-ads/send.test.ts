@@ -14,7 +14,7 @@ vi.mock("@/lib/webhooks/secrets", () => ({
 
 import { sendMetaCapiEvent } from "./send";
 
-function adminDuble() {
+function adminDuble(opts: { wabaId?: string | null } = {}) {
   return {
     from(tabela: string) {
       if (tabela === "tenant_meta_ads_credentials") {
@@ -28,6 +28,20 @@ function adminDuble() {
             }),
           }),
         };
+      }
+      if (tabela === "channel_sessions") {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          is: () => chain,
+          not: () => chain,
+          limit: () => chain,
+          maybeSingle: async () => ({
+            data: opts.wabaId ? { meta_waba_id: opts.wabaId } : null,
+            error: null,
+          }),
+        };
+        return chain;
       }
       throw new Error(`tabela não modelada no double: ${tabela}`);
     },
@@ -72,6 +86,44 @@ describe("sendMetaCapiEvent", () => {
     // a frase que explica a causa ficava DEPOIS do corte de 300 chars — se
     // reaparecer aqui, a correção está de pé.
     expect(result.error).toContain("Conecte a Página ao conjunto de dados");
+  });
+
+  it("⭐ resolve whatsapp_business_account_id de channel_sessions (meta_cloud) e manda no payload — page_id sozinho não bastou (subcode 2804131)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ events_received: 1 }, 200));
+    await sendMetaCapiEvent(
+      adminDuble({ wabaId: "2122990258423751" }),
+      "org-1",
+      {
+        eventName: "Purchase",
+        eventId: "event-3",
+        eventTimeSeconds: 1234567890,
+        sourceMetadata: { ad_click_id: "AbCdEf123", ad_click_id_type: "ctwa_clid" },
+      },
+      { fetchImpl },
+    );
+
+    const [, options] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.data[0].user_data.whatsapp_business_account_id).toBe("2122990258423751");
+  });
+
+  it("sem meta_cloud conectado (channel_sessions vazio): envia mesmo assim, sem whatsapp_business_account_id", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ events_received: 1 }, 200));
+    await sendMetaCapiEvent(
+      adminDuble({ wabaId: null }),
+      "org-1",
+      {
+        eventName: "Purchase",
+        eventId: "event-4",
+        eventTimeSeconds: 1234567890,
+        sourceMetadata: { ad_click_id: "AbCdEf123", ad_click_id_type: "ctwa_clid" },
+      },
+      { fetchImpl },
+    );
+
+    const [, options] = fetchImpl.mock.calls[0]!;
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.data[0].user_data.whatsapp_business_account_id).toBeUndefined();
   });
 
   it("resposta ok: status sent", async () => {

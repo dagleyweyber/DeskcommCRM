@@ -35,6 +35,19 @@ export interface CapiPayloadInput {
    * assim (a Meta que recuse; melhor tentar do que não mandar nada).
    */
   pageId?: string | null;
+  /**
+   * WhatsApp Business Account ID — achado ao vivo (RevitaFio Mossoró,
+   * subcode 2804131 "nenhuma Página associada ao conjunto de dados"):
+   * `page_id` sozinho NÃO basta pra eventos de business_messaging quando o
+   * conjunto de anúncios não tem um pixel/dataset configurado explicitamente
+   * (comum em campanhas "Local da conversão: WhatsApp") — a Meta usa o WABA
+   * pra resolver a associação Página↔conjunto de dados nesse caso. Manda OS
+   * DOIS quando existirem (não é um substituto do page_id, é complementar —
+   * já tínhamos page_id certo e ainda assim falhava). `channel_sessions.
+   * meta_waba_id` já guarda isso pra quem conectou Meta Cloud API oficial —
+   * mesma fonte que preenche os templates.
+   */
+  whatsappBusinessAccountId?: string | null;
 }
 
 export interface CapiEventPayload {
@@ -47,6 +60,7 @@ export interface CapiEventPayload {
     ph?: [string];
     ctwa_clid?: string;
     page_id?: string;
+    whatsapp_business_account_id?: string;
     fbc?: string;
     fbp?: string;
   };
@@ -83,6 +97,9 @@ export function buildCapiPayload(input: CapiPayloadInput): CapiEventPayload {
     messagingChannel = "whatsapp";
     userData.ctwa_clid = ctwaClid;
     if (input.pageId) userData.page_id = input.pageId;
+    if (input.whatsappBusinessAccountId) {
+      userData.whatsapp_business_account_id = input.whatsappBusinessAccountId;
+    }
   } else if (fbc || fbp || fbclid) {
     actionSource = "website";
     // `fbclid` sozinho (sem cookie do Pixel) ainda serve de match — a Meta

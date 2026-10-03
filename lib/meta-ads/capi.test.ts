@@ -31,6 +31,26 @@ describe("buildCapiPayload", () => {
     expect(p.user_data.page_id).toBe("113751265048315");
   });
 
+  it("⭐ ctwa_clid + whatsappBusinessAccountId → user_data.whatsapp_business_account_id preenchido (page_id sozinho não bastou — subcode 2804131 achado ao vivo)", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { ad_click_id: "AbCdEf123", ad_click_id_type: "ctwa_clid" },
+      pageId: "113751265048315",
+      whatsappBusinessAccountId: "2122990258423751",
+    });
+    expect(p.user_data.page_id).toBe("113751265048315");
+    expect(p.user_data.whatsapp_business_account_id).toBe("2122990258423751");
+  });
+
+  it("whatsappBusinessAccountId presente mas SEM ctwa_clid (action_source website) não vaza pra user_data", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { fbc: "fb.1.111.222" },
+      whatsappBusinessAccountId: "2122990258423751",
+    });
+    expect(p.user_data.whatsapp_business_account_id).toBeUndefined();
+  });
+
   it("ctwa_clid sem pageId cacheado (anúncio ainda não resolvido) → user_data.page_id ausente, não quebra", () => {
     const p = buildCapiPayload({
       ...BASE,
