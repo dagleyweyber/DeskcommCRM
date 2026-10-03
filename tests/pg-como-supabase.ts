@@ -150,6 +150,20 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     return this;
   }
 
+  /**
+   * `.not(coluna, "is", valor)` — nasceu porque `sendMetaCapiEvent`
+   * (lib/meta-ads/send.ts) filtra `channel_sessions` com
+   * `.not("meta_waba_id", "is", null)` pra achar sessão com WABA
+   * preenchido (resolução do subcode 2804131), e o adaptador ESTOUROU. Só
+   * nega `is`: é o único operador que algum chamador real nega hoje —
+   * `not.eq`/`not.in` nascem quando precisarem, mesmo padrão dos vizinhos.
+   */
+  not(coluna: string, operador: "is", valor: null | boolean): this {
+    if (operador !== "is") return naoImplementado(`not com operador '${operador}'`);
+    this.filtros.push(["is not", coluna, valor]);
+    return this;
+  }
+
   order(coluna: string, opts?: { ascending?: boolean }): this {
     this.ordem = { coluna, asc: opts?.ascending !== false };
     return this;
@@ -195,6 +209,7 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
       // `IS NULL`/`IS TRUE`/`IS FALSE` não aceitam parâmetro — `IS $1` não é
       // sintaxe válida de Postgres pra este operador.
       if (op === "is") return `"${c}" is ${v === null ? "null" : v ? "true" : "false"}`;
+      if (op === "is not") return `"${c}" is not ${v === null ? "null" : v ? "true" : "false"}`;
       if (op === "in") {
         const lista = v as unknown[];
         if (lista.length === 0) return "false";

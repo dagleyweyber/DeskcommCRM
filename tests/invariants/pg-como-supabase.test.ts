@@ -79,6 +79,19 @@ beforeAll(async () => {
      on conflict do nothing`,
     [ORG],
   );
+
+  // Duas sessões `meta_cloud` — uma COM `meta_waba_id`, uma sem. É o par que
+  // prova `.not("meta_waba_id", "is", null)` de verdade: se ele fosse ignorado,
+  // as duas viriam.
+  await pool.query(
+    `insert into channel_sessions
+       (organization_id, provider, meta_phone_number_id, meta_waba_id, webhook_secret_encrypted)
+       values
+       ($1, 'meta_cloud', 'phone-com-waba', 'waba-123', public.fn_encrypt_oauth('segredo-waba')),
+       ($1, 'meta_cloud', 'phone-sem-waba', null, public.fn_encrypt_oauth('segredo-sem-waba'))
+     on conflict do nothing`,
+    [ORG],
+  );
 });
 
 afterAll(async () => {
@@ -146,6 +159,22 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
       .order("position", { ascending: true });
     const nomes = (data as Array<{ name: string }>).map((x) => x.name);
     expect(nomes).toEqual(["Zulu", "Bravo", "Alfa"]);
+  });
+
+  it("⭐ `not(coluna, \"is\", null)` nega o IS — só quem TEM o campo preenchido", async () => {
+    // Nasceu por pressão do mesmo mecanismo: `sendMetaCapiEvent`
+    // (lib/meta-ads/send.ts) filtra `channel_sessions` com
+    // `.not("meta_waba_id", "is", null)` pra achar a sessão meta_cloud com
+    // WABA resolvido, e o adaptador ESTOUROU (`.not is not a function`).
+    const { data } = await db
+      .from("channel_sessions")
+      .select("meta_phone_number_id")
+      .eq("organization_id", ORG)
+      .eq("provider", "meta_cloud")
+      .not("meta_waba_id", "is", null);
+    expect((data as Array<{ meta_phone_number_id: string }>).map((x) => x.meta_phone_number_id)).toEqual([
+      "phone-com-waba",
+    ]);
   });
 
   it("⭐ `in` casa qualquer valor da lista — e lista vazia não vira `IN ()` (erro de sintaxe)", async () => {
