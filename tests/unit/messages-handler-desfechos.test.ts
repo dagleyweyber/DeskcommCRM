@@ -240,10 +240,12 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
   // Tasks 4b–4d tem que preservá-lo (o adapter WAHA fala com o mesmo WAHA).
   it('4. com media_storage_path: sent + external_id + ack 0, pelo endpoint de mídia', async () => {
     wahaConfigured(true);
-    // `calls[0]` agora é o `check-exists` que `resolveRecipient` dispara antes
-    // de montar o chatId (achado ao vivo: nono dígito brasileiro — ver
-    // `lib/waha/send.ts`); a resposta genérica cai no formato ingênuo sem
-    // afetar este teste, e o envio de verdade é `calls[1]`.
+    // `resolveRecipient` dispara `check-exists` ANTES do envio de verdade
+    // (achado ao vivo: nono dígito brasileiro — ver `lib/waha/send.ts`), às
+    // vezes mais de uma vez (o telefone deste teste tem duas variantes de
+    // 8/9 dígitos). A resposta genérica cai no formato ingênuo sem afetar
+    // este teste; por isso a asserção ACHA a chamada de envio pelo endpoint,
+    // em vez de supor um índice fixo.
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ id: { _serialized: 'MEDIA1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -257,13 +259,14 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.external_id).toBe('MEDIA1');
     expect(msg.ack).toBe(0);
     expect(msg.error_code).toBeNull();
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`${WAHA_BASE}/api/sendImage`);
+    const chamadaDeEnvio = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/sendImage'));
+    expect(String(chamadaDeEnvio?.[0])).toBe(`${WAHA_BASE}/api/sendImage`);
   });
 
   it('5. texto puro: sent + external_id + ack 0, pelo endpoint de texto', async () => {
     wahaConfigured(true);
-    // Idem ao caso 4: `calls[0]` é o `check-exists` de `resolveRecipient`,
-    // `calls[1]` é o envio de verdade.
+    // Idem ao caso 4: uma ou mais chamadas de `check-exists` podem preceder o
+    // envio — a asserção acha a chamada de envio pelo endpoint.
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ key: { id: 'TEXT1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -273,12 +276,13 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.external_id).toBe('TEXT1');
     expect(msg.ack).toBe(0);
     expect(msg.error_code).toBeNull();
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`${WAHA_BASE}/api/sendText`);
+    const chamadaDeEnvio = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/sendText'));
+    expect(String(chamadaDeEnvio?.[0])).toBe(`${WAHA_BASE}/api/sendText`);
     // Task 7: a sessão que chega ao fio sai de `resolveSessionRef` (que escolhe a
     // COLUNA conforme o provider), não mais de um acesso direto à coluna do
     // provider legado. Sem esta linha, um resolvedor que devolva a coluna errada
     // manda `session: undefined` e a rede inteira continua verde — medido.
-    const body = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as {
+    const body = JSON.parse(String((chamadaDeEnvio?.[1] as RequestInit).body)) as {
       session: string;
     };
     expect(body.session).toBe('default');
