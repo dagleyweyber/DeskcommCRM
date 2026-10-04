@@ -368,9 +368,9 @@ export async function sendMessageHandler(
     phoneNumber: c.contacts?.phone_number,
     waIdentity: c.contacts?.wa_identity,
     waLid: c.contacts?.wa_lid,
-    // Sem sessão ainda (ramo abaixo cobre isso) é o único caso de `null` —
-    // `resolveWahaChatId` já trata como "não dá para perguntar", mesmo
-    // comportamento de antes desta checagem existir.
+    // Sem sessão ainda (ramo abaixo cobre isso) é o único caso de `null` — o
+    // adapter já trata como "não dá para confirmar o endereço de verdade",
+    // mesmo comportamento de antes desta checagem existir.
     sessionRef: c.channel_sessions ? resolveSessionRef(c.channel_sessions) : null,
   });
 
