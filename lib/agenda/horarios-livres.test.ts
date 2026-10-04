@@ -24,7 +24,11 @@ function base(over: Partial<ParametrosDeHorariosLivres> = {}): ParametrosDeHorar
     bufferBeforeMinutes: 0,
     bufferAfterMinutes: 0,
     minimumNoticeMinutes: 60,
-    bookingWindowDays: 14,
+    // 6, não 14: a partir de domingo, 6 dias alcança UMA segunda (dia 1) e
+    // para antes da segunda seguinte (dia 8) — os testes abaixo contam
+    // candidatos de uma janela só. Quem precisar de mais de uma semana
+    // sobrescreve explicitamente.
+    bookingWindowDays: 6,
     ...over,
   };
 }
@@ -121,11 +125,9 @@ describe("horariosLivres — exceções", () => {
         excecoes: [{ date: "2026-07-14", kind: "available", start_time: "14:00", end_time: "15:00" }],
       }),
     );
-    const terca = out.filter((h) => h.starts_at.startsWith("2026-07-14") === false && h.starts_at < "2026-07-15");
-    // 14:00-15:00 BRT terça = 17:00Z-18:00Z — dois candidatos de 30min.
+    // 14:00-15:00 BRT terça (dow=2, sem janela semanal nenhuma) = 17:00Z-18:00Z — dois candidatos de 30min.
     expect(out.map((h) => h.starts_at)).toContain(new Date("2026-07-14T17:00:00Z").toISOString());
     expect(out.map((h) => h.starts_at)).toContain(new Date("2026-07-14T17:30:00Z").toISOString());
-    void terca;
   });
 
   it("⭐ exceção 'unavailable' SUBTRAI da janela semanal — bloqueia um feriado", () => {
