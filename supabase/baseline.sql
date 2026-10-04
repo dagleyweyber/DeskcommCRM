@@ -14635,6 +14635,279 @@ alter table public.crm_stages
 
 notify pgrst, 'reload schema';
 
+-- ---- agenda núcleo (migration 0182) ----
+-- Espelho idempotente da migration 0182. Racional completo no arquivo da
+-- migration; aqui fica só o que o install.sh/update.sh precisa executar.
+-- Fase 1, sem Google Calendar — ver o cabeçalho da 0182 pro que ficou de
+-- fora de propósito (cliente pela agenda, toggle de colegas, locais, crons
+-- de confirmação/no-show).
+
+create table if not exists public.calendar_event_types (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  slug text not null,
+  duration_minutes integer not null default 30 check (duration_minutes > 0),
+  buffer_before_minutes integer not null default 0 check (buffer_before_minutes >= 0),
+  buffer_after_minutes integer not null default 0 check (buffer_after_minutes >= 0),
+  minimum_notice_minutes integer not null default 60 check (minimum_notice_minutes >= 0),
+  booking_window_days integer not null default 30 check (booking_window_days > 0),
+  slot_interval_minutes integer check (slot_interval_minutes is null or slot_interval_minutes > 0),
+  location_kind text not null default 'in_person'
+    check (location_kind in ('in_person', 'phone', 'video', 'other')),
+  location_detail text,
+  default_owner_user_id uuid references auth.users(id) on delete set null,
+  is_active boolean not null default true,
+  position numeric not null default 1000,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, slug)
+);
+
+create index if not exists calendar_event_types_org_ativos_idx
+  on public.calendar_event_types (organization_id)
+  where is_active;
+
+alter table public.calendar_event_types enable row level security;
+
+drop policy if exists calendar_event_types_select on public.calendar_event_types;
+create policy calendar_event_types_select on public.calendar_event_types
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+
+drop policy if exists calendar_event_types_write on public.calendar_event_types;
+create policy calendar_event_types_write on public.calendar_event_types
+  using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke all on public.calendar_event_types from anon;
+grant select, insert, update, delete on public.calendar_event_types to authenticated;
+grant all on public.calendar_event_types to service_role;
+
+drop trigger if exists trg_calendar_event_types_updated_at on public.calendar_event_types;
+create trigger trg_calendar_event_types_updated_at
+  before update on public.calendar_event_types
+  for each row execute function public.fn_set_updated_at();
+
+create table if not exists public.calendar_appointments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  event_type_id uuid references public.calendar_event_types(id) on delete set null,
+  title text not null,
+  description text,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  time_zone text not null default 'America/Sao_Paulo',
+  status text not null default 'confirmed'
+    check (status in ('pending', 'confirmed', 'cancelled', 'completed', 'no_show')),
+  owner_user_id uuid references auth.users(id) on delete set null,
+  contact_id uuid not null references public.contacts(id) on delete restrict,
+  conversation_id uuid references public.conversations(id) on delete set null,
+  location_kind text not null default 'in_person'
+    check (location_kind in ('in_person', 'phone', 'video', 'other')),
+  location_detail text,
+  notes text,
+  cancelled_at timestamptz,
+  cancellation_reason text,
+  rescheduled_from_id uuid references public.calendar_appointments(id) on delete set null,
+  created_by_kind text not null default 'user' check (created_by_kind in ('user', 'ai_agent')),
+  created_by_user_id uuid references auth.users(id) on delete set null,
+  created_by_agent_id uuid,
+  source text not null default 'manual',
+  revision integer not null default 1,
+  reminder_sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint calendar_appointments_periodo_valido check (ends_at > starts_at),
+  constraint calendar_appointments_cancelamento_consistente check (
+    (status = 'cancelled' and cancelled_at is not null and cancellation_reason is not null)
+    or (status <> 'cancelled' and cancelled_at is null)
+  )
+);
+
+create index if not exists calendar_appointments_org_periodo_idx
+  on public.calendar_appointments (organization_id, starts_at);
+
+create index if not exists calendar_appointments_contato_idx
+  on public.calendar_appointments (contact_id);
+
+create index if not exists calendar_appointments_org_vivos_idx
+  on public.calendar_appointments (organization_id, owner_user_id, starts_at)
+  where status not in ('cancelled', 'no_show');
+
+alter table public.calendar_appointments enable row level security;
+
+drop policy if exists calendar_appointments_select on public.calendar_appointments;
+create policy calendar_appointments_select on public.calendar_appointments
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+
+drop policy if exists calendar_appointments_write on public.calendar_appointments;
+create policy calendar_appointments_write on public.calendar_appointments
+  using (
+    public.fn_is_platform_admin()
+    or auth.uid() is null
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'agent')
+        and (owner_user_id = auth.uid()
+             or public.fn_role_at_least(organization_id, 'manager')))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or auth.uid() is null
+    or (organization_id in (select public.fn_user_org_ids())
+        and public.fn_role_at_least(organization_id, 'agent')
+        and (owner_user_id = auth.uid()
+             or public.fn_role_at_least(organization_id, 'manager')))
+  );
+
+revoke all on public.calendar_appointments from anon;
+grant select, insert, update, delete on public.calendar_appointments to authenticated;
+grant all on public.calendar_appointments to service_role;
+
+drop trigger if exists trg_calendar_appointments_updated_at on public.calendar_appointments;
+create trigger trg_calendar_appointments_updated_at
+  before update on public.calendar_appointments
+  for each row execute function public.fn_set_updated_at();
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'calendar_appointments'
+  ) then
+    alter publication supabase_realtime add table public.calendar_appointments;
+  end if;
+end $$;
+
+create table if not exists public.calendar_availability_exceptions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  kind text not null check (kind in ('unavailable', 'available')),
+  start_time time,
+  end_time time,
+  reason text,
+  created_at timestamptz not null default now(),
+  constraint calendar_exceptions_horario_consistente check (
+    (start_time is null and end_time is null)
+    or (start_time is not null and end_time is not null and end_time > start_time)
+  )
+);
+
+create index if not exists calendar_exceptions_org_dia_idx
+  on public.calendar_availability_exceptions (organization_id, user_id, date);
+
+alter table public.calendar_availability_exceptions enable row level security;
+
+drop policy if exists calendar_availability_exceptions_select on public.calendar_availability_exceptions;
+create policy calendar_availability_exceptions_select on public.calendar_availability_exceptions
+  for select using (
+    public.fn_is_platform_admin()
+    or organization_id in (select public.fn_user_org_ids())
+  );
+
+drop policy if exists calendar_availability_exceptions_write on public.calendar_availability_exceptions;
+create policy calendar_availability_exceptions_write on public.calendar_availability_exceptions
+  using (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+        and (user_id = auth.uid()
+             or public.fn_role_at_least(organization_id, 'manager')))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (organization_id in (select public.fn_user_org_ids())
+        and (user_id = auth.uid()
+             or public.fn_role_at_least(organization_id, 'manager')))
+  );
+
+revoke all on public.calendar_availability_exceptions from anon;
+grant select, insert, update, delete on public.calendar_availability_exceptions to authenticated;
+grant all on public.calendar_availability_exceptions to service_role;
+
+alter table public.user_organizations
+  add column if not exists calendar_color text;
+
+comment on column public.user_organizations.calendar_color is
+  'Cor da pessoa na grade da Agenda (paleta fixa de 8, ver components/agenda/paleta.ts). Nula = derivada por hash do user_id no cliente, nunca da posição na lista — pra não mudar quando alguém entra/sai da equipe.';
+
+create or replace function public.fn_limpar_vinculos_do_agendamento()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  delete from public.crm_lead_links
+   where target_kind = 'appointment'
+     and target_id = old.id;
+  return old;
+end;
+$$;
+
+revoke execute on function public.fn_limpar_vinculos_do_agendamento() from public, anon, authenticated;
+grant  execute on function public.fn_limpar_vinculos_do_agendamento() to service_role;
+
+drop trigger if exists trg_limpar_vinculos_do_agendamento on public.calendar_appointments;
+create trigger trg_limpar_vinculos_do_agendamento
+  after delete on public.calendar_appointments
+  for each row execute function public.fn_limpar_vinculos_do_agendamento();
+
+create or replace function public.fn_redigir_agenda_do_contato_anonimizado()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.calendar_appointments
+     set title       = 'Compromisso anonimizado',
+         description = null,
+         notes       = null,
+         location_detail = null
+   where organization_id = new.organization_id
+     and contact_id = new.id;
+  return new;
+end;
+$$;
+
+revoke execute on function public.fn_redigir_agenda_do_contato_anonimizado() from public, anon, authenticated;
+grant  execute on function public.fn_redigir_agenda_do_contato_anonimizado() to service_role;
+
+drop trigger if exists trg_redigir_agenda_ao_anonimizar on public.contacts;
+create trigger trg_redigir_agenda_ao_anonimizar
+  after update of is_anonymized on public.contacts
+  for each row
+  when (new.is_anonymized is true and old.is_anonymized is distinct from true)
+  execute function public.fn_redigir_agenda_do_contato_anonimizado();
+
+comment on table public.calendar_event_types is
+  'O "molde" de um tipo de compromisso (duração, buffers, janela de agendamento). Núcleo da Agenda (Fase 1, sem Google Calendar).';
+comment on table public.calendar_appointments is
+  'Compromisso marcado com um contato. Vínculo com negócio em aberto é polimórfico via crm_lead_links (target_kind=''appointment''), nunca lead_id direto — um compromisso pode existir sem negócio aberto.';
+comment on column public.calendar_appointments.revision is
+  'Concorrência otimista resolvida em TypeScript (update ... where revision = $1), não stored procedure — mesmo padrão de trava otimista já usado em lib/leads/stage-operations.ts.';
+comment on table public.calendar_availability_exceptions is
+  'Exceção pontual (feriado, plantão extra) por cima de attendant_availability.schedule — não duplica a jornada semanal, só sobrepõe um dia.';
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
