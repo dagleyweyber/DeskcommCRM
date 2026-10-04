@@ -219,7 +219,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     // cobre a chamada sem afetar o desfecho: cai no formato ingênuo de
     // qualquer jeito, e nada SAI por este canal (o que a asserção abaixo
     // confere de verdade, em vez de "fetch nunca tocado").
-    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
+    const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
@@ -369,7 +369,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     // `resolveRecipient` roda antes da assinatura do Storage e pode disparar
     // `check-exists` (uma LEITURA) — não é o que esta asserção protege. O que
     // importa é que a MÍDIA nunca saiu por `sendImage`.
-    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
+    const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
@@ -479,7 +479,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     // — o que a doutrina proíbe é ENVIAR por ele, não perguntar sua
     // existência. `numberExists:false` genérico cobre a chamada sem afetar
     // o desfecho.
-    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
+    const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
