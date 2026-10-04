@@ -273,4 +273,10 @@ export type AuditAction =
   // não passa por rota autenticada, mesma nota de Campanhas acima.
   | "automation.created"
   | "automation.activated"
-  | "automation.paused";
+  | "automation.paused"
+  // Agenda (núcleo, Fase 1 — sem Google Calendar).
+  | "calendar_event_type.created"
+  | "calendar_event_type.updated"
+  | "calendar_appointment.created"
+  | "calendar_appointment.rescheduled"
+  | "calendar_appointment.cancelled";

@@ -13,6 +13,7 @@
  *
  * Client-safe: zero import de zod, supabase ou next/headers.
  */
+import { TOOLS_AGENDA } from "./agendamento";
 import { TOOLS_ATENDIMENTO } from "./atendimento";
 import { TOOLS_COMERCIO } from "./comercio";
 import { TOOLS_EVOLUCAO } from "./evolucao";
@@ -35,6 +36,7 @@ export const TOOL_CATALOG: ReadonlyArray<McpToolCatalogEntry> = [
   ...TOOLS_COMERCIO,
   ...TOOLS_OPERACAO,
   ...TOOLS_RETENCAO,
+  ...TOOLS_AGENDA,
 ];
 
 /**
