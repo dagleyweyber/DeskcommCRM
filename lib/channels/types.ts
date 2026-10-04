@@ -61,6 +61,15 @@ export interface RecipientInput {
    * `waIdentity.startsWith("lid:")` — justo o caso que a regra protege.
    */
   waLid?: string | null | undefined;
+  /**
+   * Nome/ref da sessão no provider (`resolveSessionRef`). OPCIONAL porque só
+   * o WAHA precisa — é o que permite perguntar ao `check-exists` qual é o
+   * chatId REAL de um telefone antes de montar `@c.us` às cegas (achado ao
+   * vivo: nono dígito brasileiro causando envio para endereço que não é
+   * ninguém — ver `lib/waha/send.ts`). Sem ele, cai no formato ingênuo, que
+   * era o único comportamento antes desta checagem existir.
+   */
+  sessionRef?: string | null | undefined;
 }
 
 export interface OutboundEnvelope {
@@ -102,8 +111,16 @@ export interface OutboundEnvelope {
  */
 export interface ChannelAdapter {
   provider: ChannelProvider;
-  /** null = não há endereço possível para este contato neste canal. */
-  resolveRecipient(input: RecipientInput): string | null;
+  /**
+   * null = não há endereço possível para este contato neste canal.
+   *
+   * Assíncrono porque o WAHA pode precisar de um round trip real
+   * (`check-exists`) para resolver o chatId correto — não é mais uma
+   * tradução de formato pura para quem tem telefone sujeito ao nono dígito
+   * brasileiro. Os outros dois adapters continuam síncronos por dentro; só a
+   * assinatura do contrato mudou.
+   */
+  resolveRecipient(input: RecipientInput): Promise<string | null>;
   /**
    * O canal tem credencial para enviar? Perguntado ANTES de `send` porque
    * `{externalId: null}` colapsa "não tentei" com "tentei e a resposta não

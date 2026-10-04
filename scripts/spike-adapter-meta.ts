@@ -2,7 +2,7 @@ import { getAdapter } from "@/lib/channels";
 async function main() {
   const a = getAdapter("meta_cloud");
   console.info("isConfigured:", a.isConfigured());
-  const to = a.resolveRecipient({
+  const to = await a.resolveRecipient({
     isGroup: false, groupChatId: null, phoneNumber: "+55 31 99896-6398", waIdentity: null,
   });
   console.info("destinatario resolvido:", to);

@@ -99,14 +99,14 @@ describe("telefoneAlternativoDe", () => {
 });
 
 describe("resolveWahaChatId — o canal de uma conversa viva não muda", () => {
-  it("contato @lid QUE GANHOU TELEFONE continua recebendo por @lid", () => {
+  it("contato @lid QUE GANHOU TELEFONE continua recebendo por @lid", async () => {
     // Este é o caso que a 0122 cria e que ninguém tinha antes: até ela, contato
     // @lid nunca tinha `phone_number`. Se a ordem fosse "telefone primeiro",
     // toda conversa @lid viva mudaria de endereço no envio seguinte — e para
     // contato em modo privacidade o `@c.us` frequentemente não é endereçável.
     // O sintoma seria pior que um erro: mensagem marcada como enviada, cliente
     // sem resposta.
-    expect(
+    await expect(
       resolveWahaChatId({
         isGroup: false,
         groupChatId: null,
@@ -114,11 +114,13 @@ describe("resolveWahaChatId — o canal de uma conversa viva não muda", () => {
         waIdentity: "phone:+558183647258", // já virou phone: — a coluna é gerada
         waLid: "70192801575156",
       }),
-    ).toBe("70192801575156@lid");
+    ).resolves.toBe("70192801575156@lid");
   });
 
-  it("contato SEM lid continua indo por @c.us", () => {
-    expect(
+  // Sem `sessionRef`, `resolveCanonicalPhoneChatId` nem tenta perguntar ao
+  // WAHA — cai direto no formato ingênuo, que é o que este caso prova.
+  it("contato SEM lid continua indo por @c.us", async () => {
+    await expect(
       resolveWahaChatId({
         isGroup: false,
         groupChatId: null,
@@ -126,22 +128,22 @@ describe("resolveWahaChatId — o canal de uma conversa viva não muda", () => {
         waIdentity: "phone:+5531988887777",
         waLid: null,
       }),
-    ).toBe("5531988887777@c.us");
+    ).resolves.toBe("5531988887777@c.us");
   });
 
-  it("sem waLid, ainda cai no lid de `wa_identity` — retaguarda para quem não lê a coluna nova", () => {
-    expect(
+  it("sem waLid, ainda cai no lid de `wa_identity` — retaguarda para quem não lê a coluna nova", async () => {
+    await expect(
       resolveWahaChatId({
         isGroup: false,
         groupChatId: null,
         phoneNumber: null,
         waIdentity: "lid:70192801575156",
       }),
-    ).toBe("70192801575156@lid");
+    ).resolves.toBe("70192801575156@lid");
   });
 
-  it("grupo vence tudo", () => {
-    expect(
+  it("grupo vence tudo", async () => {
+    await expect(
       resolveWahaChatId({
         isGroup: true,
         groupChatId: "1203630@g.us",
@@ -149,6 +151,6 @@ describe("resolveWahaChatId — o canal de uma conversa viva não muda", () => {
         waIdentity: "phone:+5531988887777",
         waLid: "70192801575156",
       }),
-    ).toBe("1203630@g.us");
+    ).resolves.toBe("1203630@g.us");
   });
 });

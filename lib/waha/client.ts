@@ -205,6 +205,37 @@ export class WahaClient {
     }
   }
 
+  /**
+   * O chatId REAL de um telefone, segundo o próprio WhatsApp — não o que dá
+   * para montar às cegas com `${dígitos}@c.us`.
+   *
+   * Existe por causa do nono dígito brasileiro: achado ao vivo (Ads Pro
+   * Company) — um envio para o número de 9 dígitos saiu sem erro nenhum,
+   * ganhou um id de mensagem do WAHA, e nunca foi confirmado pelo WhatsApp
+   * (`ack` preso em 0 para sempre, nenhum webhook `message.ack` chegou)
+   * porque a conta real daquele número é indexada pelo formato de 8 dígitos
+   * — `check-exists` devolve o `chatId` CANÔNICO, que pode vir diferente do
+   * que foi perguntado.
+   *
+   * NÃO lança quando não existe ou a chamada falha: "este número não tem
+   * WhatsApp" é desfecho NORMAL (contato errado, número errado), não erro —
+   * quem chama decide o que fazer (tipicamente, cair no formato ingênuo).
+   */
+  async checkExists(session: string, phoneDigits: string): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/api/contacts/check-exists` +
+          `?session=${encodeURIComponent(session)}&phone=${encodeURIComponent(phoneDigits)}`,
+        { headers: { "X-Api-Key": this.apiKey }, signal: AbortSignal.timeout(WAHA_TIMEOUT_MS) },
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as { numberExists?: boolean; chatId?: string };
+      return body.numberExists && body.chatId ? body.chatId : null;
+    } catch {
+      return null;
+    }
+  }
+
   async sendMessage(session: string, chatId: string, text: string): Promise<unknown> {
     const res = await fetch(`${this.baseUrl}/api/sendText`, {
       method: "POST",

@@ -291,12 +291,13 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
         // Mesmo seam do handler de envio: quem sabe de que coluna sai o ref da
         // sessão, e como o telefone vira endereço, é `lib/channels/`.
         waSessionName = conv.channel_sessions ? resolveSessionRef(conv.channel_sessions) : null;
-        chatId = getAdapter(conv.channel_sessions?.provider ?? DEFAULT_CHANNEL_PROVIDER).resolveRecipient({
+        chatId = await getAdapter(conv.channel_sessions?.provider ?? DEFAULT_CHANNEL_PROVIDER).resolveRecipient({
           isGroup: conv.is_group,
           groupChatId: conv.group_chat_id,
           phoneNumber: conv.contacts?.phone_number,
           waIdentity: conv.contacts?.wa_identity,
           waLid: conv.contacts?.wa_lid,
+          sessionRef: waSessionName,
         });
       }
     }

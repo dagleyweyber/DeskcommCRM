@@ -16,7 +16,7 @@ import type { ChannelAdapter, ChannelHealth, OutboundEnvelope, RecipientInput } 
 export const wahaAdapter: ChannelAdapter = {
   provider: "waha",
 
-  resolveRecipient(input: RecipientInput): string | null {
+  async resolveRecipient(input: RecipientInput): Promise<string | null> {
     return resolveWahaChatId(input);
   },
 

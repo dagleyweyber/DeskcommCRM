@@ -62,7 +62,11 @@ function mediaPayload(env: OutboundEnvelope): Record<string, unknown> | null {
 export const metaCloudAdapter: ChannelAdapter = {
   provider: "meta_cloud",
 
-  resolveRecipient(input: RecipientInput): string | null {
+  // Síncrono por dentro: este canal endereça por E.164 em dígitos, sem
+  // ambiguidade de nono dígito para resolver — `async` é só a forma do
+  // contrato (`ChannelAdapter.resolveRecipient`), que o WAHA precisa de
+  // verdade.
+  async resolveRecipient(input: RecipientInput): Promise<string | null> {
     // Grupos: a API de grupos da Cloud é recente e não faz parte deste seam ainda.
     // Devolver null é honesto — o chamador grava `missing_phone_number` em vez de
     // montar um endereço que a Meta recusaria.

@@ -82,7 +82,9 @@ export const zernioAdapter: ChannelAdapter = {
    * (`/wa-groups`), com id próprio, e fingir que um chatId de grupo cabe aqui
    * mandaria a mensagem para o lugar errado.
    */
-  resolveRecipient(input: RecipientInput): string | null {
+  // Síncrono por dentro, como o canal oficial — `async` é só a forma do
+  // contrato (`ChannelAdapter.resolveRecipient`).
+  async resolveRecipient(input: RecipientInput): Promise<string | null> {
     if (input.isGroup) return null;
 
     const doIdentity = input.waIdentity?.startsWith("phone:")

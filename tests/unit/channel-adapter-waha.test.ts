@@ -23,28 +23,65 @@ afterEach(() => {
 });
 
 describe('adapter WAHA', () => {
-  it('resolve destinatário 1:1 por telefone', () => {
+  // Sem `sessionRef`, não há como perguntar ao `check-exists` — cai direto no
+  // formato ingênuo, mesmo comportamento de antes da checagem existir. Por
+  // isso não precisa stubar WAHA aqui: `resolveCanonicalPhoneChatId` nem
+  // chega a tentar.
+  it('sem sessionRef, resolve destinatário 1:1 por telefone no formato ingênuo', async () => {
     const a = getAdapter('waha');
-    expect(
+    await expect(
       a.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: '+5531999998888',
         waIdentity: null,
       }),
-    ).toBe('5531999998888@c.us');
+    ).resolves.toBe('5531999998888@c.us');
   });
 
-  it('resolve destinatário por lid quando não há telefone', () => {
+  // ⭐ Achado ao vivo (Ads Pro Company): telefone de 9 dígitos cuja conta real
+  // no WhatsApp é indexada pelo formato de 8 — `${dígitos}@c.us` ingênuo
+  // monta um endereço que não é ninguém, o envio "sai" e nunca é confirmado
+  // (`ack` preso em 0 para sempre). `check-exists` é quem sabe o endereço
+  // real, e precisa vencer o formato ingênuo.
+  it('⭐ com sessionRef, usa o chatId CANÔNICO que o check-exists confirma — não o formato ingênuo', async () => {
+    stubWaha({ numberExists: true, chatId: '558496321728@c.us' });
     const a = getAdapter('waha');
-    expect(
+    await expect(
+      a.resolveRecipient({
+        isGroup: false,
+        groupChatId: null,
+        phoneNumber: '+5584996321728',
+        waIdentity: null,
+        sessionRef: 'org_cc05fae4',
+      }),
+    ).resolves.toBe('558496321728@c.us');
+  });
+
+  it('com sessionRef mas check-exists não confirma ninguém, cai no formato ingênuo', async () => {
+    stubWaha({ numberExists: false });
+    const a = getAdapter('waha');
+    await expect(
+      a.resolveRecipient({
+        isGroup: false,
+        groupChatId: null,
+        phoneNumber: '+5531999998888',
+        waIdentity: null,
+        sessionRef: 'org_cc05fae4',
+      }),
+    ).resolves.toBe('5531999998888@c.us');
+  });
+
+  it('resolve destinatário por lid quando não há telefone', async () => {
+    const a = getAdapter('waha');
+    await expect(
       a.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: null,
         waIdentity: 'lid:12345',
       }),
-    ).toBe('12345@lid');
+    ).resolves.toBe('12345@lid');
   });
 
   it('resolução de adapter é fail-closed', () => {

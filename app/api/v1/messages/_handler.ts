@@ -362,12 +362,16 @@ export async function sendMessageHandler(
   // (`conversations.channel_session_id` é NOT NULL com FK ON DELETE RESTRICT),
   // e ainda assim mantido para não trocar o desfecho desse ramo defensivo.
   const adapter = getAdapter(c.channel_sessions?.provider ?? DEFAULT_CHANNEL_PROVIDER);
-  const chatId = adapter.resolveRecipient({
+  const chatId = await adapter.resolveRecipient({
     isGroup: c.is_group,
     groupChatId: c.group_chat_id,
     phoneNumber: c.contacts?.phone_number,
     waIdentity: c.contacts?.wa_identity,
     waLid: c.contacts?.wa_lid,
+    // Sem sessão ainda (ramo abaixo cobre isso) é o único caso de `null` —
+    // `resolveWahaChatId` já trata como "não dá para perguntar", mesmo
+    // comportamento de antes desta checagem existir.
+    sessionRef: c.channel_sessions ? resolveSessionRef(c.channel_sessions) : null,
   });
 
   if (c.channel_sessions?.archived_at) {

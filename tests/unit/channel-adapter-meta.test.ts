@@ -52,23 +52,23 @@ afterEach(() => {
 });
 
 describe("adapter meta_cloud — endereçamento", () => {
-  it("telefone vira E.164 em DÍGITOS, sem + e sem sufixo", () => {
+  it("telefone vira E.164 em DÍGITOS, sem + e sem sufixo", async () => {
     // `@c.us` é do outro canal. Um `+` sobrevivente vira (#131009) na Meta.
-    expect(a().resolveRecipient({
+    await expect(a().resolveRecipient({
       isGroup: false, groupChatId: null, phoneNumber: "+55 (31) 99896-6398", waIdentity: null,
-    })).toBe("5531998966398");
+    })).resolves.toBe("5531998966398");
   });
 
-  it("grupo devolve null — a API de grupos não faz parte deste seam", () => {
-    expect(a().resolveRecipient({
+  it("grupo devolve null — a API de grupos não faz parte deste seam", async () => {
+    await expect(a().resolveRecipient({
       isGroup: true, groupChatId: "123@g.us", phoneNumber: "+5531999998888", waIdentity: null,
-    })).toBeNull();
+    })).resolves.toBeNull();
   });
 
-  it("sem telefone devolve null — não há `lid` neste canal", () => {
-    expect(a().resolveRecipient({
+  it("sem telefone devolve null — não há `lid` neste canal", async () => {
+    await expect(a().resolveRecipient({
       isGroup: false, groupChatId: null, phoneNumber: null, waIdentity: "lid:12345",
-    })).toBeNull();
+    })).resolves.toBeNull();
   });
 });
 

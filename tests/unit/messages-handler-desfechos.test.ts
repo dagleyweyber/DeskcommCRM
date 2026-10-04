@@ -213,7 +213,13 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
 
   it('3. sessão fora de WORKING: fica queued com channel_session_not_working', async () => {
     wahaConfigured(true);
-    const fetchMock = vi.fn();
+    // `resolveRecipient` roda ANTES desta checagem (precisa do chatId para
+    // decidir `missing_phone_number`), e agora pode perguntar `check-exists`
+    // ao WAHA — uma LEITURA, não um envio. `numberExists:false` genérico
+    // cobre a chamada sem afetar o desfecho: cai no formato ingênuo de
+    // qualquer jeito, e nada SAI por este canal (o que a asserção abaixo
+    // confere de verdade, em vez de "fetch nunca tocado").
+    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
@@ -225,7 +231,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.status).toBe('queued');
     expect((msg.metadata as Record<string, unknown>).queued_reason).toBe('channel_session_not_working');
     expect(msg.error_code).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/sendText'))).toBe(false);
   });
 
   // Os desfechos 4 e 5 gravam a MESMA linha final. O que os separa é o efeito
@@ -234,6 +240,10 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
   // Tasks 4b–4d tem que preservá-lo (o adapter WAHA fala com o mesmo WAHA).
   it('4. com media_storage_path: sent + external_id + ack 0, pelo endpoint de mídia', async () => {
     wahaConfigured(true);
+    // `calls[0]` agora é o `check-exists` que `resolveRecipient` dispara antes
+    // de montar o chatId (achado ao vivo: nono dígito brasileiro — ver
+    // `lib/waha/send.ts`); a resposta genérica cai no formato ingênuo sem
+    // afetar este teste, e o envio de verdade é `calls[1]`.
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ id: { _serialized: 'MEDIA1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -247,11 +257,13 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.external_id).toBe('MEDIA1');
     expect(msg.ack).toBe(0);
     expect(msg.error_code).toBeNull();
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`${WAHA_BASE}/api/sendImage`);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`${WAHA_BASE}/api/sendImage`);
   });
 
   it('5. texto puro: sent + external_id + ack 0, pelo endpoint de texto', async () => {
     wahaConfigured(true);
+    // Idem ao caso 4: `calls[0]` é o `check-exists` de `resolveRecipient`,
+    // `calls[1]` é o envio de verdade.
     const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ key: { id: 'TEXT1' } }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -261,12 +273,12 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.external_id).toBe('TEXT1');
     expect(msg.ack).toBe(0);
     expect(msg.error_code).toBeNull();
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(`${WAHA_BASE}/api/sendText`);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(`${WAHA_BASE}/api/sendText`);
     // Task 7: a sessão que chega ao fio sai de `resolveSessionRef` (que escolhe a
     // COLUNA conforme o provider), não mais de um acesso direto à coluna do
     // provider legado. Sem esta linha, um resolvedor que devolva a coluna errada
     // manda `session: undefined` e a rede inteira continua verde — medido.
-    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as {
+    const body = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as {
       session: string;
     };
     expect(body.session).toBe('default');
@@ -354,7 +366,10 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
   it('6b. assinatura do Storage falha: failed/storage_sign_failed, não waha_error', async () => {
     wahaConfigured(true);
     signedUrl.mockResolvedValue({ data: null, error: { message: 'no_object' } });
-    const fetchMock = vi.fn();
+    // `resolveRecipient` roda antes da assinatura do Storage e pode disparar
+    // `check-exists` (uma LEITURA) — não é o que esta asserção protege. O que
+    // importa é que a MÍDIA nunca saiu por `sendImage`.
+    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
@@ -366,7 +381,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(msg.status).toBe('failed');
     expect(msg.error_code).toBe('storage_sign_failed');
     expect(msg.error_message).toContain('no_object');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/sendImage'))).toBe(false);
   });
 
   // A ORDEM entre os desfechos é comportamento, não detalhe: se o pre-check de
@@ -459,7 +474,12 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
    */
   it('8. canal ARQUIVADO: failed/channel_archived, nada sai pela rede', async () => {
     wahaConfigured(true);
-    const fetchMock = vi.fn();
+    // `resolveRecipient` roda antes da checagem de `archived_at` e pode
+    // disparar `check-exists` (uma LEITURA) mesmo para um canal já excluído
+    // — o que a doutrina proíbe é ENVIAR por ele, não perguntar sua
+    // existência. `numberExists:false` genérico cobre a chamada sem afetar
+    // o desfecho.
+    const fetchMock = vi.fn(async () => Response.json({ numberExists: false }));
     vi.stubGlobal('fetch', fetchMock);
 
     const msg = await sendMessageHandler(
@@ -470,7 +490,7 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
 
     expect(msg.status).toBe('failed');
     expect(msg.error_code).toBe('channel_archived');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/sendText'))).toBe(false);
   });
 
   /**

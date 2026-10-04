@@ -59,62 +59,62 @@ beforeEach(() => {
 });
 
 describe("resolveRecipient", () => {
-  it("devolve o telefone em dígitos — é o participantId da API", () => {
-    expect(
+  it("devolve o telefone em dígitos — é o participantId da API", async () => {
+    await expect(
       zernioAdapter.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: "+595 (99) 173-3685",
         waIdentity: null,
       }),
-    ).toBe("595991733685");
+    ).resolves.toBe("595991733685");
   });
 
-  it("prefere o wa_identity de telefone quando existe", () => {
-    expect(
+  it("prefere o wa_identity de telefone quando existe", async () => {
+    await expect(
       zernioAdapter.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: "000",
         waIdentity: "phone:+595991733685",
       }),
-    ).toBe("595991733685");
+    ).resolves.toBe("595991733685");
   });
 
-  it("grupo devolve null — a API de grupos é outro recurso, com id próprio", () => {
-    expect(
+  it("grupo devolve null — a API de grupos é outro recurso, com id próprio", async () => {
+    await expect(
       zernioAdapter.resolveRecipient({
         isGroup: true,
         groupChatId: "123@g.us",
         phoneNumber: null,
         waIdentity: null,
       }),
-    ).toBeNull();
+    ).resolves.toBeNull();
   });
 
-  it("sem telefone devolve o id OPACO — dizer null é afirmar que não dá para falar com quem acabou de escrever", () => {
+  it("sem telefone devolve o id OPACO — dizer null é afirmar que não dá para falar com quem acabou de escrever", async () => {
     // Medido em produção: contato do rollout novo (BSUID, sem telefone) fazia o
     // envio parar em `missing_phone_number`. Para este canal o telefone não
     // endereça nada — quem endereça é a thread.
-    expect(
+    await expect(
       zernioAdapter.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: null,
         waIdentity: "lid:PY.853283837822954",
       }),
-    ).toBe("PY.853283837822954");
+    ).resolves.toBe("PY.853283837822954");
   });
 
-  it("sem telefone E sem identidade devolve null — aí sim não há destinatário", () => {
-    expect(
+  it("sem telefone E sem identidade devolve null — aí sim não há destinatário", async () => {
+    await expect(
       zernioAdapter.resolveRecipient({
         isGroup: false,
         groupChatId: null,
         phoneNumber: null,
         waIdentity: null,
       }),
-    ).toBeNull();
+    ).resolves.toBeNull();
   });
 });
 
