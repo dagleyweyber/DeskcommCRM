@@ -25,7 +25,10 @@ export const createEventTypeSchema = z.object({
   location_detail: z.string().max(500).nullable().optional(),
   default_owner_user_id: z.string().uuid().nullable().optional(),
 });
-export type CreateEventTypeInput = z.infer<typeof createEventTypeSchema>;
+// `z.input`, não `z.infer` (que é `z.output`): os campos com `.default()`
+// devem continuar OPCIONAIS pra quem monta o objeto antes do parse — é o
+// servidor quem preenche o default, não quem chama.
+export type CreateEventTypeInput = z.input<typeof createEventTypeSchema>;
 
 export const updateEventTypeSchema = createEventTypeSchema.partial().extend({
   is_active: z.boolean().optional(),
