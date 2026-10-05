@@ -14908,6 +14908,84 @@ comment on table public.calendar_availability_exceptions is
 
 notify pgrst, 'reload schema';
 
+-- ---- eventos "fato" nascem `done`, não `pending` (migration 0183) ----
+--
+-- Achado investigando lentidão relatada pela RevitaFio Mossoró: `event_log`
+-- tinha 25.155 linhas `pending`, a mais antiga de 48 dias — quase tudo
+-- (20.071 linhas) era `message.sent`/`whatsapp.chat_id_not_recognized`, que
+-- por doutrina (issue #129, `workers/media-derive-worker.handler.ts`) são
+-- "fato" sem consumidor por design (realtime/auditoria, nunca trabalho
+-- assíncrono). `emit_event()` sempre inseria com o default `pending`, e o
+-- drain só reclama `event_type`s com handler registrado — essas linhas
+-- ficavam `pending` PARA SEMPRE, inflando o índice parcial que o drain
+-- escaneia globalmente e causando `statement timeout` nele, atrasando o
+-- processamento real de TODAS as organizações. Fix no chokepoint único de
+-- emissão (cobre TS direto e o trigger `fn_emit_message_event`, que delega
+-- via `fn_log_event`): esses 2 tipos nascem `done` — `event_log_status_check`
+-- já aceita, sem mudança de schema. Idempotente (create or replace +
+-- UPDATE filtrado por `status='pending'`, seguro reaplicar).
+create or replace function public.emit_event(
+  p_event_type text,
+  p_entity_kind text,
+  p_entity_id uuid,
+  p_payload jsonb default '{}'::jsonb,
+  p_metadata jsonb default '{}'::jsonb,
+  p_organization_id uuid default null
+) returns uuid
+  language plpgsql security definer
+  set search_path to 'public'
+as $$
+declare
+  v_org_id uuid;
+  v_event_id uuid;
+  v_status text;
+begin
+  v_org_id := p_organization_id;
+  if v_org_id is null then
+    select organization_id into v_org_id
+      from public.user_organizations
+      where user_id = auth.uid() and revoked_at is null
+      limit 1;
+  end if;
+  if v_org_id is null then
+    raise exception 'emit_event: organization_id obrigatorio';
+  end if;
+
+  if auth.uid() is not null
+     and not public.fn_is_platform_admin()
+     and not public.fn_role_at_least(v_org_id, 'viewer') then
+    raise exception 'caller_not_authorized_for_org'
+      using hint = 'emit_event: caller must be an active member of the organization';
+  end if;
+
+  v_status := case
+    when p_event_type in ('message.sent', 'whatsapp.chat_id_not_recognized') then 'done'
+    else 'pending'
+  end;
+
+  insert into public.event_log
+    (organization_id, event_type, entity_kind, entity_id, payload, metadata, status)
+  values
+    (v_org_id, p_event_type, p_entity_kind, p_entity_id,
+     coalesce(p_payload, '{}'::jsonb),
+     coalesce(p_metadata, '{}'::jsonb)
+       || jsonb_build_object('emitted_at', extract(epoch from now())),
+     v_status)
+  returning id into v_event_id;
+
+  return v_event_id;
+end $$;
+
+revoke execute on function public.emit_event(text, text, uuid, jsonb, jsonb, uuid) from public, anon;
+grant  execute on function public.emit_event(text, text, uuid, jsonb, jsonb, uuid) to authenticated, service_role;
+
+update public.event_log
+  set status = 'done', updated_at = now()
+  where status = 'pending'
+    and event_type in ('message.sent', 'whatsapp.chat_id_not_recognized');
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
