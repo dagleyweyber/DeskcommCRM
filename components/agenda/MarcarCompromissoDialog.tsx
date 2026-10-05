@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiClient } from "@/lib/api/client";
+import { useUser } from "@/hooks/auth/AuthProvider";
+import { useAttendants } from "@/hooks/team/useAttendants";
 import { useEventTypes } from "@/hooks/agenda/useEventTypes";
 import { useHorariosLivres } from "@/hooks/agenda/useHorariosLivres";
 import { useMarcarAgendamento } from "@/hooks/agenda/useAgendamentos";
@@ -36,8 +38,15 @@ interface ContatoEncontrado {
  * aquela complexidade.
  */
 export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void }) {
+  const user = useUser();
   const [aberto, setAberto] = useState(false);
   const [eventTypeId, setEventTypeId] = useState<string>("");
+  // Padrão: quem está marcando. Pode trocar — quem atende na recepção marca
+  // pra QUALQUER profissional, não só pra si. Achado ao vivo (B'laser
+  // Caruaru): sem este campo, `marcarAgendamentoHandler` recusa com
+  // `sem_dono` todo tipo sem `default_owner_user_id` configurado — e a tela
+  // de tipos ainda não coleta isso.
+  const [ownerUserId, setOwnerUserId] = useState<string>("");
   const [termoBusca, setTermoBusca] = useState("");
   const [contatos, setContatos] = useState<ContatoEncontrado[]>([]);
   const [contato, setContato] = useState<ContatoEncontrado | null>(null);
@@ -45,7 +54,11 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
   const [buscando, setBuscando] = useState(false);
 
   const { data: tipos } = useEventTypes();
-  const { data: horarios, isLoading: carregandoHorarios } = useHorariosLivres(eventTypeId || null);
+  const { data: atendentes } = useAttendants();
+  const { data: horarios, isLoading: carregandoHorarios } = useHorariosLivres(
+    eventTypeId || null,
+    ownerUserId || user.id,
+  );
   const marcar = useMarcarAgendamento();
 
   async function buscarContatos(termo: string) {
@@ -70,6 +83,7 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
 
   function reiniciar() {
     setEventTypeId("");
+    setOwnerUserId("");
     setTermoBusca("");
     setContatos([]);
     setContato(null);
@@ -79,7 +93,12 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
   async function confirmar() {
     if (!eventTypeId || !contato || !horarioEscolhido) return;
     try {
-      await marcar.mutateAsync({ event_type_id: eventTypeId, contact_id: contato.id, starts_at: horarioEscolhido });
+      await marcar.mutateAsync({
+        event_type_id: eventTypeId,
+        contact_id: contato.id,
+        starts_at: horarioEscolhido,
+        owner_user_id: ownerUserId || user.id,
+      });
       toast.success("Compromisso marcado.");
       setAberto(false);
       reiniciar();
@@ -124,6 +143,31 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
                     {t.name} ({t.duration_minutes}min)
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Dono do compromisso</Label>
+            <Select
+              value={ownerUserId || user.id}
+              onValueChange={(v) => {
+                setOwnerUserId(v);
+                setHorarioEscolhido(null);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Quem atende" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={user.id}>{user.full_name ?? user.email} (você)</SelectItem>
+                {(atendentes?.data ?? [])
+                  .filter((a) => a.user_id !== user.id)
+                  .map((a) => (
+                    <SelectItem key={a.user_id} value={a.user_id}>
+                      {a.name ?? a.email ?? "Sem nome"}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
