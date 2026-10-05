@@ -34,6 +34,7 @@ interface FormShape {
   expected_close_date: string;
   source: string;
   produtoInteresse: string;
+  contactName: string;
   phone: string;
   email: string;
   owner_user_id: string;
@@ -101,11 +102,24 @@ export function waMeLink(rawPhone: string): string {
  * registro justamente de quem o produziu — a funcionalidade que prova "sua ação
  * fica registrada" provaria isso para todo mundo menos para o autor.
  *
- * E-mail/telefone NÃO são coluna do lead — moram no `contacts` vinculado por
- * `contact_id` (DIRC: referenciar, não duplicar). Por isso viajam por uma
- * mutação separada (`useUpdateContact`/`useCreateContact`), não pelo PATCH do
- * lead. Lead sem contato ainda (`contact_id null`) cria um na hora, espelhando
- * o mesmo caminho do `NewLeadDialog`.
+ * E-mail/telefone/nome do CONTATO NÃO são coluna do lead — moram no `contacts`
+ * vinculado por `contact_id` (DIRC: referenciar, não duplicar). Por isso
+ * viajam por uma mutação separada (`useUpdateContact`/`useCreateContact`), não
+ * pelo PATCH do lead. Lead sem contato ainda (`contact_id null`) cria um na
+ * hora, espelhando o mesmo caminho do `NewLeadDialog`.
+ *
+ * Achado ao vivo (RevitaFio Mossoró): "Nome do contato" é campo NOVO,
+ * deliberadamente separado de "Título". O título é o rótulo do NEGÓCIO (pode
+ * ser "Carlos — Clínica Vida Odonto"); o nome é da PESSOA, em `contacts.display_name`
+ * — a MESMA coluna que Contatos e o cabeçalho do Inbox mostram. Sem este campo,
+ * só dava pra editar o título — a atendente mudava o título, via sucesso no
+ * card do Kanban, e o nome continuava errado (normalmente um `pushName` cru do
+ * WhatsApp, tipo "A.C🥷🇾🇪⚖️") em Contatos e no Inbox, porque são tabelas
+ * diferentes e nada sincroniza uma na outra. Sincronizar AUTOMATICAMENTE título
+ * → nome do contato seria pior: o título pode ter contexto do negócio que não é
+ * o nome da pessoa, e o contato é COMPARTILHADO entre todos os negócios dela —
+ * sobrescrever por engano corromperia o Customer 360 inteiro a partir de uma
+ * edição pensada pra um único negócio.
  *
  * Atendente só entra no `patch` quando o valor do <Select> DIFERE do dono
  * atual do lead — nunca "sempre que o form é enviado". `owner_user_id`
@@ -132,6 +146,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       expected_close_date: lead.expected_close_date ?? "",
       source: lead.source,
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
+      contactName: "",
       phone: "",
       email: "",
       owner_user_id: lead.owner_user_id ?? NO_OWNER,
@@ -147,6 +162,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       expected_close_date: lead.expected_close_date ?? "",
       source: lead.source,
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
+      contactName: "",
       phone: "",
       email: "",
       owner_user_id: lead.owner_user_id ?? NO_OWNER,
@@ -154,12 +170,13 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead.id]);
 
-  // Telefone/e-mail chegam depois, num fetch à parte (o contato é outra
-  // tabela) — por isso um efeito próprio, que só preenche os DOIS campos dele
+  // Nome/telefone/e-mail chegam depois, num fetch à parte (o contato é outra
+  // tabela) — por isso um efeito próprio, que só preenche os TRÊS campos dele
   // e não mexe no resto do form enquanto a pessoa já pode estar editando.
   useEffect(() => {
     const c = contact.data?.data;
     if (c) {
+      form.setValue("contactName", c.display_name ?? c.name ?? "");
       form.setValue("email", c.email ?? "");
       form.setValue("phone", c.phone_number ?? "");
     }
@@ -212,15 +229,23 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
     }
 
     // Contato é recurso à parte (DIRC: referenciar). Lead com contato existente
-    // tem o e-mail/telefone corrigidos nele; lead ainda sem contato ganha um
+    // tem nome/e-mail/telefone corrigidos nele; lead ainda sem contato ganha um
     // agora, do mesmo jeito que o NewLeadDialog cria na criação.
+    //
+    // `display_name`, não `name`: é a coluna que Contatos e o cabeçalho do
+    // Inbox de fato mostram (ver `app/api/v1/contacts/_handler.ts`) — gravar só
+    // em `name` deixaria o campo "certo" no banco mas invisível nas duas telas
+    // que motivaram este campo existir.
     if (lead.contact_id) {
       const current = contact.data?.data;
+      const nameChanged =
+        values.contactName.trim() !== (current?.display_name ?? current?.name ?? "");
       const emailChanged = values.email.trim() !== (current?.email ?? "");
       const phoneChanged = phoneE164 !== (current?.phone_number ?? null);
-      if (emailChanged || phoneChanged) {
+      if (nameChanged || emailChanged || phoneChanged) {
         try {
           await updateContact.mutateAsync({
+            display_name: values.contactName.trim() || undefined,
             email: values.email.trim() || undefined,
             phone_number: phoneE164 ?? undefined,
           });
@@ -228,10 +253,11 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           // erro já mostrado pelo toast do hook; não bloqueia o resto do salvamento
         }
       }
-    } else if (values.email.trim() || phoneE164) {
+    } else if (values.contactName.trim() || values.email.trim() || phoneE164) {
       try {
         const res = await createContact.mutateAsync({
           name: values.title.trim() || undefined,
+          display_name: values.contactName.trim() || values.title.trim() || undefined,
           email: values.email.trim() || undefined,
           phone_number: phoneE164 ?? undefined,
           source: values.source,
@@ -276,6 +302,15 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
           <Input
             id="title"
             {...form.register("title", { required: true, minLength: 2 })}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="contactName">Nome do contato</Label>
+          <Input
+            id="contactName"
+            placeholder="Nome da pessoa (aparece em Contatos e no Inbox)"
+            {...form.register("contactName")}
           />
         </div>
 
