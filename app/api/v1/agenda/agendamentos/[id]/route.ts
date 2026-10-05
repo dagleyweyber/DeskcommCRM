@@ -59,18 +59,21 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const authz = await requireRole("agent", { requestId, resource: "calendar_appointments" });
   if (!authz.ok) return authz.response;
 
-  let input;
-  try {
-    input = await validateRequest(cancelarAgendamentoSchema, req);
-  } catch (err) {
-    if (err instanceof ApiError) {
-      return fail(err.code, err.message, err.status, {
-        details: err.details as Record<string, unknown> | undefined,
-        requestId,
-      });
-    }
-    throw err;
+  // Query string, não corpo: `apiClient.delete` (lib/api/client.ts) não manda
+  // body em DELETE — mesmo padrão já usado por `useArquivarEtapa`
+  // (hooks/pipelines/useStages.ts, `?destino=`).
+  const { searchParams } = new URL(req.url);
+  const parsed = cancelarAgendamentoSchema.safeParse({
+    revision: Number(searchParams.get("revision")),
+    reason: searchParams.get("reason") ?? "",
+  });
+  if (!parsed.success) {
+    return fail("unprocessable_entity", "Informe revision e reason na query string.", 422, {
+      requestId,
+      details: parsed.error.flatten(),
+    });
   }
+  const input = parsed.data;
 
   try {
     const compromisso = await cancelarAgendamentoHandler(
