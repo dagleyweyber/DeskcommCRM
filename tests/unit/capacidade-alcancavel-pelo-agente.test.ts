@@ -109,6 +109,15 @@ const ESCRITA_QUE_E_TRABALHO_DE_ATENDENTE: ReadonlyArray<string> = [
   // `app/api/v1/conversation-tags` é leitura `viewer`; marcar conversa é trabalho
   // de atendente e o dano máximo é um filtro sujo, reversível na tela.
   "crm_manage_tags",
+  // `app/api/v1/agenda/agendamentos/` — POST exige `agent`. Marcar compromisso
+  // com o contato é o trabalho do dia, mesma paridade de `crm_create_lead`.
+  "crm_book_appointment",
+  // `app/api/v1/agenda/agendamentos/[id]/` — PATCH exige `agent`.
+  "crm_reschedule_appointment",
+  // `app/api/v1/agenda/agendamentos/[id]/` — DELETE exige `agent`. Cancelar é
+  // irreversível (o `risco: "critico"` do catálogo já cobra isso na tela), mas
+  // o PAPEL que a rota exige continua `agent` — mesma régua de `crm_close_demand`.
+  "crm_cancel_appointment",
 ];
 
 function alcancavelPeloAgente(requiresRole: Role): boolean {

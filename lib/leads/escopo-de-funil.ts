@@ -82,6 +82,13 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   crm_create_webhook_source: "sem_funil",
   crm_set_webhook_source_active: "sem_funil",
   crm_set_automation_rule_active: "sem_funil",
+  // Marcam/remarcam/cancelam por `contact_id`, nunca por `pipeline_id` ou
+  // `lead_id` — o vínculo com um negócio (quando existe) é resolvido por
+  // dentro do handler (`resolveActiveLeadForContact`), não recebido como
+  // argumento da ferramenta. Sem alvo de funil pra este gate escolher.
+  crm_book_appointment: "sem_funil",
+  crm_reschedule_appointment: "sem_funil",
+  crm_cancel_appointment: "sem_funil",
 };
 
 export type VereditoDoEscopo =
