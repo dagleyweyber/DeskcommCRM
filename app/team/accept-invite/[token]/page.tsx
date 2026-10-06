@@ -3,15 +3,31 @@
  *
  * Behavior matrix:
  *  - Invalid/expired token         → render error
- *  - Unauthenticated user          → render CTA → /login?next=...
+ *  - Unauthenticated user          → render CTA → /login?next=... OU /signup?invite=...,
+ *                                    com a ação CORRETA em destaque (ver nota abaixo)
  *  - Authenticated, email mismatch → render mismatch + sign-out CTA
  *  - Authenticated, email match    → form posts to Server Action which inserts
  *                                    membership and redirects to /app/inbox
+ *
+ * Nota sobre o branch "unauthenticated" (achado ao vivo — Botulaser Curitiba,
+ * 2026-10-06): as duas opções ("Fazer login" / "Ainda não tenho conta")
+ * tinham o MESMO peso visual — "Fazer login" como botão grande, a outra como
+ * linkzinho sublinhado. Quem está sendo convidado pela 1ª vez (o caso mais
+ * comum desta tela: dono de tenant novo, criado por `POST /api/v1/admin/
+ * tenants`, que NUNCA pré-cria o usuário Auth) naturalmente clica no botão
+ * grande — e cai numa tela de login vazia, sem conta pra entrar, confusa sem
+ * explicar o motivo. `accountExistsForEmail` checa (melhor esforço) se já
+ * existe conta pro e-mail do convite, e a tela destaca a ação certa — nunca
+ * esconde a outra, porque o lookup pagina só os primeiros 200 usuários
+ * (mesmo limite de `useRecoveryCode.ts`) e pode errar por falso-negativo.
  */
 import Link from "next/link";
 
+import { accountExistsForEmail } from "@/lib/auth/account-exists";
 import { verifyInviteToken } from "@/lib/auth/invite-token";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
+import { isServiceRoleConfigured } from "@/lib/audit";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { acceptInviteAction } from "@/app/actions/team/acceptInvite";
 
@@ -59,32 +75,49 @@ export default async function AcceptInvitePage({ params }: PageProps) {
 
   if (!user) {
     const next = encodeURIComponent(`/team/accept-invite/${token}`);
+    const loginHref = `/login?next=${next}`;
+    const signupHref = `/signup?invite=${encodeURIComponent(token)}`;
+
+    // Melhor esforço: já existe conta pra este e-mail? `null` (sem service
+    // role, ou erro na API) degrada pro meio-termo neutro abaixo — nunca
+    // derruba a tela.
+    const admin = isServiceRoleConfigured() ? createAdminClient() : null;
+    const accountExists = admin ? await accountExistsForEmail(admin, payload.email) : null;
+
+    // accountExists === false (achado) OU null (não sabemos — e o caso mais
+    // comum desta tela, convite de dono de tenant novo, é justamente não ter
+    // conta ainda) ⇒ "Criar conta" é a ação em destaque. Só quando SABEMOS
+    // que já existe conta é que "Fazer login" vira o botão primário.
+    const primaryIsLogin = accountExists === true;
+    const primaryHref = primaryIsLogin ? loginHref : signupHref;
+    const primaryLabel = primaryIsLogin ? "Fazer login" : "Criar conta";
+    const secondaryHref = primaryIsLogin ? signupHref : loginHref;
+    const secondaryLabel = primaryIsLogin ? "Ainda não tenho conta" : "Já tenho conta, fazer login";
+
     return (
       <Shell>
         <h1 className="text-xl font-semibold">Você foi convidado</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Para aceitar o convite como <strong>{payload.role}</strong>, faça login com o email{" "}
+          Para aceitar o convite como <strong>{payload.role}</strong>, continue com o email{" "}
           <strong>{payload.email}</strong>.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Link
-            href={`/login?next=${next}`}
+            href={primaryHref}
             className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
           >
-            Fazer login
+            {primaryLabel}
           </Link>
           {/*
             O caminho que faltava. Quem é convidado e ainda NÃO tem conta só
             tinha "Fazer login" — então criava conta pelo caminho comum, e o
             provisionamento, sem achar vínculo, abria uma empresa e o tornava
             admin dela. O token viaja no link para que a conta nova já nasça
-            amarrada a este convite.
+            amarrada a este convite. Continua presente mesmo quando não é a
+            ação em destaque — o lookup é melhor-esforço, nunca remove caminho.
           */}
-          <Link
-            href={`/signup?invite=${encodeURIComponent(token)}`}
-            className="text-sm underline underline-offset-4"
-          >
-            Ainda não tenho conta
+          <Link href={secondaryHref} className="text-sm underline underline-offset-4">
+            {secondaryLabel}
           </Link>
         </div>
       </Shell>
