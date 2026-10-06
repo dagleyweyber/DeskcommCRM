@@ -33,7 +33,29 @@
  * dia em que gritar de verdade.
  */
 
+import { getRegisteredHandlers } from "@/lib/event-log/dispatcher";
+import { ensureHandlersRegistered } from "@/lib/event-log/register-handlers";
+
 export type Saude = "ok" | "atencao" | "critico" | "suspenso";
+
+/**
+ * Os `event_type` que ALGUÉM de fato consome — o argumento de
+ * `fn_saude_das_clinicas()` (migration 0187).
+ *
+ * Existe porque "fila parada" só faz sentido para COMANDO (`*_requested`, que
+ * sem consumidor nunca é atendido). Evento de FATO (`message.outbound`,
+ * `lead.lost`, `channel_session.status_changed`…) fica `pending` para sempre
+ * por desenho, e contá-lo gerava alarme falso: no primeiro ciclo em produção o
+ * vigia abriu "fila parada" para 5 de 7 clínicas, com até 49 dias — nenhuma
+ * tinha trabalho atrasado.
+ *
+ * A lista vem do REGISTRO, nunca de uma cópia: handler novo entra aqui
+ * sozinho, e tipo que perde o handler sai sozinho.
+ */
+export function tiposAcionaveis(): string[] {
+  ensureHandlersRegistered();
+  return [...new Set(getRegisteredHandlers().flatMap((h) => h.events))];
+}
 
 /** Uma linha crua de `fn_saude_das_clinicas()`. */
 export interface SinaisDaClinica {

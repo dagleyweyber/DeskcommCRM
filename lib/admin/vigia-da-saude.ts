@@ -25,6 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   classificaClinica,
+  tiposAcionaveis,
   type SaudeDaClinica,
   type SinaisDaClinica,
 } from "@/lib/admin/saude-das-clinicas";
@@ -132,7 +133,9 @@ export async function vigiaSaudeDasClinicas(
 ): Promise<ResultadoDaVigia> {
   const vazio: ResultadoDaVigia = { clinicas_verificadas: 0, abrir: [], resolver: [] };
 
-  const { data: linhas, error: erroRpc } = await admin.rpc("fn_saude_das_clinicas" as never);
+  const { data: linhas, error: erroRpc } = await admin.rpc("fn_saude_das_clinicas" as never, {
+    p_tipos_acionaveis: tiposAcionaveis(),
+  } as never);
   if (erroRpc) {
     logger.error("[vigia-da-saude] fn_saude_das_clinicas falhou", { error: erroRpc.message });
     return vazio;

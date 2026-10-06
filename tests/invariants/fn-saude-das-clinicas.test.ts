@@ -30,13 +30,16 @@ interface LinhaDeSaude {
   agentes_publicados: number;
   credenciais_ia_ativas: number;
   mensagens_falhas_24h: number;
+  fila_pendente_desde: string | null;
   eventos_mortos_7d: number;
   avisos_abertos: number;
 }
 
-function chamaFuncao(): LinhaDeSaude[] {
+function chamaFuncao(tiposAcionaveis: string[] = []): LinhaDeSaude[] {
+  const lista = tiposAcionaveis.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
+  const arg = lista ? `array[${lista}]::text[]` : `'{}'::text[]`;
   const out = sql(
-    `select coalesce(json_agg(t), '[]') from (select * from public.fn_saude_das_clinicas()) t;`,
+    `select coalesce(json_agg(t), '[]') from (select * from public.fn_saude_das_clinicas(${arg})) t;`,
   );
   return JSON.parse(out) as LinhaDeSaude[];
 }
@@ -95,13 +98,43 @@ describe("fn_saude_das_clinicas — painel de saúde cross-tenant (migration 018
   });
 
   it("não é executável por anon nem por authenticated (doutrina §9)", () => {
+    // `authenticated` NÃO é zelo decorativo aqui: o baseline tem
+    // `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO authenticated`,
+    // e esta função devolve dados de TODAS as organizações. Sem o revoke
+    // explícito, um usuário logado de qualquer clínica enumeraria as outras.
     const anon = sql(
-      `select has_function_privilege('anon', 'public.fn_saude_das_clinicas()', 'execute');`,
+      `select has_function_privilege('anon', 'public.fn_saude_das_clinicas(text[])', 'execute');`,
     );
     const auth = sql(
-      `select has_function_privilege('authenticated', 'public.fn_saude_das_clinicas()', 'execute');`,
+      `select has_function_privilege('authenticated', 'public.fn_saude_das_clinicas(text[])', 'execute');`,
     );
     expect(anon).toBe("f");
     expect(auth).toBe("f");
+  });
+
+  it("⭐ 'fila parada' só conta tipo ACIONÁVEL — fato pendente não é atraso (0187)", () => {
+    // O alarme falso que isto conserta foi medido em produção: o vigia abriu
+    // "fila parada" para 5 de 7 clínicas, com até 49 dias, porque contava
+    // `message.outbound`/`lead.lost` — fato, que fica `pending` por desenho.
+    sql(`
+      insert into public.event_log (organization_id, event_type, entity_kind, status)
+        values ('${ORG_VAZIA}', 'test.fato_sem_consumidor', 'test', 'pending');
+      insert into public.event_log (organization_id, event_type, entity_kind, status)
+        values ('${ORG_VAZIA}', 'test.comando_requested', 'test', 'pending');
+    `);
+
+    const semTipos = chamaFuncao([]).find((l) => l.organization_id === ORG_VAZIA);
+    const comComando = chamaFuncao(["test.comando_requested"]).find(
+      (l) => l.organization_id === ORG_VAZIA,
+    );
+    const comFato = chamaFuncao(["test.fato_sem_consumidor"]).find(
+      (l) => l.organization_id === ORG_VAZIA,
+    );
+
+    // Lista vazia: nada é acionável, logo não há fila a cobrar.
+    expect(semTipos!.fila_pendente_desde).toBeNull();
+    // O tipo declarado acionável aparece; o outro, não.
+    expect(comComando!.fila_pendente_desde).not.toBeNull();
+    expect(comFato!.fila_pendente_desde).not.toBeNull();
   });
 });

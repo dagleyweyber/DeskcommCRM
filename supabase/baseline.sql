@@ -15024,7 +15024,17 @@ create index if not exists event_log_pendente_por_tipo_idx
 -- em duas linguagens divergiria no primeiro ajuste). `left join lateral` para
 -- que organização sem canal/agente/mensagem apareça com zero em vez de sumir —
 -- a que some do painel é a que ninguém socorre. Idempotente.
-create or replace function public.fn_saude_das_clinicas()
+-- 0187: a assinatura ganhou `p_tipos_acionaveis` — "fila parada" só conta
+-- evento que ALGUÉM consome. Evento de FATO (message.outbound, lead.lost,
+-- channel_session.status_changed…) fica `pending` para sempre por desenho, e
+-- contá-lo abriu alarme falso para 5 de 7 clínicas no primeiro ciclo real.
+-- Quem sabe o que tem consumidor é o registro de handlers em TypeScript, então
+-- a lista VEM de quem chama; cópia aqui divergiria no primeiro handler novo.
+drop function if exists public.fn_saude_das_clinicas();
+
+create or replace function public.fn_saude_das_clinicas(
+  p_tipos_acionaveis text[] default '{}'
+)
 returns table (
   organization_id uuid,
   display_name text,
@@ -15089,10 +15099,12 @@ as $$
       and m.created_at > now() - interval '24 hours'
   ) msgs on true
   left join lateral (
+    -- SÓ tipo com consumidor: fato pendente não é trabalho atrasado (0187).
     select min(e.created_at) as mais_antiga
     from public.event_log e
     where e.organization_id = o.id
       and e.status = 'pending'
+      and e.event_type = any (p_tipos_acionaveis)
   ) fila on true
   left join lateral (
     select count(*) as total
@@ -15120,8 +15132,8 @@ $$;
 -- tem `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO authenticated`,
 -- e sem esta linha qualquer usuário logado de qualquer clínica chamaria esta
 -- RPC pelo PostgREST e enumeraria as outras 49.
-revoke execute on function public.fn_saude_das_clinicas() from public, anon, authenticated;
-grant  execute on function public.fn_saude_das_clinicas() to service_role;
+revoke execute on function public.fn_saude_das_clinicas(text[]) from public, anon, authenticated;
+grant  execute on function public.fn_saude_das_clinicas(text[]) to service_role;
 
 notify pgrst, 'reload schema';
 

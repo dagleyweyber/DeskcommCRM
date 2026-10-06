@@ -19,6 +19,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   classificaClinica,
   ordenaPorGravidade,
+  tiposAcionaveis,
   type SinaisDaClinica,
 } from "@/lib/admin/saude-das-clinicas";
 
@@ -35,7 +36,9 @@ export async function GET(): Promise<Response> {
   }
 
   const admin = createAdminClient();
-  const { data, error } = await admin.rpc("fn_saude_das_clinicas" as never);
+  const { data, error } = await admin.rpc("fn_saude_das_clinicas" as never, {
+    p_tipos_acionaveis: tiposAcionaveis(),
+  } as never);
 
   if (error) {
     return fail("internal_error", error.message, 500, { requestId });
