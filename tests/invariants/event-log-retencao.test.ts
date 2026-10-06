@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { pruneEventLog } from "@/lib/event-log/retention";
-import { GOV_ORG, seedGov, sql, indexExists } from "./gov-helpers";
+import { GOV_ORG, seedGov, sql, lastLine, indexExists } from "./gov-helpers";
 
 /**
  * Retenção de event_log (migration 0184) — parte 2 do incidente de
@@ -60,14 +60,22 @@ function fakeAdminClient(): SupabaseClient {
   } as unknown as SupabaseClient;
 }
 
+// `with ... select` em vez de `insert ... returning` direto: o `psql -tA`
+// imprime a tag de conclusão ("INSERT 0 1") DEPOIS da linha retornada —
+// `lastLine()` pegaria a tag, não o id. Embrulhar numa CTE + SELECT externo
+// faz o comando inteiro ser um SELECT aos olhos do psql, sem tag nenhuma —
+// mesmo motivo que `dispatcher-event-status.test.ts` usa `select emit_event(...)`
+// em vez de inserir direto.
 function seedRow(status: string, idadeDias: number, eventType = "test.retention_case"): string {
   const out = sql(`
-    insert into public.event_log (organization_id, event_type, entity_kind, status, updated_at)
-    values ('${GOV_ORG}', '${eventType}', 'test', '${status}', now() - interval '${idadeDias} days')
-    returning id;
+    with w as (
+      insert into public.event_log (organization_id, event_type, entity_kind, status, updated_at)
+      values ('${GOV_ORG}', '${eventType}', 'test', '${status}', now() - interval '${idadeDias} days')
+      returning id
+    )
+    select id from w;
   `);
-  const lines = out.split("\n");
-  return lines[lines.length - 1]!;
+  return lastLine(out);
 }
 
 function existe(id: string): boolean {
