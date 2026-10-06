@@ -14999,6 +14999,20 @@ create index if not exists event_log_retention_idx
   on public.event_log (updated_at)
   where status in ('done', 'dead');
 
+-- ---- índice de pendentes POR TIPO (migration 0185) ----
+--
+-- Suporte ao rodízio por organização nos dois drenadores de fila: ambos buscam
+-- "pendentes de certos tipos, mais antigo primeiro", SEM filtrar organização —
+-- formato que nenhum índice existente servia (`event_log_pending_idx` e
+-- `event_log_org_type_idx` têm `organization_id` como coluna líder, que estas
+-- consultas não filtram). Com o rodízio lendo uma janela 4× maior, a falta de
+-- apoio viraria IO desperdiçado — o recurso exato que o incidente de Disk IO
+-- em 100% mandou economizar. Parcial em `pending`: a menor fatia da tabela.
+-- Idempotente.
+create index if not exists event_log_pendente_por_tipo_idx
+  on public.event_log (event_type, created_at)
+  where status = 'pending';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

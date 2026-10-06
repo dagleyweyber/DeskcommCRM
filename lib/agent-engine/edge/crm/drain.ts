@@ -21,6 +21,17 @@ import { TIPOS_DERIVAVEIS, DERIVACAO_TERMINADA } from '@/lib/messaging/media/der
 
 const DRAIN_CONSUMER = 'agent-engine';
 
+/**
+ * Quantas linhas a janela lê para cada linha claimada, para alimentar o
+ * rodízio por organização abaixo.
+ *
+ * Mesma razão (e mesmo número) de `lib/event-log/rodizio.ts`: sem janela não
+ * há o que intercalar — se uma clínica em rajada ocupa as `batchSize` linhas
+ * mais antigas, o rodízio não alcança quem está atrás. 4× cobre o caso real
+ * sem transformar leitura extra em novo problema de IO.
+ */
+const JANELA_DO_RODIZIO = 4;
+
 const dispatchPayloadSchema = z
   .object({
     conversation_id: z.string().uuid(),
@@ -64,6 +75,16 @@ export async function drainTick(
     [DRAIN_CONSUMER, knobs.reapTimeoutMs],
   );
 
+  // RODÍZIO POR ORGANIZAÇÃO. Antes era `order by created_at limit N` puro: uma
+  // clínica em rajada (enxurrada de inbound depois de um anúncio) enchia a fila
+  // com os eventos MAIS ANTIGOS e consumia todo tick até esvaziar — os clientes
+  // das outras clínicas ficavam esperando a IA responder. Agora a janela lê mais
+  // fundo, o `row_number()` numera a fila DE CADA organização, e a ordenação por
+  // posição serve a primeira de cada uma antes da segunda de qualquer uma.
+  //
+  // O `for update skip locked` continua no SELECT sobre a tabela real (o nível
+  // com a função de janela não aceita lock de linha), preservando o claim
+  // concorrente entre workers.
   const { rows: events } = await pool.query<EventRow>(
     `update event_log e
      set status = 'processing', attempts = e.attempts + 1,
@@ -71,15 +92,27 @@ export async function drainTick(
          updated_at = now()
      where e.id in (
        select id from event_log
-       where event_type = 'ai_agent.dispatch_requested'
-         and status = 'pending'
-         and (next_attempt_at is null or next_attempt_at <= now())
-       order by created_at
-       limit $1
+       where id = any (
+         select id from (
+           select id, created_at,
+                  row_number() over (partition by organization_id order by created_at) as posicao
+           from (
+             select id, organization_id, created_at
+             from event_log
+             where event_type = 'ai_agent.dispatch_requested'
+               and status = 'pending'
+               and (next_attempt_at is null or next_attempt_at <= now())
+             order by created_at
+             limit $3
+           ) janela
+         ) rodizio
+         order by rodizio.posicao, rodizio.created_at
+         limit $1
+       )
        for update skip locked
      )
      returning e.id, e.organization_id, e.payload, e.attempts, e.created_at`,
-    [knobs.batchSize, DRAIN_CONSUMER],
+    [knobs.batchSize, DRAIN_CONSUMER, knobs.batchSize * JANELA_DO_RODIZIO],
   );
 
   for (const event of events) {

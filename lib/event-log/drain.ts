@@ -11,12 +11,29 @@ import {
   getRegisteredHandlers,
   type EventRow,
 } from "@/lib/event-log/dispatcher";
+import { intercalaPorOrganizacao } from "@/lib/event-log/rodizio";
 import { logger } from "@/lib/logger";
 
 // Exportado: handlers que precisam saber "esta é minha última chance antes
 // do drain marcar `dead`" (ex. lib/meta-ads/send-log.ts) importam daqui em
 // vez de duplicar o número — duplicar divergiria no primeiro ajuste.
 export const MAX_ATTEMPTS = 5;
+
+/**
+ * Quantas linhas LER para cada linha PROCESSADA, para dar material ao rodízio
+ * por organização (`lib/event-log/rodizio.ts`).
+ *
+ * Sem janela, a leitura traz exatamente `limit` linhas — e se uma clínica em
+ * rajada ocupa todas elas, não sobra o que intercalar: o rodízio não teria
+ * como ser justo com o que nunca foi lido. Com janela, a leitura alcança as
+ * organizações que estão atrás na ordem global.
+ *
+ * 4 e não 20: a leitura extra custa (foi Disk IO em 100% que originou esta
+ * entrega). 4× cobre o caso real — uma barulhenta + as demais — sem transformar
+ * a cura em uma segunda doença. O índice parcial de `pending` já serve esta
+ * consulta; a janela maior lê mais fundo no MESMO índice, não faz varredura nova.
+ */
+const JANELA_DO_RODIZIO = 4;
 
 export interface DrainSummary {
   scanned: number;
@@ -56,14 +73,22 @@ export async function drainEventLog(
     .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
     .in("event_type", handledTypes)
     .order("created_at", { ascending: true })
-    .limit(limit);
+    .limit(limit * JANELA_DO_RODIZIO);
 
   if (error) {
     logger.error("[event-log.drain] select failed", { error: error.message });
     return summary;
   }
 
-  for (const raw of rows ?? []) {
+  // RODÍZIO POR ORGANIZAÇÃO — sem isto, uma clínica em rajada ocupa o tick
+  // inteiro (os eventos dela são os mais antigos) e as demais esperam a fila
+  // dela esvaziar. Ver `lib/event-log/rodizio.ts` para o porquê completo.
+  const selecionadas = intercalaPorOrganizacao(
+    (rows ?? []) as unknown as Array<{ organization_id: string }>,
+    limit,
+  );
+
+  for (const raw of selecionadas) {
     const row = raw as unknown as EventRow;
     summary.scanned += 1;
 
