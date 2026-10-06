@@ -45,6 +45,7 @@ CRONS="
 * * * * *|25|api/v1/cron/followup-flow-worker
 * * * * *|45|api/v1/cron/event-log-drain
 */15 * * * *|45|api/v1/cron/event-log-retention
+*/15 * * * *|45|api/v1/cron/vigia-da-saude
 * * * * *|25|api/v1/cron/routing-worker
 * * * * *|25|api/v1/cron/recover-stuck-messages
 * * * * *|25|api/v1/cron/campaign-dispatch
