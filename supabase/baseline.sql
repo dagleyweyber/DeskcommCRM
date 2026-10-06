@@ -14986,6 +14986,19 @@ update public.event_log
 
 notify pgrst, 'reload schema';
 
+-- ---- índice de suporte pra retenção de event_log (migration 0184) ----
+--
+-- Prepara o terreno pro worker de retenção (`lib/event-log/retention.ts` +
+-- `api/v1/cron/event-log-retention`): sem este índice parcial, o DELETE em
+-- lote varreria a tabela inteira a cada execução — o mesmo tipo de IO
+-- desnecessário que causou o incidente que motivou esta correção (painel do
+-- Supabase em Compute/Disk IO 100%). Parcial (só `done`/`dead`) e por
+-- `updated_at` (idade desde que o status virou terminal, não desde que a
+-- linha nasceu). Idempotente.
+create index if not exists event_log_retention_idx
+  on public.event_log (updated_at)
+  where status in ('done', 'dead');
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
