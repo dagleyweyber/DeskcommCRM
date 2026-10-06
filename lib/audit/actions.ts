@@ -103,6 +103,9 @@ export type AuditAction =
   | "platform_admin.tenant_viewed"
   | "tenant.created_by_platform_admin"
   | "platform_admin.tenant_health_viewed"
+  // Painel de saúde de TODAS as clínicas (migration 0186) — leitura
+  // cross-tenant por service role, então deixa rastro como as irmãs.
+  | "platform_admin.saude_das_clinicas_viewed"
   | "platform_admin.impersonate_started"
   | "platform_admin.impersonate_ended"
   | "platform_admin.impersonate_misconfigured"

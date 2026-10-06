@@ -15013,6 +15013,114 @@ create index if not exists event_log_pendente_por_tipo_idx
   on public.event_log (event_type, created_at)
   where status = 'pending';
 
+-- ---- fn_saude_das_clinicas: saúde de TODAS as organizações (migration 0186) ----
+--
+-- Preparação para 50 clínicas. A rota por tenant (`admin/tenants/[id]/health`)
+-- gasta 4 consultas por organização — descobrir qual das 50 quebrou exigiria 50
+-- telas e 200 consultas, então na prática ninguém descobre: a clínica liga. Esta
+-- função devolve uma linha por organização numa ida só, cada agregado apoiado
+-- num índice parcial que já existe. Devolve FATO, não julgamento: os limiares
+-- moram em `lib/admin/saude-das-clinicas.ts`, testados como função pura (régua
+-- em duas linguagens divergiria no primeiro ajuste). `left join lateral` para
+-- que organização sem canal/agente/mensagem apareça com zero em vez de sumir —
+-- a que some do painel é a que ninguém socorre. Idempotente.
+create or replace function public.fn_saude_das_clinicas()
+returns table (
+  organization_id uuid,
+  display_name text,
+  slug text,
+  status text,
+  suspended_at timestamptz,
+  canais_total int,
+  canais_working int,
+  agentes_publicados int,
+  credenciais_ia_ativas int,
+  mensagens_falhas_24h int,
+  fila_pendente_desde timestamptz,
+  eventos_mortos_7d int,
+  avisos_abertos int,
+  ultima_mensagem_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    o.id,
+    o.display_name,
+    o.slug::text,
+    o.status,
+    o.suspended_at,
+    coalesce(canais.total, 0)::int,
+    coalesce(canais.working, 0)::int,
+    coalesce(agentes.publicados, 0)::int,
+    coalesce(cred.ativas, 0)::int,
+    coalesce(msgs.falhas, 0)::int,
+    fila.mais_antiga,
+    coalesce(mortos.total, 0)::int,
+    coalesce(avisos.abertos, 0)::int,
+    conv.ultima
+  from public.organizations o
+  left join lateral (
+    select count(*) as total,
+           count(*) filter (where cs.status = 'WORKING') as working
+    from public.channel_sessions cs
+    where cs.organization_id = o.id
+  ) canais on true
+  left join lateral (
+    select count(*) as publicados
+    from public.ai_agents a
+    where a.organization_id = o.id
+      and a.published_version_id is not null
+  ) agentes on true
+  left join lateral (
+    select count(*) as ativas
+    from public.ai_provider_credentials c
+    where c.organization_id = o.id
+      and c.is_active
+      and c.validated_at is not null
+  ) cred on true
+  left join lateral (
+    select count(*) as falhas
+    from public.messages m
+    where m.organization_id = o.id
+      and m.status = 'failed'
+      and m.created_at > now() - interval '24 hours'
+  ) msgs on true
+  left join lateral (
+    select min(e.created_at) as mais_antiga
+    from public.event_log e
+    where e.organization_id = o.id
+      and e.status = 'pending'
+  ) fila on true
+  left join lateral (
+    select count(*) as total
+    from public.event_log e
+    where e.organization_id = o.id
+      and e.status = 'dead'
+      and e.created_at > now() - interval '7 days'
+  ) mortos on true
+  left join lateral (
+    select count(*) as abertos
+    from public.agent_inbox_items i
+    where i.organization_id = o.id
+      and i.status = 'open'
+  ) avisos on true
+  left join lateral (
+    select max(c.last_message_at) as ultima
+    from public.conversations c
+    where c.organization_id = o.id
+  ) conv on true
+  where o.redacted_at is null
+  order by o.display_name;
+$$;
+
+revoke execute on function public.fn_saude_das_clinicas() from public, anon;
+grant  execute on function public.fn_saude_das_clinicas() to service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

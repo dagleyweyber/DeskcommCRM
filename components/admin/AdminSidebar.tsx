@@ -12,6 +12,7 @@ import {
   Users,
   ShieldCheck,
   ArrowRight,
+  Heartbeat,
 } from "@/lib/ui/icons";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,9 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin/dashboard", label: "Dashboard", icon: Gauge },
+  // Logo abaixo do Dashboard de propósito: é a tela de "quem está quebrado
+  // agora", a primeira que alguém abre ao desconfiar de problema.
+  { href: "/admin/saude", label: "Saúde das clínicas", icon: Heartbeat },
   { href: "/admin/inbox", label: "Inbox", icon: ChatsCircle },
   { href: "/admin/tenants", label: "Tenants", icon: Buildings },
   { href: "/admin/audit", label: "Audit", icon: ClipboardText },

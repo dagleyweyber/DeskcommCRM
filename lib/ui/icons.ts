@@ -38,6 +38,8 @@ export {
   Brain,
   ArrowsClockwise,
   Dot,
+  // saúde das clínicas (painel cross-tenant)
+  Heartbeat,
   // actions
   Bell,
   PaperPlaneTilt,
