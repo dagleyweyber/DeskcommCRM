@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { accountExistsForEmail } from "./account-exists";
+import { accountExistsForEmail, type AdminAuthListUsers } from "./account-exists";
 
-// SupabaseClient fake — só a fatia usada (admin.auth.admin.listUsers).
-function fakeAdmin(users: Array<{ email: string | null }>, opts?: { error?: boolean }) {
+function fakeAdmin(
+  users: Array<{ email?: string | null }>,
+  opts?: { error?: boolean },
+): AdminAuthListUsers {
   return {
     auth: {
       admin: {
         listUsers: async () =>
-          opts?.error
-            ? { data: null, error: new Error("boom") }
-            : { data: { users: users as any }, error: null },
+          opts?.error ? { data: null, error: new Error("boom") } : { data: { users }, error: null },
       },
     },
-  } as any;
+  };
 }
 
 describe("accountExistsForEmail", () => {

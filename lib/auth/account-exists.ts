@@ -14,10 +14,26 @@
  * procura. `null` = não deu pra saber (sem service role configurado, ou erro
  * na chamada) — quem chama DEGRADA pra "não sei", nunca esconde um caminho.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
+
+/**
+ * Fatia estreita do client admin — só o que esta função chama. Mesma doutrina
+ * das interfaces estreitas de `lib/followup/gatilho-etapa.ts` (`GatilhoEtapaDb`
+ * etc.): o teste monta um fake deste shape sem precisar de `any` nem do
+ * `SupabaseClient` inteiro.
+ */
+export interface AdminAuthListUsers {
+  auth: {
+    admin: {
+      listUsers(params: {
+        page: number;
+        perPage: number;
+      }): Promise<{ data: { users: Array<{ email?: string | null }> } | null; error: unknown }>;
+    };
+  };
+}
 
 export async function accountExistsForEmail(
-  admin: SupabaseClient,
+  admin: AdminAuthListUsers,
   email: string,
 ): Promise<boolean | null> {
   const target = email.trim().toLowerCase();
