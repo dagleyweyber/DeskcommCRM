@@ -134,10 +134,19 @@ as $$
   order by o.display_name;
 $$;
 
--- Doutrina de função nova em `public` (CLAUDE.md §9): as DUAS origens de
--- EXECUTE precisam ser revogadas. Só o client de service role chama isto — a
--- rota já exige platform admin antes de chegar aqui.
-revoke execute on function public.fn_saude_das_clinicas() from public, anon;
+-- Doutrina de função nova em `public` (CLAUDE.md §9): função nasce EXPOSTA e
+-- as origens de EXECUTE precisam ser revogadas uma a uma.
+--
+-- `authenticated` entra no revoke, e isto NÃO é zelo decorativo: o baseline tem
+-- `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO authenticated`, que
+-- vale para toda função criada depois dele. Sem esta linha, QUALQUER usuário
+-- logado de QUALQUER clínica poderia chamar esta RPC pelo PostgREST e enumerar
+-- nome, slug, canais e falhas das outras 49 — vazamento cross-tenant numa
+-- função que existe justamente para ser cross-tenant. Pego pelo invariante
+-- `tests/invariants/fn-saude-das-clinicas.test.ts` antes de ir para produção.
+--
+-- Só o client de service role chama isto, e a rota exige platform admin antes.
+revoke execute on function public.fn_saude_das_clinicas() from public, anon, authenticated;
 grant  execute on function public.fn_saude_das_clinicas() to service_role;
 
 notify pgrst, 'reload schema';

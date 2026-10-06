@@ -15116,7 +15116,11 @@ as $$
   order by o.display_name;
 $$;
 
-revoke execute on function public.fn_saude_das_clinicas() from public, anon;
+-- `authenticated` no revoke por necessidade, não por zelo: o próprio baseline
+-- tem `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO authenticated`,
+-- e sem esta linha qualquer usuário logado de qualquer clínica chamaria esta
+-- RPC pelo PostgREST e enumeraria as outras 49.
+revoke execute on function public.fn_saude_das_clinicas() from public, anon, authenticated;
 grant  execute on function public.fn_saude_das_clinicas() to service_role;
 
 notify pgrst, 'reload schema';
