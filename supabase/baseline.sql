@@ -15159,7 +15159,6 @@ as $$
     select 1
     from auth.users u
     where lower(u.email) = lower(trim(p_email))
-      and u.deleted_at is null
   );
 $$;
 

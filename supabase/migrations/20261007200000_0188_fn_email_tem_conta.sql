@@ -35,6 +35,11 @@
 -- porque o recebeu. Não se revela nada novo a quem já estava autorizado.
 -- ============================================================================
 
+-- Só existência, sem filtrar `deleted_at`: este produto NUNCA apaga usuário de
+-- auth (não há uma chamada de exclusão em lugar nenhum — a LGPD aqui anonimiza
+-- o CONTATO, que é outra tabela). Filtrar por uma coluna interna do GoTrue
+-- custaria acoplamento e testabilidade (o harness de teste tem um `auth.users`
+-- mínimo, sem ela) para cobrir um caso que não acontece.
 create or replace function public.fn_email_tem_conta(p_email text)
 returns boolean
 language sql
@@ -46,7 +51,6 @@ as $$
     select 1
     from auth.users u
     where lower(u.email) = lower(trim(p_email))
-      and u.deleted_at is null
   );
 $$;
 

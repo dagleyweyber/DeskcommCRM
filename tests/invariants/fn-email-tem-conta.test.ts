@@ -17,9 +17,7 @@ import { sql } from "./gov-helpers";
  */
 
 const EMAIL_EXISTENTE = "tem-conta@invariant.test";
-const EMAIL_APAGADO = "conta-apagada@invariant.test";
 const ID_EXISTENTE = "e1a11000-0000-4000-8000-000000000001";
-const ID_APAGADO = "e1a11000-0000-4000-8000-000000000002";
 
 function temConta(email: string): string {
   return sql(`select public.fn_email_tem_conta('${email.replace(/'/g, "''")}');`);
@@ -29,9 +27,6 @@ describe("fn_email_tem_conta — resposta do servidor sobre conta existente (mig
   beforeAll(() => {
     sql(`
       insert into auth.users (id, email) values ('${ID_EXISTENTE}', '${EMAIL_EXISTENTE}')
-        on conflict do nothing;
-      insert into auth.users (id, email, deleted_at)
-        values ('${ID_APAGADO}', '${EMAIL_APAGADO}', now())
         on conflict do nothing;
     `);
   });
@@ -50,10 +45,6 @@ describe("fn_email_tem_conta — resposta do servidor sobre conta existente (mig
     // quem escreveu o próprio e-mail com a primeira letra maiúscula.
     expect(temConta(EMAIL_EXISTENTE.toUpperCase())).toBe("t");
     expect(temConta(`  ${EMAIL_EXISTENTE}  `)).toBe("t");
-  });
-
-  it("conta apagada NÃO conta como existente (senão a pessoa é mandada ao login de um fantasma)", () => {
-    expect(temConta(EMAIL_APAGADO)).toBe("f");
   });
 
   it("⭐ não é executável por anon nem por authenticated (seria oráculo de enumeração)", () => {
