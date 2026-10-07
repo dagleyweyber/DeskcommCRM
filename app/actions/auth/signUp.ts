@@ -10,6 +10,8 @@ import {
   type SignupComConviteInput,
 } from "@/lib/auth/schemas";
 import { verifyInviteToken } from "@/lib/auth/invite-token";
+import { emailTemConta } from "@/lib/auth/conta-existente";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
@@ -18,7 +20,21 @@ export type SignUpResult =
   | { ok: true }
   | {
       ok: false;
-      error: "validation_error" | "rate_limited" | "signup_failed";
+      error:
+        | "validation_error"
+        | "rate_limited"
+        | "signup_failed"
+        /**
+         * Só no fluxo de CONVITE: o e-mail convidado já tem conta, então criar
+         * outra é um beco sem saída (ver `lib/auth/conta-existente.ts`). Vira
+         * um desfecho próprio para a tela poder mandar a pessoa para o login
+         * em vez de deixá-la tentando de novo.
+         *
+         * Fora do convite este desfecho NÃO existe — ali a anti-enumeração do
+         * GoTrue continua valendo, e e-mail repetido segue recebendo a mesma
+         * resposta de sucesso de sempre.
+         */
+        | "conta_existente";
       details?: Record<string, unknown>;
     };
 
@@ -78,6 +94,19 @@ export async function signUp(
     if (payload.email.trim().toLowerCase() !== parsed.data.email.trim().toLowerCase()) {
       return { ok: false, error: "validation_error", details: { invite: ["email_divergente"] } };
     }
+
+    // REDE DE SEGURANÇA. A tela do convite já manda quem tem conta para o
+    // login, mas link antigo, botão "voltar" e favorito ainda chegam aqui — e
+    // seguir em frente seria o beco sem saída permanente que originou esta
+    // correção: o GoTrue devolve sucesso ofuscado, não atualiza o usuário
+    // existente, e o `invite_token` novo se perde para sempre.
+    //
+    // Revelar "já existe conta" aqui é seguro pelo mesmo motivo da 0188: só
+    // chega a este ponto quem traz um token HMAC válido PARA ESTE e-mail.
+    if ((await emailTemConta(createAdminClient(), parsed.data.email)) === true) {
+      return { ok: false, error: "conta_existente" };
+    }
+
     convite = inviteToken;
   }
 

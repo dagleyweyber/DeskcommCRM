@@ -11,8 +11,10 @@
 import Link from "next/link";
 
 import { verifyInviteToken } from "@/lib/auth/invite-token";
+import { emailTemConta } from "@/lib/auth/conta-existente";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { acceptInviteAction } from "@/app/actions/team/acceptInvite";
 
 export const dynamic = "force-dynamic";
@@ -59,34 +61,86 @@ export default async function AcceptInvitePage({ params }: PageProps) {
 
   if (!user) {
     const next = encodeURIComponent(`/team/accept-invite/${token}`);
+    const entrar = `/login?next=${next}`;
+    const criarConta = `/signup?invite=${encodeURIComponent(token)}`;
+
+    /*
+      UMA PORTA SÓ — quem decide é o servidor, não a pessoa.
+
+      Esta tela oferecia "Fazer login" E "Ainda não tenho conta", e errar a
+      escolha prendia a pessoa PERMANENTEMENTE: o GoTrue não atualiza
+      `user_metadata` de conta que já existe, então o convite novo era
+      descartado e o token velho (expirado) era o que `/auth/confirm` lia —
+      para sempre, convite após convite. Aconteceu com a gerente da B'Laser
+      Gravatá; o cabeçalho da migration 0188 tem o rastro completo.
+
+      Ninguém que recebe um convite sabe de cor se criou conta semanas atrás.
+      O servidor sabe, então o servidor responde.
+    */
+    const temConta = await emailTemConta(createAdminClient(), payload.email);
+
     return (
       <Shell>
         <h1 className="text-xl font-semibold">Você foi convidado</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Para aceitar o convite como <strong>{payload.role}</strong>, faça login com o email{" "}
+          Entrar como <strong>{payload.role}</strong>, com o e-mail{" "}
           <strong>{payload.email}</strong>.
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Link
-            href={`/login?next=${next}`}
-            className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          >
-            Fazer login
-          </Link>
-          {/*
-            O caminho que faltava. Quem é convidado e ainda NÃO tem conta só
-            tinha "Fazer login" — então criava conta pelo caminho comum, e o
-            provisionamento, sem achar vínculo, abria uma empresa e o tornava
-            admin dela. O token viaja no link para que a conta nova já nasça
-            amarrada a este convite.
-          */}
-          <Link
-            href={`/signup?invite=${encodeURIComponent(token)}`}
-            className="text-sm underline underline-offset-4"
-          >
-            Ainda não tenho conta
-          </Link>
-        </div>
+
+        {temConta === true && (
+          <>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Você já tem uma conta com esse e-mail. Entre com sua senha para concluir.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <Link
+                href={entrar}
+                className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Entrar e aceitar
+              </Link>
+              <Link href="/login/forgot" className="text-sm underline underline-offset-4">
+                Esqueci minha senha
+              </Link>
+            </div>
+          </>
+        )}
+
+        {temConta === false && (
+          <>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Você ainda não tem conta. Crie uma senha para concluir — leva menos de um minuto.
+            </p>
+            <div className="mt-4">
+              <Link
+                href={criarConta}
+                className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                Criar conta e aceitar
+              </Link>
+            </div>
+          </>
+        )}
+
+        {/*
+          Consulta indisponível: oferecer as duas portas é o comportamento
+          ANTIGO, e é o degradê honesto — a tela diz que não sabe, em vez de
+          chutar. Chutar "não tem conta" devolveria a armadilha exatamente no
+          dia em que o banco está ruim.
+        */}
+        {temConta === null && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Link
+              href={entrar}
+              className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+            >
+              Já tenho conta — entrar
+            </Link>
+            <Link href={criarConta} className="text-sm underline underline-offset-4">
+              Criar conta
+            </Link>
+          </div>
+        )}
       </Shell>
     );
   }

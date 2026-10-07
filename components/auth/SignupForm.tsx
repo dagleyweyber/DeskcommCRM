@@ -30,6 +30,7 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [contaExistente, setContaExistente] = useState(false);
 
   const {
     register,
@@ -72,6 +73,12 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
       }
       if (res.error === "rate_limited") {
         setServerError("Muitas tentativas. Aguarde alguns minutos.");
+      } else if (res.error === "conta_existente") {
+        // Beco sem saída se a pessoa insistir aqui: o provedor de auth não
+        // atualiza conta existente, o convite novo se perde e ela volta ao
+        // começo. A saída tem que ser um LINK, não um texto pedindo que ela
+        // descubra sozinha para onde ir.
+        setContaExistente(true);
       } else if (res.error === "validation_error") {
         setServerError("Dados inválidos. Confira os campos.");
       } else {
@@ -79,6 +86,34 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
       }
     });
   };
+
+  // Conta já existe: o formulário SAI da tela. Deixá-lo ali convida a tentar
+  // de novo, e tentar de novo dá exatamente no mesmo lugar.
+  if (contaExistente) {
+    const voltarAoConvite = convite
+      ? `/login?next=${encodeURIComponent(`/team/accept-invite/${convite.token}`)}`
+      : "/login";
+    return (
+      <div className="space-y-3 rounded-md border bg-muted/40 px-4 py-6 text-center" role="status">
+        <p className="text-sm font-medium">Você já tem uma conta</p>
+        <p className="text-sm text-muted-foreground">
+          O e-mail <strong>{convite?.email}</strong> já está cadastrado. Entre com sua senha para
+          aceitar o convite — não é preciso criar outra conta.
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+          <a
+            href={voltarAoConvite}
+            className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Entrar e aceitar
+          </a>
+          <a href="/login/forgot" className="text-sm underline underline-offset-4">
+            Esqueci minha senha
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   if (sentTo) {
     return (

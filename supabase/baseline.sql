@@ -15137,6 +15137,37 @@ grant  execute on function public.fn_saude_das_clinicas(text[]) to service_role;
 
 notify pgrst, 'reload schema';
 
+-- ---- fn_email_tem_conta: a tela do convite para de fazer adivinhar (migration 0188) ----
+--
+-- Incidente real (B'Laser Gravatá): a tela do convite oferecia "Fazer login" E
+-- "Ainda não tenho conta", e quem escolhia errado ficava preso PARA SEMPRE — o
+-- GoTrue não atualiza `user_metadata` de conta existente, então o convite novo
+-- era descartado e o token velho (expirado) sobrevivia, convite após convite.
+-- O conserto é tirar a escolha: o servidor sabe se o e-mail tem conta, a pessoa
+-- não tem como saber. Só `service_role` executa — exposta a `anon`/`authenticated`
+-- viraria oráculo de enumeração; o único chamador exige token HMAC válido
+-- contendo aquele e-mail, então nada novo é revelado a quem já o tinha.
+-- Idempotente.
+create or replace function public.fn_email_tem_conta(p_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from auth.users u
+    where lower(u.email) = lower(trim(p_email))
+      and u.deleted_at is null
+  );
+$$;
+
+revoke execute on function public.fn_email_tem_conta(text) from public, anon, authenticated;
+grant  execute on function public.fn_email_tem_conta(text) to service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
