@@ -25,6 +25,7 @@ const ORG_REDIGIDA = "5a0de5a0-0000-4000-8000-000000000002";
 interface LinhaDeSaude {
   organization_id: string;
   display_name: string;
+  onboarded_at: string | null;
   canais_total: number;
   canais_working: number;
   agentes_publicados: number;
@@ -82,6 +83,19 @@ describe("fn_saude_das_clinicas — painel de saúde cross-tenant (migration 018
     expect(linha!.mensagens_falhas_24h).toBe(0);
     expect(linha!.eventos_mortos_7d).toBe(0);
     expect(linha!.avisos_abertos).toBe(0);
+    // Organização recém-criada: onboarding ainda não aconteceu. É o fato que
+    // `classificaCanal` (migration 0189) usa pra NÃO tratar esta clínica como
+    // "muda pra sempre" — ela só está começando.
+    expect(linha!.onboarded_at).toBeNull();
+  });
+
+  it("⭐ onboarded_at chega como fato cru — migration 0189 (a cegueira do vigia)", () => {
+    const marco = "2026-09-01T00:00:00.000Z";
+    sql(`update public.organizations set onboarded_at = '${marco}' where id = '${ORG_VAZIA}';`);
+
+    const linha = chamaFuncao().find((l) => l.organization_id === ORG_VAZIA);
+
+    expect(new Date(linha!.onboarded_at!).toISOString()).toBe(marco);
   });
 
   it("organização anonimizada por LGPD fica FORA (não é operação viva)", () => {

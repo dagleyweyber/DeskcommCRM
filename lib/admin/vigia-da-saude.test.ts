@@ -18,6 +18,7 @@ function sinais(over: Partial<SinaisDaClinica> = {}): SinaisDaClinica {
     slug: "clinica-a",
     status: "active",
     suspended_at: null,
+    onboarded_at: "2026-09-01T00:00:00.000Z",
     canais_total: 1,
     canais_working: 1,
     agentes_publicados: 1,

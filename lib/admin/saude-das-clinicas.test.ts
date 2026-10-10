@@ -17,6 +17,10 @@ function clinicaOk(over: Partial<SinaisDaClinica> = {}): SinaisDaClinica {
     slug: "clinica-teste",
     status: "active",
     suspended_at: null,
+    // Padrão = onboarding concluído: é o caso comum testado na maioria dos
+    // cenários (clínica operando). Testes do estado "ainda configurando"
+    // sobrescrevem para null explicitamente.
+    onboarded_at: "2026-09-01T00:00:00.000Z",
     canais_total: 1,
     canais_working: 1,
     agentes_publicados: 1,
@@ -70,10 +74,23 @@ describe("classificaClinica", () => {
     expect(r.canal.saude).toBe("atencao");
   });
 
-  it("nenhum canal cadastrado é atenção (clínica ainda não configurada), não crítico", () => {
-    const r = classificaClinica(clinicaOk({ canais_total: 0, canais_working: 0 }), AGORA);
+  it("nenhum canal cadastrado é atenção ENQUANTO ainda está configurando (onboarding em curso), não crítico", () => {
+    const r = classificaClinica(
+      clinicaOk({ canais_total: 0, canais_working: 0, onboarded_at: null }),
+      AGORA,
+    );
     expect(r.canal.saude).toBe("atencao");
     expect(r.canal.detalhe).toMatch(/Nenhum canal/);
+  });
+
+  it("⭐ nenhum canal cadastrado é CRÍTICO depois do onboarding concluído (migration 0189 — a cegueira do vigia)", () => {
+    // Sem esta distinção, uma clínica podia terminar o cadastro e ficar muda
+    // no WhatsApp pra sempre sem o vigia (item 3) jamais abrir incidente — ele
+    // só age em crítico, e "zero canal" sempre foi "atenção" até aqui.
+    const r = classificaClinica(clinicaOk({ canais_total: 0, canais_working: 0 }), AGORA);
+    expect(r.canal.saude).toBe("critico");
+    expect(r.canal.detalhe).toMatch(/Onboarding concluído/);
+    expect(r.geral).toBe("critico");
   });
 
   it("⭐ fila parada há dias é crítica e o detalhe diz em DIAS (o backlog de 48 dias)", () => {

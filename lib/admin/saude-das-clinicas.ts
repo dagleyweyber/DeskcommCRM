@@ -31,6 +31,15 @@
  * (nenhum agente publicado) não é cobrada por credencial. Painel que grita
  * sobre o que é normal ensina a ignorar o painel — e aí ele não serve para o
  * dia em que gritar de verdade.
+ *
+ * ## `onboarded_at` decide o que "zero canal" SIGNIFICA (migration 0189)
+ *
+ * Zero canal é tolerável enquanto a clínica ainda está sendo configurada —
+ * por isso "atenção", nunca "crítico", nessa janela. Mas o MESMO zero canal
+ * numa clínica que já terminou o onboarding há meses é idêntico, na prática, a
+ * "canal conectado e caiu": ninguém está recebendo mensagem. Sem essa
+ * distinção, essa clínica ficaria muda pra sempre sem o vigia (item 3) jamais
+ * abrir incidente — ele só age em crítico.
  */
 
 import { getRegisteredHandlers } from "@/lib/event-log/dispatcher";
@@ -64,6 +73,7 @@ export interface SinaisDaClinica {
   slug: string;
   status: string;
   suspended_at: string | null;
+  onboarded_at: string | null;
   canais_total: number;
   canais_working: number;
   agentes_publicados: number;
@@ -117,6 +127,12 @@ export function pior(...saudes: Saude[]): Saude {
 
 function classificaCanal(s: SinaisDaClinica): SinalClassificado {
   if (s.canais_total === 0) {
+    // Onboarding concluído e zero canal: não é "ainda configurando", é
+    // clínica ao vivo e muda. Mesma gravidade de "conectado e caiu" — ver o
+    // cabeçalho desta função (migration 0189).
+    if (s.onboarded_at !== null) {
+      return { saude: "critico", detalhe: "Onboarding concluído sem nenhum canal conectado" };
+    }
     return { saude: "atencao", detalhe: "Nenhum canal conectado" };
   }
   if (s.canais_working === 0) {
