@@ -27,11 +27,21 @@ const ALTURA_GRADE_PX = (HORA_FIM - HORA_INICIO) * ALTURA_HORA_PX;
 
 // `cancelled` nunca renderiza (filtrado antes de chegar aqui) — a chave
 // existe só pra satisfazer o Record, que cobre todo StatusDoCompromisso.
+//
+// ⚠️ `confirmed` aqui é "criado/agendado", não "cliente confirmou presença"
+// — `marcarAgendamentoHandler` grava `status: "confirmed"` na hora de
+// CRIAR o compromisso, sempre, pra todo mundo (não existe hoje nenhum sinal
+// de resposta do cliente — o lembrete automático, `lib/automations/triggers/
+// agendamento.ts`, só ENVIA, nunca lê confirmação de volta). Pintar de verde
+// por "confirmed" pintaria TODO compromisso de verde no instante em que é
+// criado, o oposto do pedido ("verde só quando o cliente confirma"). Por
+// isso o verde fica de fora daqui até esse sinal existir de verdade — ver
+// conversa com o dono do produto.
 const CLASSE_POR_STATUS: Record<StatusDoCompromisso, string> = {
-  pending: "border-amber-500/40 bg-amber-500/10 text-foreground",
-  confirmed: "border-primary/50 bg-primary/15 text-foreground",
-  completed: "border-muted-foreground/30 bg-muted text-muted-foreground",
-  no_show: "border-destructive/40 bg-destructive/10 text-foreground",
+  pending: "border-amber-500/60 bg-amber-500/25 text-foreground",
+  confirmed: "border-sky-500/60 bg-sky-500/25 text-foreground",
+  completed: "border-muted-foreground/40 bg-muted text-muted-foreground",
+  no_show: "border-destructive/60 bg-destructive/20 text-foreground",
   cancelled: "",
 };
 
@@ -149,6 +159,7 @@ export function GradeDoDia({ compromissos, atendentes }: GradeDoDiaProps) {
                 15,
                 (new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime()) / 60_000,
               );
+              const alturaPx = Math.max(Math.round(duracaoMin * PX_POR_MINUTO), 20);
               const cancelavel =
                 c.status !== "cancelled" && c.status !== "completed" && c.status !== "no_show";
 
@@ -159,14 +170,16 @@ export function GradeDoDia({ compromissos, atendentes }: GradeDoDiaProps) {
                   disabled={!cancelavel}
                   onClick={() => cancelavel && setAlvoDoCancelamento(c)}
                   className={cn(
-                    "absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-left text-xs leading-tight transition-colors",
-                    cancelavel ? "cursor-pointer hover:brightness-110" : "cursor-default",
+                    // `agenda-compromisso-caixa`: a altura base é inline (varia por
+                    // compromisso, Tailwind JIT não gera classe de valor
+                    // interpolado em runtime) — o hover que a expande vive em
+                    // globals.css com `!important`, único jeito de uma classe
+                    // vencer um `style` inline no mesmo elemento.
+                    "agenda-compromisso-caixa absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-left text-xs leading-tight shadow-sm",
+                    cancelavel ? "cursor-pointer" : "cursor-default",
                     CLASSE_POR_STATUS[c.status],
                   )}
-                  style={{
-                    top: inicio * PX_POR_MINUTO,
-                    height: Math.max(duracaoMin * PX_POR_MINUTO, 20),
-                  }}
+                  style={{ top: inicio * PX_POR_MINUTO, height: alturaPx }}
                 >
                   <span className="font-medium">
                     {new Date(c.starts_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
@@ -174,7 +187,10 @@ export function GradeDoDia({ compromissos, atendentes }: GradeDoDiaProps) {
                     {c.contacts?.display_name ?? c.contacts?.phone_number ?? "Sem contato"}
                   </span>
                   <br />
-                  <span className="opacity-80">{c.title}</span>
+                  {/* Tipo de compromisso em vez do `title` cru: o default de
+                      `marcarAgendamentoHandler` ("Compromisso com Fulano") só
+                      repetia o nome já mostrado acima sem dizer do QUE se trata. */}
+                  <span className="opacity-80">{c.calendar_event_types?.name ?? c.title}</span>
                 </button>
               );
             })}

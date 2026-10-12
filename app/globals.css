@@ -315,6 +315,18 @@
     background-clip: padding-box;
     border: 2px solid transparent;
   }
+
+  /* Grade da Agenda (components/agenda/GradeDoDia.tsx): a caixa de um
+     compromisso tem altura INLINE (varia por duração, Tailwind JIT não gera
+     classe de valor que só existe em runtime) — o hover que expande pra
+     mostrar o texto cortado só consegue vencer esse `style` com
+     `!important`; é o único lugar deste arquivo que usa, de propósito. */
+  .agenda-compromisso-caixa:hover {
+    height: auto !important;
+    z-index: 20;
+    overflow: visible;
+    box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.25), 0 8px 10px -6px rgb(0 0 0 / 0.2);
+  }
 }
 
 /* ---- Pulso de chegada no card do Kanban (CRM Vivo, Wave 3) --------------

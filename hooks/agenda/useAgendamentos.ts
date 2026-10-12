@@ -7,6 +7,7 @@ import type { AlterarAgendamentoInput, MarcarAgendamentoInput } from "@/lib/sche
 
 export interface CompromissoDaLista extends Compromisso {
   contacts: { display_name: string | null; phone_number: string | null } | null;
+  calendar_event_types: { name: string } | null;
 }
 
 const chave = (de: string, ate: string) => ["agenda", "agendamentos", de, ate] as const;
