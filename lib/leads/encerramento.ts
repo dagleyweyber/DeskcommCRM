@@ -35,6 +35,8 @@ export interface EncerraDemandaInput {
   desfecho: DesfechoDaDemanda;
   /** OBRIGATÓRIO em `lost` (P-03): perder sem motivo não ensina nada a ninguém. */
   motivo?: string | null;
+  /** OBRIGATÓRIO em `won` (migration 0191): ganhar sem valor não serve de faturamento a ninguém. */
+  valueCents?: number | null;
 }
 
 export interface DemandaEncerrada {
@@ -99,6 +101,19 @@ export async function encerraDemanda(
     throw new ApiError(404, "not_found", undefined, ctx.requestId, "Lead não encontrado.");
   }
 
+  if (input.desfecho === "won") {
+    const valorFinal = input.valueCents ?? (lead as { value_cents: number | null }).value_cents;
+    if (!valorFinal || valorFinal <= 0) {
+      throw new ApiError(
+        422,
+        "validation_failed",
+        undefined,
+        ctx.requestId,
+        "Informe o valor da venda.",
+      );
+    }
+  }
+
   if ((lead as { status: string }).status === input.desfecho) {
     return { lead: lead as Record<string, unknown>, jaEstava: true };
   }
@@ -133,6 +148,7 @@ export async function encerraDemanda(
     updated_at: new Date().toISOString(),
   };
   if (input.desfecho === "lost") patch.lost_reason = input.motivo;
+  if (input.desfecho === "won" && input.valueCents != null) patch.value_cents = input.valueCents;
 
   let { error: updErr } = await supabase
     .from("crm_leads")

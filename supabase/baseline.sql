@@ -15278,6 +15278,85 @@ grant  execute on function public.fn_saude_das_clinicas(text[]) to service_role;
 
 notify pgrst, 'reload schema';
 
+-- ---- funil padrão genérico no onboarding (migration 0190) ----
+-- `fn_seed_default_pipeline_for_org` nasceu no pg_dump original (migration
+-- 0003) semeando um funil de e-commerce ("Pedidos") pra TODA organização
+-- nova. Troca pelo funil genérico de vendas (Novo → Contato Realizado →
+-- Avaliação Agendada → Avaliação Realizada → Negociação → Fechou/Ganho →
+-- Perdido, pipeline "Padrão"). Não retroage em organização já existente — só
+-- vale pra quem nasce daqui pra frente. Entra ANTES da VARREDURA anon de
+-- propósito, mesma razão dos blocos acima: a função já existia exposta a
+-- anon/authenticated desde o dump original (gap anterior à doutrina de
+-- hardening), e o `create or replace` abaixo já sai com os dois revokes
+-- corretos — sem a varredura de novo depois, a correção não alcançaria quem
+-- atualiza.
+
+create or replace function "public"."fn_seed_default_pipeline_for_org"() returns "trigger"
+    language "plpgsql"
+    set "search_path" to 'public', 'pg_temp'
+    as $$
+declare
+  v_pipeline_id uuid;
+  v_position numeric := 1000;
+  r record;
+begin
+  insert into public.crm_pipelines (organization_id, name, slug, is_default, position, vocabulary)
+  values (
+    new.id, 'Padrão', 'padrao', true, 1000,
+    jsonb_build_object(
+      'lead', 'Lead', 'lead_plural', 'Leads',
+      'deal', 'Negócio', 'deal_plural', 'Negócios',
+      'won', 'Ganho', 'lost', 'Perdido',
+      'stage', 'Etapa', 'stage_plural', 'Etapas'
+    )
+  )
+  returning id into v_pipeline_id;
+
+  for r in
+    select * from (values
+      ('Novo',                 'novo',                 false, false),
+      ('Contato Realizado',    'contato_realizado',    false, false),
+      ('Avaliação Agendada',   'avaliacao_agendada',   false, false),
+      ('Avaliação Realizada',  'avaliacao_realizada',  false, false),
+      ('Negociação',           'negociacao',           false, false),
+      ('Fechou/Ganho',         'fechou_ganho',         true,  false),
+      ('Perdido',              'perdido',              false, true)
+    ) as t(stage_name, stage_slug, won, lost)
+  loop
+    insert into public.crm_stages (organization_id, pipeline_id, name, slug, position, is_won, is_lost)
+    values (new.id, v_pipeline_id, r.stage_name, r.stage_slug, v_position, r.won, r.lost);
+    v_position := v_position + 1000;
+  end loop;
+
+  return new;
+end$$;
+
+revoke execute on function public.fn_seed_default_pipeline_for_org() from public, anon, authenticated;
+grant execute on function public.fn_seed_default_pipeline_for_org() to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- valor obrigatório no ganho (migration 0191) ----
+-- Espelha `crm_leads_lost_reason_required`, do lado do GANHO: nenhum negócio
+-- marcado `won` pode ficar sem `value_cents` positivo. NOT VALID de
+-- propósito — existem negócios já ganhos sem valor gravado em clones
+-- antigos; inventar um número no update.sh seria pior que não ter. A regra
+-- passa a valer pra toda escrita NOVA a partir de agora; linhas antigas só
+-- precisam do valor quando forem tocadas de novo.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'crm_leads_value_cents_required_won'
+      and conrelid = 'public.crm_leads'::regclass
+  ) then
+    alter table public.crm_leads
+      add constraint crm_leads_value_cents_required_won check (
+        (status <> 'won'::text) or (value_cents is not null and value_cents > 0)
+      ) not valid;
+  end if;
+end $$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

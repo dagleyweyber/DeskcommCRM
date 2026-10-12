@@ -12,11 +12,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { CalendarPlus, ChatCircle, DotsThree, PencilSimple, UserCheck, Users } from "@/lib/ui/icons";
-import { useWinLead, useEditLead } from "@/hooks/kanban/useUpdateLead";
+import { useEditLead } from "@/hooks/kanban/useUpdateLead";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
 import { usePermission } from "@/hooks/auth/AuthProvider";
 import { LoseLeadDialog } from "./LoseLeadDialog";
+import { WinLeadDialog } from "./WinLeadDialog";
 import { MarkExistingCustomerDialog } from "./MarkExistingCustomerDialog";
 import { EditLeadDialog } from "./EditLeadDialog";
 import { ObjectionDialog } from "./ObjectionDialog";
@@ -32,13 +33,13 @@ interface KanbanCardActionsProps {
 }
 
 export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardActionsProps) {
+  const [winOpen, setWinOpen] = useState(false);
   const [loseOpen, setLoseOpen] = useState(false);
   const [existingCustomerOpen, setExistingCustomerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [objectionOpen, setObjectionOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(false);
-  const winMutation = useWinLead(pipelineId);
   const editMutation = useEditLead(pipelineId);
   // spec 13 §4: escrita no funil é agent+ — viewer não reatribui (a rota
   // PATCH também recusa; aqui é só não oferecer o que seria negado).
@@ -157,9 +158,8 @@ export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardA
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            disabled={winMutation.isPending}
             onSelect={() => {
-              winMutation.mutate({ leadId: lead.id });
+              setWinOpen(true);
             }}
           >
             Marcar como ganho
@@ -183,6 +183,12 @@ export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardA
         </DropdownMenuContent>
       </DropdownMenu>
 
+      <WinLeadDialog
+        open={winOpen}
+        onOpenChange={setWinOpen}
+        leadId={lead.id}
+        pipelineId={pipelineId}
+      />
       <LoseLeadDialog
         open={loseOpen}
         onOpenChange={setLoseOpen}

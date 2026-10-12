@@ -16,12 +16,13 @@ import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { encerraDemanda } from "@/lib/leads/encerramento";
+import { winLeadSchema, validateRequest } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const requestId = randomUUID();
@@ -33,6 +34,7 @@ export async function POST(
   if (!authz.ok) return authz.response;
 
   try {
+    const input = await validateRequest(winLeadSchema, req);
     const { lead } = await encerraDemanda(
       supabase,
       {
@@ -40,7 +42,7 @@ export async function POST(
         actor: { type: "user", id: authz.user.id },
         requestId,
       },
-      { leadId, desfecho: "won" },
+      { leadId, desfecho: "won", valueCents: input.value_cents },
     );
     return ok(lead, { requestId });
   } catch (err) {

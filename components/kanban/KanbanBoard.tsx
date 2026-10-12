@@ -14,6 +14,7 @@ import type { Pipeline, Stage } from "@/lib/kanban/types";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
 import { LoseLeadDialog } from "./LoseLeadDialog";
+import { WinLeadDialog } from "./WinLeadDialog";
 
 interface KanbanBoardProps {
   pipelineId: string;
@@ -124,9 +125,10 @@ export function KanbanBoard({
   // O dossiê é do BOARD e não da página: ele precisa do lead inteiro e do nome
   // do estágio, que só existem aqui depois do agrupamento.
   const [dossieId, setDossieId] = useState<string | null>(null);
-  // Arrastar pra um estágio de perda abre o mesmo diálogo do menu do card —
-  // ver o guard em `handleDragEnd`.
+  // Arrastar pra um estágio de perda/ganho abre o mesmo diálogo do menu do
+  // card — ver o guard em `handleDragEnd`.
   const [loseDragLeadId, setLoseDragLeadId] = useState<string | null>(null);
+  const [winDragLeadId, setWinDragLeadId] = useState<string | null>(null);
   const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
   const selectedLeadIds = useMemo(
     () => (selectedIds ? new Set(selectedIds) : internalSelected),
@@ -204,6 +206,20 @@ export function KanbanBoard({
         data.stages.find((s) => s.id === destStageId)?.is_lost
       ) {
         setLoseDragLeadId(lead.id);
+        return;
+      }
+
+      // Mesma trava do lado do GANHO (migration 0191): o banco agora EXIGE
+      // `value_cents` positivo em todo negócio `won`, e o endpoint de mover não
+      // coleta valor nenhum — sem esta trava o arrasto pro estágio `is_won`
+      // sempre falharia com 500. Abre o mesmo diálogo do menu "Marcar como
+      // ganho" em vez de mover direto.
+      if (
+        destStageId !== lead.stage_id &&
+        lead.status !== "won" &&
+        data.stages.find((s) => s.id === destStageId)?.is_won
+      ) {
+        setWinDragLeadId(lead.id);
         return;
       }
 
@@ -299,6 +315,12 @@ export function KanbanBoard({
         leadId={loseDragLeadId ?? ""}
         pipelineId={pipelineId}
         extraReasons={extraLostReasons}
+      />
+      <WinLeadDialog
+        open={winDragLeadId !== null}
+        onOpenChange={(v) => !v && setWinDragLeadId(null)}
+        leadId={winDragLeadId ?? ""}
+        pipelineId={pipelineId}
       />
     </DragDropContext>
   );

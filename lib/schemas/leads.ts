@@ -26,7 +26,10 @@ export const moveLeadSchema = z.object({
 });
 export type MoveLeadInput = z.infer<typeof moveLeadSchema>;
 
-export const winLeadSchema = z.object({}).passthrough();
+/** `value_cents` OBRIGATÓRIO (migration 0191) — ganhar sem valor não serve de faturamento a ninguém. */
+export const winLeadSchema = z.object({
+  value_cents: z.coerce.number().int().positive(),
+});
 export type WinLeadInput = z.infer<typeof winLeadSchema>;
 
 /**

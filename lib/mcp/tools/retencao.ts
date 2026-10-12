@@ -412,14 +412,17 @@ const encerrarShape = {
   outcome: z.enum(["won", "lost"]),
   /** Obrigatório em `lost`: perder sem motivo não ensina nada a ninguém. */
   reason: z.string().min(1).max(500).optional(),
+  /** Obrigatório em `won`: ganhar sem valor não serve de faturamento a ninguém. */
+  value_cents: z.number().int().positive().optional(),
 };
 
 export const crmCloseDemand: McpToolDefinition<typeof encerrarShape> = {
   name: "crm_close_demand",
   description:
     "Encerra a demanda: move a oportunidade para o estágio terminal do funil como ganha " +
-    "(outcome='won') ou perdida (outcome='lost', com reason obrigatório). É o outro lado do " +
-    "acompanhamento: demanda aberta precisa de próximo passo OU de desfecho registrado. " +
+    "(outcome='won', com value_cents obrigatório — o valor da venda, em centavos) ou perdida " +
+    "(outcome='lost', com reason obrigatório). É o outro lado do acompanhamento: demanda aberta " +
+    "precisa de próximo passo OU de desfecho registrado. " +
     "Idempotente — encerrar de novo devolve o estado atual sem alterar nada.",
   inputSchema: encerrarShape,
   category: "write",
@@ -434,7 +437,12 @@ export const crmCloseDemand: McpToolDefinition<typeof encerrarShape> = {
           actor: ctx.actor,
           requestId: ctx.requestId,
         },
-        { leadId: input.lead_id, desfecho: input.outcome, motivo: input.reason ?? null },
+        {
+          leadId: input.lead_id,
+          desfecho: input.outcome,
+          motivo: input.reason ?? null,
+          valueCents: input.value_cents ?? null,
+        },
       );
       return {
         encerrado: true,

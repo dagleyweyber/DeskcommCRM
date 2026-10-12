@@ -8,6 +8,7 @@ import type { UpdateLeadInput } from "@/lib/schemas/leads";
 
 interface WinArgs {
   leadId: string;
+  valueCents: number;
 }
 interface LoseArgs {
   leadId: string;
@@ -17,9 +18,11 @@ interface LoseArgs {
 export function useWinLead(pipelineId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ leadId }: WinArgs) => {
+    mutationFn: async ({ leadId, valueCents }: WinArgs) => {
       marcarEcoLocal(leadId);
-      return apiClient.post<{ data: Lead }>(`/api/v1/leads/${leadId}/win`, {});
+      return apiClient.post<{ data: Lead }>(`/api/v1/leads/${leadId}/win`, {
+        value_cents: valueCents,
+      });
     },
     onError: showApiError,
     onSettled: (_data, _err, { leadId }) => {
