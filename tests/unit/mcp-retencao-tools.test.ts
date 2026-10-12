@@ -611,7 +611,7 @@ describe("crm_close_demand", () => {
     };
 
     const res = (await crmCloseDemand.handler(
-      { lead_id: LEAD, outcome: "lost", reason: "sem orçamento" },
+      { lead_id: LEAD, outcome: "lost", reason: "sem orçamento", value_cents: undefined },
       ctxDe(resolver, cap),
     )) as { encerrado: boolean };
 
@@ -631,7 +631,7 @@ describe("crm_close_demand", () => {
   it("perder sem motivo é recusado como ensino, e nada é escrito", async () => {
     const cap = novasCapturas();
     const res = (await crmCloseDemand.handler(
-      { lead_id: LEAD, outcome: "lost", reason: undefined },
+      { lead_id: LEAD, outcome: "lost", reason: undefined, value_cents: undefined },
       ctxDe(() => ({ data: null, error: null }), cap),
     )) as { encerrado: boolean; motivo: string };
 
@@ -648,7 +648,7 @@ describe("crm_close_demand", () => {
     };
 
     const res = (await crmCloseDemand.handler(
-      { lead_id: LEAD, outcome: "won", reason: undefined },
+      { lead_id: LEAD, outcome: "won", reason: undefined, value_cents: 10000 },
       ctxDe(semEstagio, cap),
     )) as { encerrado: boolean; motivo: string };
 
@@ -804,7 +804,7 @@ describe("o texto que aparece na linha do tempo", () => {
       return { data: c.terminal === "list" ? [] : null, error: null };
     };
     await crmCloseDemand.handler(
-      { lead_id: LEAD, outcome: "lost", reason: "sem orçamento" },
+      { lead_id: LEAD, outcome: "lost", reason: "sem orçamento", value_cents: undefined },
       ctxDe(resolver, cap),
     );
     const reason = String(
