@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,21 @@ interface ContatoEncontrado {
   phone_number: string | null;
 }
 
+interface MarcarCompromissoDialogProps {
+  onMarcado?: () => void;
+  /**
+   * Modo "contato travado" (Kanban → Agenda, issue agenda-lead): quando o
+   * compromisso nasce de um negócio específico, o contato não é escolhido —
+   * já é o do lead. Travar em vez de pré-selecionar evita marcar pro contato
+   * errado se a busca mudar de ideia no meio do fluxo.
+   */
+  contatoFixo?: ContatoEncontrado;
+  /** Customiza o botão que abre o diálogo — default é "Marcar compromisso". */
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
 /**
  * Marca um compromisso: tipo → contato → horário livre. O horário mostrado
  * é o MESMO que `lib/agenda/consulta.ts` publica pra IA — nunca inventa.
@@ -36,10 +51,24 @@ interface ContatoEncontrado {
  * próprio e complexo (ver plano desta feature); aqui reabrir este MESMO
  * diálogo com `appointmentId` preenchido cobre o reagendamento sem herdar
  * aquela complexidade.
+ *
+ * Reaproveitado pelo Kanban (`ScheduleMeetingDialog`) via `contatoFixo` —
+ * marcar uma avaliação direto do negócio PRECISA criar o mesmo
+ * `calendar_appointments` que a tela da Agenda cria (não um registro solto
+ * na timeline), senão as duas telas contam coisas diferentes para o mesmo
+ * compromisso. Reimplementar o fluxo lá seria duas fontes da mesma regra.
  */
-export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void }) {
+export function MarcarCompromissoDialog({
+  onMarcado,
+  contatoFixo,
+  trigger,
+  open: openControlado,
+  onOpenChange: onOpenChangeControlado,
+}: MarcarCompromissoDialogProps) {
   const user = useUser();
-  const [aberto, setAberto] = useState(false);
+  const [abertoInterno, setAbertoInterno] = useState(false);
+  const aberto = openControlado ?? abertoInterno;
+  const setAberto = onOpenChangeControlado ?? setAbertoInterno;
   const [eventTypeId, setEventTypeId] = useState<string>("");
   // Padrão: quem está marcando. Pode trocar — quem atende na recepção marca
   // pra QUALQUER profissional, não só pra si. Achado ao vivo (B'laser
@@ -49,7 +78,7 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
   const [ownerUserId, setOwnerUserId] = useState<string>("");
   const [termoBusca, setTermoBusca] = useState("");
   const [contatos, setContatos] = useState<ContatoEncontrado[]>([]);
-  const [contato, setContato] = useState<ContatoEncontrado | null>(null);
+  const [contato, setContato] = useState<ContatoEncontrado | null>(contatoFixo ?? null);
   const [horarioEscolhido, setHorarioEscolhido] = useState<string | null>(null);
   const [buscando, setBuscando] = useState(false);
 
@@ -86,7 +115,7 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
     setOwnerUserId("");
     setTermoBusca("");
     setContatos([]);
-    setContato(null);
+    setContato(contatoFixo ?? null);
     setHorarioEscolhido(null);
   }
 
@@ -116,9 +145,9 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
         if (!v) reiniciar();
       }}
     >
-      <DialogTrigger asChild>
-        <Button>Marcar compromisso</Button>
-      </DialogTrigger>
+      {openControlado === undefined && (
+        <DialogTrigger asChild>{trigger ?? <Button>Marcar compromisso</Button>}</DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Marcar compromisso</DialogTitle>
@@ -177,9 +206,11 @@ export function MarcarCompromissoDialog({ onMarcado }: { onMarcado?: () => void 
             {contato ? (
               <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                 <span>{contato.display_name ?? contato.phone_number ?? "Sem nome"}</span>
-                <Button variant="ghost" size="sm" onClick={() => setContato(null)}>
-                  Trocar
-                </Button>
+                {!contatoFixo && (
+                  <Button variant="ghost" size="sm" onClick={() => setContato(null)}>
+                    Trocar
+                  </Button>
+                )}
               </div>
             ) : (
               <>

@@ -6,7 +6,6 @@ import {
   objectionSchema,
   formatLostReason,
   motivosParaExibir,
-  scheduleMeetingSchema,
   meetingOutcomeSchema,
 } from "./leads";
 
@@ -133,23 +132,6 @@ describe("objectionSchema", () => {
 
   it("rejects note acima de 500 caracteres", () => {
     const r = objectionSchema.safeParse({ reason: "price", note: "x".repeat(501) });
-    expect(r.success).toBe(false);
-  });
-});
-
-describe("scheduleMeetingSchema", () => {
-  it("aceita ISO-8601 com offset", () => {
-    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "2026-08-25T14:30:00-03:00" });
-    expect(r.success).toBe(true);
-  });
-
-  it("⭐ rejeita data sem offset — mesma exigência de outras datas da API", () => {
-    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "2026-08-25T14:30:00" });
-    expect(r.success).toBe(false);
-  });
-
-  it("rejeita string que não é data", () => {
-    const r = scheduleMeetingSchema.safeParse({ scheduled_at: "amanhã" });
     expect(r.success).toBe(false);
   });
 });

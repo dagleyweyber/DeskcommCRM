@@ -143,6 +143,8 @@ export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardA
             <ChatCircle size={14} className="mr-2" /> Registrar objeção
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={!lead.contact_id}
+            title={!lead.contact_id ? "Este negócio não tem contato vinculado" : undefined}
             onSelect={() => {
               setScheduleOpen(true);
             }}
@@ -214,12 +216,16 @@ export function KanbanCardActions({ lead, pipelineId, lostReasons }: KanbanCardA
         leadId={lead.id}
         pipelineId={pipelineId}
       />
-      <ScheduleMeetingDialog
-        open={scheduleOpen}
-        onOpenChange={setScheduleOpen}
-        leadId={lead.id}
-        pipelineId={pipelineId}
-      />
+      {lead.contact_id && (
+        <ScheduleMeetingDialog
+          open={scheduleOpen}
+          onOpenChange={setScheduleOpen}
+          leadId={lead.id}
+          pipelineId={pipelineId}
+          contactId={lead.contact_id}
+          contactLabel={lead.title}
+        />
+      )}
       <MeetingOutcomeDialog
         open={outcomeOpen}
         onOpenChange={setOutcomeOpen}
