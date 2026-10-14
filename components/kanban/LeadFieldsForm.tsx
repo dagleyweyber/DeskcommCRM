@@ -419,12 +419,22 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="expected_close_date">Fechamento previsto</Label>
+            <Label htmlFor="expected_close_date">
+              {lead.status === "won" ? "Data de conversão" : "Fechamento previsto"}
+            </Label>
             <Input
               id="expected_close_date"
               type="date"
               {...form.register("expected_close_date")}
             />
+            {/* Preenchida sozinha com a data real ao marcar como ganho
+                (`fn_crm_lead_close_on_stage`, migration 0192) — continua
+                editável pra corrigir um erro de registro. */}
+            {lead.status === "won" && (
+              <p className="text-xs text-muted-foreground">
+                Preenchida automaticamente ao fechar o negócio — pode corrigir se estiver errada.
+              </p>
+            )}
           </div>
         </div>
 
