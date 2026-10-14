@@ -180,8 +180,8 @@ beforeAll(() => {
     -- O lead vem ANTES da activity: a FK exige, e um segundo beforeAll não
     -- garantiria a ordem — garantiria só uma violação mais difícil de ler.
     insert into public.crm_leads
-      (id, organization_id, pipeline_id, stage_id, title, status, closed_at)
-    values ('${LEAD_GANHO}', '${GOV_ORG}', '${GOV_PIPELINE}', '${GOV_STAGE}', 'Ganho', 'won', '2026-03-18T10:00:00Z');
+      (id, organization_id, pipeline_id, stage_id, title, status, closed_at, value_cents)
+    values ('${LEAD_GANHO}', '${GOV_ORG}', '${GOV_PIPELINE}', '${GOV_STAGE}', 'Ganho', 'won', '2026-03-18T10:00:00Z', 10000);
 
     -- UM pedido de humano na timeline (inserir duas vezes faria a contagem virar 2).
     insert into public.crm_lead_activities

@@ -137,7 +137,7 @@ describe("ingestMetaInbound — o conserto do pos-entrada", () => {
     // bloqueia o contato — cenário de quem comprou e depois pediu pra sair.
     await ingestMetaInbound(db, evento({ from: numero, externalId: "wamid.stop1" }));
     await pool.query(
-      `update crm_leads set status = 'won', closed_at = now()
+      `update crm_leads set status = 'won', closed_at = now(), value_cents = 10000
          where contact_id = (select id from contacts where phone_number = $1)`,
       [`+${numero}`],
     );

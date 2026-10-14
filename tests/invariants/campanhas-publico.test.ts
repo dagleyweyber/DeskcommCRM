@@ -64,9 +64,17 @@ async function criarLead(
   status: "open" | "won" = "open",
 ): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `insert into crm_leads (organization_id, contact_id, pipeline_id, stage_id, title, status, closed_at)
-     values ($1, $2, $3, $4, 'lead de teste', $5, $6) returning id`,
-    [org, contactId, pipelineId, stageId, status, status === "won" ? new Date() : null],
+    `insert into crm_leads (organization_id, contact_id, pipeline_id, stage_id, title, status, closed_at, value_cents)
+     values ($1, $2, $3, $4, 'lead de teste', $5, $6, $7) returning id`,
+    [
+      org,
+      contactId,
+      pipelineId,
+      stageId,
+      status,
+      status === "won" ? new Date() : null,
+      status === "won" ? 10000 : null,
+    ],
   );
   return rows[0]!.id;
 }

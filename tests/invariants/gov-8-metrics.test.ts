@@ -79,14 +79,14 @@ beforeAll(() => {
     -- LEADS won/lost (janela = closed_at). owner A: 3 won + 1 lost in-window,
     -- + 1 won OUT-of-window (não conta). owner B: 1 won + 2 lost in-window.
     -- + opens (funil, status='open', sem closed_at): A=2 (STAGE_1), B=1 (STAGE_2).
-    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason)
-      select '${ORG}', '${PIPELINE}', '${STAGE_1}', 'A won '||g, 'won', '${AGENT_A}', '${IN}', null from generate_series(1,3) g;
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason, value_cents)
+      select '${ORG}', '${PIPELINE}', '${STAGE_1}', 'A won '||g, 'won', '${AGENT_A}', '${IN}', null, 10000 from generate_series(1,3) g;
     insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason)
       values ('${ORG}', '${PIPELINE}', '${STAGE_1}', 'A lost', 'lost', '${AGENT_A}', '${IN}', 'price');
-    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason)
-      values ('${ORG}', '${PIPELINE}', '${STAGE_1}', 'A won OLD', 'won', '${AGENT_A}', '${OLD}', null);
-    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason)
-      values ('${ORG}', '${PIPELINE}', '${STAGE_2}', 'B won', 'won', '${AGENT_B}', '${IN}', null);
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason, value_cents)
+      values ('${ORG}', '${PIPELINE}', '${STAGE_1}', 'A won OLD', 'won', '${AGENT_A}', '${OLD}', null, 10000);
+    insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason, value_cents)
+      values ('${ORG}', '${PIPELINE}', '${STAGE_2}', 'B won', 'won', '${AGENT_B}', '${IN}', null, 10000);
     insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id, closed_at, lost_reason)
       select '${ORG}', '${PIPELINE}', '${STAGE_2}', 'B lost '||g, 'lost', '${AGENT_B}', '${IN}', 'no_response' from generate_series(1,2) g;
     insert into public.crm_leads (organization_id, pipeline_id, stage_id, title, status, owner_user_id)

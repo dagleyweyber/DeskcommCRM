@@ -296,7 +296,7 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
     if (!primeira.criado) return;
 
     await pool.query(
-      "update crm_leads set status = 'won', closed_at = now() where id = $1",
+      "update crm_leads set status = 'won', closed_at = now(), value_cents = 10000 where id = $1",
       [primeira.leadId],
     );
 
@@ -332,7 +332,7 @@ describe("UM lead por DEMANDA, não um por mensagem", () => {
     if (!primeira.criado) return;
 
     await pool.query(
-      "update crm_leads set status = 'won', closed_at = now() where id = $1",
+      "update crm_leads set status = 'won', closed_at = now(), value_cents = 10000 where id = $1",
       [primeira.leadId],
     );
     await pool.query("update contacts set became_customer_at = now() where id = $1", [contato]);
