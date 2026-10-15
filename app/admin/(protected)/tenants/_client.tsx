@@ -13,7 +13,7 @@ import { useAdminTenants, type AdminTenantsFilters } from "@/hooks/useAdminTenan
 export function TenantsClient() {
   const [filters, setFilters] = useState<AdminTenantsFilters>({});
 
-  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
+  const { data, isLoading, isError, error, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useAdminTenants(filters);
 
   const rows = data?.pages.flatMap((p) => p.data ?? []) ?? [];
@@ -41,7 +41,16 @@ export function TenantsClient() {
       <TenantsFilters filters={filters} onChange={setFilters} />
 
       {/* Table */}
-      {isLoading ? (
+      {isError ? (
+        // Achado ao vivo: um erro do backend (filtro mal formado, etc.)
+        // virava "Nenhum tenant encontrado" na tela — indistinguível de uma
+        // busca que genuinamente não achou nada. Erro de busca precisa dizer
+        // que é erro, não fingir lista vazia.
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          Falha ao buscar tenants
+          {error instanceof Error ? `: ${error.message}` : "."}
+        </p>
+      ) : isLoading ? (
         <TenantsTableSkeleton />
       ) : (
         <TenantsTable

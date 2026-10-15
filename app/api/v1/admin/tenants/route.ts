@@ -113,8 +113,22 @@ export async function GET(req: NextRequest) {
   }
 
   if (q) {
+    // Achado ao vivo: busca por "Viagem" não encontrava "RevitaFio Boa
+    // Viagem", mesmo a linha existindo — a causa era `slug::text` (o cast
+    // explícito). PostgREST aceita `coluna::cast` na sintaxe de filtro
+    // SIMPLES (um filtro por query param), mas a gramática da lista do
+    // `.or()`/`.and()` NÃO entende `::` — toda busca com `q` setado quebrava
+    // com "failed to parse logic tree" (confirmado direto contra o
+    // PostgREST), e o erro 500 resultante virava lista vazia silenciosa na
+    // tela (ver o fix em TenantsClient.tsx pra essa segunda parte). O cast
+    // nunca foi necessário: `slug` é `citext` (case-insensitive por
+    // natureza), que já aceita `ilike` sem conversão nenhuma.
+    //
+    // `,`/`(`/`)` são delimitadores reservados da gramática do `.or()` —
+    // removidos pra um termo de busca não injetar uma condição extra.
+    const termo = q.replace(/[,()]/g, " ");
     query = query.or(
-      `display_name.ilike.%${q}%,slug::text.ilike.%${q}%,cnpj.ilike.%${q}%`,
+      `display_name.ilike.%${termo}%,slug.ilike.%${termo}%,cnpj.ilike.%${termo}%`,
     );
   }
 
