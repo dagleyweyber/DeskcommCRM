@@ -214,13 +214,19 @@ describe("handleLeadCreatedForAdHierarchy", () => {
     }
   });
 
-  it("⭐ Graph API falha (token sem permissão): grava o ad_id com last_error, sem reprocessar depois", async () => {
-    const fetchImpl = vi
+  it("⭐ Graph API falha (token sem permissão): grava o ad_id com last_error, e TENTA DE NOVO no próximo evento", async () => {
+    // Achado ao vivo (RevitaFio Carpina): a causa mais comum de falha é a
+    // conta de anúncios ainda não compartilhada com o usuário do sistema —
+    // um estado que se corrige DEPOIS, no Meta Business Manager, sem nenhum
+    // evento novo do lado do CRM. Cachear a FALHA como se fosse sucesso
+    // permanente faria o nome da campanha nunca aparecer mesmo depois do
+    // acesso corrigido.
+    const fetchFalha = vi
       .fn()
       .mockResolvedValue(
         new Response(JSON.stringify({ error: { message: "Requires ads_read permission" } }), { status: 400 }),
       );
-    vi.stubGlobal("fetch", fetchImpl);
+    vi.stubGlobal("fetch", fetchFalha);
     try {
       const row = eventRow({ id: "evt-5", organization_id: ORG_COM_TOKEN, entity_id: LEAD_AD_FALHA });
       const result = await handleLeadCreatedForAdHierarchy(db, row);
@@ -233,17 +239,38 @@ describe("handleLeadCreatedForAdHierarchy", () => {
       const [adName, lastError] = lastLine(out).split("|");
       expect(adName).toBe("");
       expect(lastError).toContain("ads_read permission");
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
-      // Reprocessar o MESMO lead não chama fetch de novo — o ad_id já está
-      // marcado como tentado (com erro), o handler sai por "already_cached".
+    // Acesso corrigido no Meta Business Manager — nenhum evento novo do CRM
+    // marca isso, então o PRÓXIMO evento pro mesmo ad_id precisa tentar de
+    // novo, não sair por "already_cached".
+    const fetchOk = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: "Anúncio Recuperado",
+          adset: { id: "777", name: "Conjunto Recuperado" },
+          campaign: { id: "888", name: "Campanha Recuperada" },
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchOk);
+    try {
       const row2 = eventRow({ id: "evt-6", organization_id: ORG_COM_TOKEN, entity_id: LEAD_AD_FALHA });
       const result2 = await handleLeadCreatedForAdHierarchy(db, row2);
-      expect(result2).toEqual({
-        consumer_key: "meta-ads-resolve-hierarchy",
-        status: "skipped",
-        detail: "already_cached",
-      });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(result2).toEqual({ consumer_key: "meta-ads-resolve-hierarchy", status: "ok" });
+      expect(fetchOk).toHaveBeenCalledTimes(1);
+
+      const out2 = sql(`
+        select ad_name, campaign_name, last_error from public.meta_ads_ad_metadata
+          where organization_id = '${ORG_COM_TOKEN}' and ad_id = '444';
+      `);
+      const [adName2, campaignName2, lastError2] = lastLine(out2).split("|");
+      expect(adName2).toBe("Anúncio Recuperado");
+      expect(campaignName2).toBe("Campanha Recuperada");
+      expect(lastError2).toBe("");
     } finally {
       vi.unstubAllGlobals();
     }

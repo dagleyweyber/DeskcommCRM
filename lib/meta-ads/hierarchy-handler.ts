@@ -9,9 +9,17 @@
  *
  * Nunca chama a Graph API no caminho do webhook — só reage DEPOIS que o lead
  * já nasceu, e sai rápido (sem `ad_id`, sem token de leitura configurado, ou
- * `ad_id` já cacheado) na maioria das vezes. Cache é PERMANENTE por
- * `(organization_id, ad_id)`: nome de campanha não muda com frequência que
- * justifique refetch a cada lead novo do mesmo anúncio.
+ * `ad_id` já cacheado COM SUCESSO) na maioria das vezes. Cache de SUCESSO é
+ * PERMANENTE por `(organization_id, ad_id)`: nome de campanha não muda com
+ * frequência que justifique refetch a cada lead novo do mesmo anúncio.
+ *
+ * ⚠️ Cache de FALHA não é permanente — achado ao vivo (RevitaFio Carpina): a
+ * causa mais comum de falha é a conta de anúncios ainda não ter sido
+ * compartilhada com o usuário do sistema da leitura de campanha, um estado
+ * que se corrige DEPOIS (no Meta Business Manager), sem nenhum evento novo
+ * do lado do CRM. Tratar uma linha com `last_error` como "já resolvido" pra
+ * sempre faria o nome da campanha nunca aparecer mesmo depois do acesso
+ * corrigido — o anúncio ficaria "Sem campanha" permanentemente no relatório.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -39,11 +47,11 @@ export async function handleLeadCreatedForAdHierarchy(
 
   const { data: cached } = await admin
     .from("meta_ads_ad_metadata")
-    .select("ad_id")
+    .select("ad_id, last_error")
     .eq("organization_id", row.organization_id)
     .eq("ad_id", adId)
     .maybeSingle();
-  if (cached) {
+  if (cached && !cached.last_error) {
     return { consumer_key: META_ADS_HIERARCHY_CONSUMER_KEY, status: "skipped", detail: "already_cached" };
   }
 
