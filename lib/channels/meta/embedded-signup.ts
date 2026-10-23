@@ -190,3 +190,35 @@ export async function numerosDoAppNaWaba(
     return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
   }
 }
+
+export type TipoDeSincronizacao = "smb_app_state_sync" | "history";
+
+/**
+ * Pede à Meta o envio da agenda (`smb_app_state_sync`) ou do histórico (`history`)
+ * do app. Cada um vale UMA vez por onboarding e só nas 24h seguintes (doc da Meta):
+ * por isso é chamado logo depois de assinar a WABA — e SÓ depois de o recebimento
+ * estar de pé, senão a Meta entrega o passado num webhook que ninguém ouve e a
+ * janela de pedir de novo nunca mais abre.
+ *
+ * Resposta de sucesso traz `request_id`; guardado só no log, para suporte.
+ */
+export async function pedirSincronizacao(
+  input: { phoneNumberId: string; token: string; tipo: TipoDeSincronizacao } & Opcoes,
+): Promise<ResultadoEmbedded<{ requestId: string | null }>> {
+  const f = input.fetchImpl ?? fetch;
+  try {
+    const res = await f(
+      `https://graph.facebook.com/${versao(input.graphVersion)}/${input.phoneNumberId}/smb_app_data`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${input.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messaging_product: "whatsapp", sync_type: input.tipo }),
+      },
+    );
+    const body = (await res.json().catch(() => ({}))) as GraphErro & { request_id?: string };
+    if (!res.ok || body.error) return { ok: false, motivo: motivoDe(body, res.status) };
+    return { ok: true, requestId: body.request_id ?? null };
+  } catch (err) {
+    return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
+  }
+}

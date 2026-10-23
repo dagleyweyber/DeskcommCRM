@@ -32,6 +32,7 @@ import {
   exchangeEmbeddedCode,
   infoDoNumero,
   numerosDoAppNaWaba,
+  pedirSincronizacao,
   subscribeWabaComOverride,
   wabaIdsDoToken,
 } from "@/lib/channels/meta/embedded-signup";
@@ -270,8 +271,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // 5. Agenda e histórico do app — UMA vez cada, dentro de 24h do onboarding. Só agora
+  // que o recebimento está assinado. Falha aqui NÃO desfaz a conexão (o número já
+  // atende); fica no log com o motivo para o suporte da Meta.
+  const sync: Record<string, { ok: boolean; motivo?: string; requestId?: string | null }> = {};
+  for (const tipo of ["smb_app_state_sync", "history"] as const) {
+    const r = await pedirSincronizacao({ phoneNumberId: phone_number_id, token: troca.token, tipo });
+    sync[tipo] = r.ok ? { ok: true, requestId: r.requestId } : { ok: false, motivo: r.motivo };
+    if (!r.ok) {
+      logger.warn("embedded-signup: pedido de sincronização falhou", {
+        request_id: requestId,
+        tipo,
+        motivo: r.motivo,
+      });
+    }
+  }
+
   return ok({
     connected: true,
+    sync,
     displayName: linha.display_name,
     phoneNumber: telefone,
     mode: "embedded_coexistence",

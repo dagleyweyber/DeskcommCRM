@@ -15735,6 +15735,46 @@ begin
   end if;
 end $$;
 
+-- ---- histórico importado não emite evento de mensagem (migration 0196) ----
+-- Racional na migration. `create or replace` não muda grants nem o gatilho.
+create or replace function public.fn_emit_message_event() returns trigger
+    language plpgsql
+    set search_path to 'public', 'pg_temp'
+    as $
+declare
+  v_event text;
+begin
+  -- Linha importada do histórico da coexistência: é PASSADO, não evento. Os
+  -- consumidores de `message.received` (sentimento pago, automações do usuário,
+  -- follow-up, agente) tratariam seis meses de conversa como mensagem nova.
+  if new.metadata ->> 'origem' = 'historico_importado' then
+    return new;
+  end if;
+
+  if new.direction = 'inbound' then
+    v_event := 'message.received';
+  else
+    v_event := case new.status
+                 when 'sending' then 'message.sending'
+                 when 'sent' then 'message.sent'
+                 when 'failed' then 'message.failed'
+                 else 'message.outbound'
+               end;
+  end if;
+
+  perform public.fn_log_event(
+    new.organization_id, v_event,
+    jsonb_build_object(
+      'message_id', new.id, 'conversation_id', new.conversation_id,
+      'contact_id', new.contact_id, 'direction', new.direction,
+      'type', new.type, 'status', new.status, 'external_id', new.external_id,
+      'channel_session_id', new.channel_session_id,
+      'body_preview', left(new.body, 280)
+    )
+  );
+  return new;
+end$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

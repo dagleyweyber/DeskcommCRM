@@ -45,7 +45,7 @@ export type IngestOutcome =
  * filtro, o desfecho `no_session` (que o chamador loga e devolve no corpo) vira
  * uma mensagem gravada num canal que já não existe para o operador.
  */
-async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
+export async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
   const base = () =>
     admin
       .from("channel_sessions")
@@ -63,7 +63,7 @@ async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
  * deixamos o upsert criar — assim o cadastro nasce uma vez só, e o número gravado
  * continua sendo o que já estava lá (não sobrescrevemos o formato de ninguém).
  */
-async function findContactByVariants(
+export async function findContactByVariants(
   admin: Admin,
   orgId: string,
   waId: string,

@@ -17,6 +17,12 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  parseCoexistenceChange,
+  parseHistoryDeclinedTopLevel,
+  type CoexistenceEvent,
+} from "./coexistence-webhook";
+
 /** Assinatura da Meta: `sha256=<hex>` no header `X-Hub-Signature-256`. */
 export function verifyMetaSignature(
   rawBody: string,
@@ -125,7 +131,11 @@ export interface MessageStatusEvent {
   errorDetails: string | null;
 }
 
-export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent;
+export type MetaWebhookEvent =
+  | TemplateStatusEvent
+  | MessageStatusEvent
+  | InboundMessageEvent
+  | CoexistenceEvent;
 
 interface MetaChange {
   field?: string;
@@ -184,12 +194,23 @@ function parseAdReferral(raw: Record<string, unknown>): AdReferral | null {
  */
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
+  // A recusa de histórico (erro 2593109) chega sem envelope — ver `coexistence-webhook.ts`.
+  if (envelope && (envelope as { object?: unknown }).object === undefined) {
+    return parseHistoryDeclinedTopLevel(envelope);
+  }
   if (envelope?.object !== "whatsapp_business_account") return out;
 
   for (const entry of envelope.entry ?? []) {
     const wabaId = str(entry.id) ?? "";
     for (const change of entry.changes ?? []) {
       const v = change.value ?? {};
+
+      // Coexistência: ecos do celular, histórico e agenda. Parsers em módulo próprio.
+      const coex = parseCoexistenceChange(change.field, wabaId, v);
+      if (coex.length > 0) {
+        out.push(...coex);
+        continue;
+      }
 
       if (change.field === "message_template_status_update") {
         const name = str(v.message_template_name);

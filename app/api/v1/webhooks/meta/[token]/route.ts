@@ -21,6 +21,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
+import {
+  ingestContactSync,
+  ingestEcho,
+  ingestHistoryChunk,
+  registrarHistoricoRecusado,
+} from "@/lib/channels/meta/coexistence-ingest";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -105,6 +111,46 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       continue;
     }
 
+    // Os eventos da coexistência resolvem a sessão pelo NÚMERO do corpo (como o
+    // inbound). Aqui exigimos que seja o número DESTA sessão: o token do caminho é o
+    // que amarra o payload a uma organização, e o corpo não pode escolher outra.
+    if (
+      (e.kind === "echo" || e.kind === "history_chunk" || e.kind === "history_declined" || e.kind === "contact_sync") &&
+      session.phoneNumberId &&
+      e.phoneNumberId !== session.phoneNumberId
+    ) {
+      desfechos.push(`${e.kind}:numero_de_outra_sessao`);
+      continue;
+    }
+
+    // ── Coexistência (o app do celular). Nada aqui passa por `pos-entrada`: eco,
+    // histórico e agenda NÃO acordam o agente nem criam lead — ver
+    // `lib/channels/meta/coexistence-ingest.ts`.
+    if (e.kind === "echo") {
+      const r = await ingestEcho(admin, e);
+      desfechos.push(`echo:${r.status}`);
+      if (r.status === "failed") {
+        console.error("[meta.echo] eco não ingerido", { reason: r.reason, external_id: e.externalId });
+      }
+      continue;
+    }
+    if (e.kind === "history_chunk") {
+      const r = await ingestHistoryChunk(admin, e);
+      desfechos.push(
+        r.status === "imported" ? `history:${r.inserted}+${r.skipped}` : `history:${r.status}`,
+      );
+      continue;
+    }
+    if (e.kind === "history_declined") {
+      await registrarHistoricoRecusado(admin, e);
+      desfechos.push("history:declined");
+      continue;
+    }
+    if (e.kind === "contact_sync") {
+      desfechos.push(`contact_sync:${await ingestContactSync(admin, e)}`);
+      continue;
+    }
+
     if (e.kind === "template_status") {
       await admin
         .from("meta_templates")
@@ -113,7 +159,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         .eq("waba_id", e.wabaId)
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
-    } else {
+    } else if (e.kind === "message_status") {
       // Achado ao vivo (RevitaFio Mossoró): campanha com TODO envio "failed"
       // e nenhum jeito de saber por quê — o `errorCode`/`errorTitle` que a
       // Meta manda no próprio webhook de status era descartado aqui, e
