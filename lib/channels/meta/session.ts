@@ -101,5 +101,6 @@ export async function metaSessionForOrg(
     organizationId: data.organization_id,
     wabaId: data.meta_waba_id ?? null,
     phoneNumberId: data.meta_phone_number_id ?? null,
+    connectionMode: data.meta_connection_mode ?? null,
   };
 }
