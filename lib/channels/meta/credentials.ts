@@ -62,10 +62,17 @@ export async function metaCredsForPhoneNumberId(
 ): Promise<MetaCredentials | null> {
   if (!phoneNumberId) return null;
 
+  // `archived_at is null`: sessão arquivada guarda o `meta_phone_number_id` para
+  // sempre (o delete só arquiva e zera o token). Sem este filtro, reconectar um
+  // número já usado deixava DUAS linhas com o mesmo id, o `maybeSingle()` falhava
+  // por "mais de uma linha", `data` virava null e o envio caía em silêncio no env
+  // — sem erro nenhum para quem depura. Com o índice único parcial da migration
+  // 0194 só uma linha ativa pode existir por número.
   const { data } = await admin
     .from("channel_sessions")
     .select("meta_phone_number_id, meta_token_encrypted")
     .eq("meta_phone_number_id", phoneNumberId)
+    .is("archived_at", null)
     .maybeSingle();
 
   const cifrado = data?.meta_token_encrypted;

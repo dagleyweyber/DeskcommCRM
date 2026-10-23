@@ -189,3 +189,41 @@ canal, cifrada** — em vez de env global, que hoje limita a instalação a uma 
 **Lição de método:** eu escrevi "Fase 5 = Embedded Signup" em três planos sem perguntar se
 ela cabia no modelo do produto. Vinha do TomikCRM, que é SaaS — lá faz sentido. Premissa
 copiada de outro contexto não vira verdade por estar escrita em três lugares.
+
+---
+
+## Emenda (2026-10-23) — Embedded Signup e Coexistência como MODO ADICIONAL, opcional
+
+A rejeição acima continua correta **para quem instala sozinho**. O que mudou foi o contexto
+de UMA instalação: a do dono do produto roda de forma central para a agência dele (Ads Pro
+Company) e ele **é** Tech Provider — Business Verification feita, app com Advanced Access
+aprovado. Ali o argumento "cada instalador teria que virar Tech Provider" não se aplica.
+
+E existe uma necessidade que **só** o Embedded Signup atende: **Coexistência** — conectar
+à Cloud API um número que já roda no app WhatsApp Business, mantendo o app e trazendo o
+histórico (até ~6 meses) em vez de começar a conversa do zero. No BYO, esse número teria
+que sair do app.
+
+**Regras do modo** (a emenda admite o modo, não troca a arquitetura):
+
+1. **Aditivo.** O BYO continua e é o padrão. O modo novo é um SEGUNDO jeito de criar uma
+   sessão `meta_cloud`, nunca um substituto.
+2. **Opt-in por existência.** `embeddedSignupConfig()` (`lib/channels/meta/embedded-config.ts`)
+   devolve `null` sem `META_APP_ID` + `META_APP_SECRET` + `META_EMBEDDED_CONFIG_ID` — e
+   `null` significa: sem botão na tela, API recusa. Instalação que não configura nada
+   segue exatamente como antes, e `.env` antigo continua válido (regra de packaging).
+3. **Sem provider novo.** Coexistência continua `provider = 'meta_cloud'`. O modo de
+   conexão é dado DA SESSÃO, não valor de provider — um provider novo exigiria entrada na
+   matriz de capacidades, novo CHECK e churn no `lint:channels`, para descrever o mesmo
+   canal da Meta.
+4. **Quem liga é quem é Tech Provider.** O projeto upstream NÃO vira provider central; o
+   self-hoster que não é Tech Provider não configura as três variáveis e segue em BYO.
+5. **Segredos.** App Secret só no backend; token por sessão, cifrado pelas MESMAS RPCs do
+   BYO (`lib/webhooks/secrets.ts`) — nenhum terceiro caminho de cifra.
+6. **O canal muda de comportamento.** O eco do celular (`smb_message_echoes`) entra como
+   SAÍDA com origem `external_device`, sem acionar a IA e sem renovar a janela de 24h; o
+   histórico importado não dispara automação nem criação de lead.
+
+**Por que emendar em vez de apagar a seção acima:** ela registra um erro real de método
+(premissa copiada de um SaaS). A emenda guarda a condição sob a qual a conclusão muda, em
+vez de deixar o próximo leitor escolher entre "a doutrina proíbe" e "a doutrina esqueceu".

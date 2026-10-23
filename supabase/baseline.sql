@@ -15692,6 +15692,29 @@ create or replace function "public"."fn_sales_dashboard"("p_org" "uuid", "p_from
   );
 $_$;
 
+-- ---- um número da Meta, uma sessão ATIVA (migration 0194) ----
+-- Índice único parcial em `meta_phone_number_id` (só sessões não arquivadas). O
+-- racional completo está na migration. Num clone que já tenha duas sessões ativas
+-- com o mesmo número o índice NÃO é criado — e o aviso abaixo é ALTO de propósito:
+-- escolher qual das duas sessões morre é decisão do operador, não do update.sh,
+-- então não há dedup automático (diferente das outras constraints deste arquivo,
+-- onde o dado a corrigir é inequívoco). O app segue correto sem o índice: a busca
+-- de credencial já filtra `archived_at`.
+do $$
+begin
+  if exists (
+    select 1 from public.channel_sessions
+    where archived_at is null and meta_phone_number_id is not null
+    group by meta_phone_number_id having count(*) > 1
+  ) then
+    raise warning 'channel_sessions_meta_phone_active_uidx NÃO criado: existem sessões ATIVAS com o mesmo meta_phone_number_id. Arquive as duplicadas e reaplique o baseline.';
+  else
+    create unique index if not exists channel_sessions_meta_phone_active_uidx
+      on public.channel_sessions (meta_phone_number_id)
+      where archived_at is null and meta_phone_number_id is not null;
+  end if;
+end $$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

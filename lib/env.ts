@@ -144,6 +144,11 @@ const schema = z.object({
     .default("false")
     .transform((v) => v === "true"),
 
+  // WhatsApp — modo Embedded Signup + Coexistência (OPCIONAL). Só liga junto com
+  // META_APP_ID e META_APP_SECRET; vazio = a instalação segue só com o modo manual
+  // (BYO). Ver lib/channels/meta/embedded-config.ts.
+  META_EMBEDDED_CONFIG_ID: z.string().optional().default(""),
+
   // App URLs
   NEXT_PUBLIC_APP_URL: z
     .string()
