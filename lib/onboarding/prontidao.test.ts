@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import { pendenciasParaConcluir, type SinaisDeProntidao } from "./prontidao";
 
 function pronta(over: Partial<SinaisDeProntidao> = {}): SinaisDeProntidao {
-  return { canais_working: 1, agentes_publicados: 1, credenciais_ia_ativas: 1, ...over };
+  return {
+    canais_working: 1,
+    agentes_publicados: 1,
+    credenciais_ia_ativas: 1,
+    whatsapp_pulado: false,
+    ...over,
+  };
 }
 
 describe("pendenciasParaConcluir", () => {
@@ -22,6 +28,23 @@ describe("pendenciasParaConcluir", () => {
     expect(r[0]!.mensagem).toMatch(/WhatsApp/);
   });
 
+  it("⭐ WhatsApp PULADO de propósito NÃO bloqueia — o onboarding tem que deixar conectar depois", () => {
+    const r = pendenciasParaConcluir(pronta({ canais_working: 0, whatsapp_pulado: true }));
+    expect(r).toEqual([]);
+  });
+
+  it("⭐ pular o WhatsApp não perdoa a IA sem credencial — são riscos independentes", () => {
+    const r = pendenciasParaConcluir(
+      pronta({
+        canais_working: 0,
+        whatsapp_pulado: true,
+        agentes_publicados: 1,
+        credenciais_ia_ativas: 0,
+      }),
+    );
+    expect(r.map((p) => p.motivo)).toEqual(["ia_sem_credencial"]);
+  });
+
   it("⭐ agente publicado sem credencial BLOQUEIA — o incidente provado (B'Laser Caruaru / RevitaFio Carpina)", () => {
     const r = pendenciasParaConcluir(pronta({ agentes_publicados: 1, credenciais_ia_ativas: 0 }));
     expect(r.map((p) => p.motivo)).toEqual(["ia_sem_credencial"]);
@@ -33,6 +56,7 @@ describe("pendenciasParaConcluir", () => {
       canais_working: 0,
       agentes_publicados: 1,
       credenciais_ia_ativas: 0,
+      whatsapp_pulado: false,
     });
     expect(r.map((p) => p.motivo).sort()).toEqual(
       ["ia_sem_credencial", "sem_canal_funcionando"].sort(),

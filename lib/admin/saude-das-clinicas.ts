@@ -83,6 +83,8 @@ export interface SinaisDaClinica {
   eventos_mortos_7d: number;
   avisos_abertos: number;
   ultima_mensagem_at: string | null;
+  /** WhatsApp PULADO no onboarding — decisão registrada (migration 0193). */
+  whatsapp_pulado: boolean;
 }
 
 export interface SinalClassificado {
@@ -130,7 +132,16 @@ function classificaCanal(s: SinaisDaClinica): SinalClassificado {
     // Onboarding concluído e zero canal: não é "ainda configurando", é
     // clínica ao vivo e muda. Mesma gravidade de "conectado e caiu" — ver o
     // cabeçalho desta função (migration 0189).
+    //
+    // EXCETO quando a pessoa PULOU o WhatsApp de propósito no onboarding
+    // (migration 0193): é uma escolha ("conecto depois"), não um canal que
+    // caiu. Crítico aqui abriria incidente do vigia pra toda clínica que fez
+    // exatamente o que o produto oferece — alarme falso, a pior falha de um
+    // painel de alerta. Fica "atenção": continua visível na lista, não grita.
     if (s.onboarded_at !== null) {
+      if (s.whatsapp_pulado) {
+        return { saude: "atencao", detalhe: "WhatsApp pulado no onboarding — ainda não conectado" };
+      }
       return { saude: "critico", detalhe: "Onboarding concluído sem nenhum canal conectado" };
     }
     return { saude: "atencao", detalhe: "Nenhum canal conectado" };

@@ -39,12 +39,29 @@
  * conclusão já mostra "(pulado)" para eles, e não há incidente real ligado a
  * pular essas duas etapas. Travar tudo "porque dá pra travar" ensinaria a
  * burlar o fluxo em vez de preveni-lo.
+ *
+ * ## WhatsApp PULADO de propósito também não bloqueia
+ *
+ * Pedido do dono do produto: o onboarding precisa deixar pular o WhatsApp e
+ * conectar depois (cliente que ainda não decidiu o número, que vai migrar da
+ * API não oficial, que só quer configurar o funil antes). O botão "Pular por
+ * enquanto" sempre existiu e gravava a decisão — mas o gate, na tela final,
+ * recusava concluir mesmo assim, o que na prática desfazia o "pular".
+ *
+ * A distinção que importa é entre DECISÃO e ACIDENTE: canal pulado é uma
+ * escolha registrada (`whatsapp.skipped`); canal que a pessoa CONFIGUROU e que
+ * não está no ar (QR lido e nunca conectou, por exemplo) é um acidente, e
+ * esse continua travando. O alarme contínuo de "clínica sem canal" depois do
+ * onboarding é outra camada (`classificaCanal`) e trata o pulado como atenção,
+ * não como incidente.
  */
 
 export interface SinaisDeProntidao {
   canais_working: number;
   agentes_publicados: number;
   credenciais_ia_ativas: number;
+  /** O WhatsApp foi PULADO no onboarding (decisão registrada, não acidente). */
+  whatsapp_pulado: boolean;
 }
 
 /** Uma pendência que bloqueia a conclusão — sempre com o porquê, nunca só um código. */
@@ -59,7 +76,7 @@ export interface PendenciaCritica {
 export function pendenciasParaConcluir(s: SinaisDeProntidao): PendenciaCritica[] {
   const pendencias: PendenciaCritica[] = [];
 
-  if (s.canais_working === 0) {
+  if (s.canais_working === 0 && !s.whatsapp_pulado) {
     pendencias.push({
       motivo: "sem_canal_funcionando",
       mensagem: "Nenhum canal de WhatsApp conectado e funcionando.",

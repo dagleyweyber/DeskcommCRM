@@ -34,6 +34,7 @@ interface LinhaDeSaude {
   fila_pendente_desde: string | null;
   eventos_mortos_7d: number;
   avisos_abertos: number;
+  whatsapp_pulado: boolean;
 }
 
 function chamaFuncao(tiposAcionaveis: string[] = []): LinhaDeSaude[] {
@@ -96,6 +97,25 @@ describe("fn_saude_das_clinicas — painel de saúde cross-tenant (migration 018
     const linha = chamaFuncao().find((l) => l.organization_id === ORG_VAZIA);
 
     expect(new Date(linha!.onboarded_at!).toISOString()).toBe(marco);
+  });
+
+  it("⭐ whatsapp_pulado chega como fato cru, e some quando o WhatsApp é conectado depois — migration 0193", () => {
+    const comEstado = (estado: string) =>
+      sql(`update public.organizations set onboarding_state = '${estado}'::jsonb where id = '${ORG_VAZIA}';`);
+
+    // Sem marca nenhuma: o caso comum, e o que a função devolvia antes da 0193.
+    comEstado("{}");
+    expect(chamaFuncao().find((l) => l.organization_id === ORG_VAZIA)!.whatsapp_pulado).toBe(false);
+
+    // O que `skipWhatsapp()` grava.
+    comEstado('{"whatsapp":{"status":"skipped","skipped":true}}');
+    expect(chamaFuncao().find((l) => l.organization_id === ORG_VAZIA)!.whatsapp_pulado).toBe(true);
+
+    // O que `markWhatsappConfigured()` grava: substitui o objeto `whatsapp`
+    // inteiro, então a marca de "pulado" some junto — conectar depois conserta
+    // o fato sozinho, sem ninguém limpar nada.
+    comEstado('{"whatsapp":{"session_name":"org_x","status":"WORKING"}}');
+    expect(chamaFuncao().find((l) => l.organization_id === ORG_VAZIA)!.whatsapp_pulado).toBe(false);
   });
 
   it("organização anonimizada por LGPD fica FORA (não é operação viva)", () => {

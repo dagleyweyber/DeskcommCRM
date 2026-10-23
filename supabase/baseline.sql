@@ -15692,6 +15692,117 @@ create or replace function "public"."fn_sales_dashboard"("p_org" "uuid", "p_from
   );
 $_$;
 
+-- ---- onboarding deixa pular o WhatsApp de verdade (migration 0193) ----
+-- `fn_saude_das_clinicas()` ganha `whatsapp_pulado` (decisão registrada em
+-- `onboarding_state.whatsapp.skipped`). O gate de conclusão do onboarding e a
+-- classificação contínua de saúde (0189) leem esse fato para NÃO tratar um
+-- WhatsApp pulado de propósito como clínica muda — ver o cabeçalho da
+-- migration. Saída muda (coluna nova no fim): drop + create, e o revoke das
+-- DUAS origens de EXECUTE entra antes da VARREDURA abaixo.
+drop function if exists public.fn_saude_das_clinicas(text[]);
+
+create function public.fn_saude_das_clinicas(p_tipos_acionaveis text[] default '{}'::text[])
+returns table (
+  organization_id uuid,
+  display_name text,
+  slug text,
+  status text,
+  suspended_at timestamptz,
+  onboarded_at timestamptz,
+  canais_total int,
+  canais_working int,
+  agentes_publicados int,
+  credenciais_ia_ativas int,
+  mensagens_falhas_24h int,
+  fila_pendente_desde timestamptz,
+  eventos_mortos_7d int,
+  avisos_abertos int,
+  ultima_mensagem_at timestamptz,
+  whatsapp_pulado boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    o.id,
+    o.display_name,
+    o.slug::text,
+    o.status,
+    o.suspended_at,
+    o.onboarded_at,
+    coalesce(canais.total, 0)::int,
+    coalesce(canais.working, 0)::int,
+    coalesce(agentes.publicados, 0)::int,
+    coalesce(cred.ativas, 0)::int,
+    coalesce(msgs.falhas, 0)::int,
+    fila.mais_antiga,
+    coalesce(mortos.total, 0)::int,
+    coalesce(avisos.abertos, 0)::int,
+    conv.ultima,
+    coalesce((o.onboarding_state -> 'whatsapp' ->> 'skipped') = 'true', false)
+  from public.organizations o
+  left join lateral (
+    select count(*) as total,
+           count(*) filter (where cs.status = 'WORKING') as working
+    from public.channel_sessions cs
+    where cs.organization_id = o.id
+  ) canais on true
+  left join lateral (
+    select count(*) as publicados
+    from public.ai_agents a
+    where a.organization_id = o.id
+      and a.published_version_id is not null
+  ) agentes on true
+  left join lateral (
+    select count(*) as ativas
+    from public.ai_provider_credentials c
+    where c.organization_id = o.id
+      and c.is_active
+      and c.validated_at is not null
+  ) cred on true
+  left join lateral (
+    select count(*) as falhas
+    from public.messages m
+    where m.organization_id = o.id
+      and m.status = 'failed'
+      and m.created_at > now() - interval '24 hours'
+  ) msgs on true
+  left join lateral (
+    select min(e.created_at) as mais_antiga
+    from public.event_log e
+    where e.organization_id = o.id
+      and e.status = 'pending'
+      and e.event_type = any (p_tipos_acionaveis)
+  ) fila on true
+  left join lateral (
+    select count(*) as total
+    from public.event_log e
+    where e.organization_id = o.id
+      and e.status = 'dead'
+      and e.created_at > now() - interval '7 days'
+  ) mortos on true
+  left join lateral (
+    select count(*) as abertos
+    from public.agent_inbox_items i
+    where i.organization_id = o.id
+      and i.status = 'open'
+  ) avisos on true
+  left join lateral (
+    select max(c.last_message_at) as ultima
+    from public.conversations c
+    where c.organization_id = o.id
+  ) conv on true
+  where o.redacted_at is null
+  order by o.display_name;
+$$;
+
+revoke execute on function public.fn_saude_das_clinicas(text[]) from public, anon, authenticated;
+grant execute on function public.fn_saude_das_clinicas(text[]) to service_role;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

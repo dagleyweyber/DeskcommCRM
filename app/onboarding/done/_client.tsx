@@ -46,7 +46,7 @@ export function DoneClient({ recap }: { recap: Recap }) {
       </h2>
       <p className="text-sm text-muted-foreground">
         {pendencias
-          ? "Duas coisas puladas aqui não dá pra deixar pra depois — sem elas, o atendimento fica mudo sem ninguém perceber."
+          ? "Isto não dá pra deixar pra depois — sem resolver, o atendimento fica mudo sem ninguém perceber."
           : "Sua operação está configurada. Você pode ajustar tudo nas Configurações."}
       </p>
 
@@ -70,6 +70,18 @@ export function DoneClient({ recap }: { recap: Recap }) {
             );
           })}
         </ul>
+      )}
+
+      {/* WhatsApp pulado é decisão legítima, não pendência: a tela diz onde
+          voltar, em vez de deixar a pessoa achando que precisa decidir agora. */}
+      {!pendencias && !recap.whatsapp && (
+        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+          Você pulou o WhatsApp. Quando quiser, conecte em{" "}
+          <Link href="/app/connections" className="underline underline-offset-4">
+            Conexões
+          </Link>
+          .
+        </p>
       )}
 
       {/* Lista fechada, nunca genérica: cada pendência aponta o caminho de

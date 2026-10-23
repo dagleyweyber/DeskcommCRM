@@ -64,6 +64,7 @@ export async function finishOnboarding(): Promise<FinishOnboardingResult> {
         canais_working: number;
         agentes_publicados: number;
         credenciais_ia_ativas: number;
+        whatsapp_pulado: boolean;
       }>
     ).find((l) => l.organization_id === ctx.orgId);
 

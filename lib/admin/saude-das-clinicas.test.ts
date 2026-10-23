@@ -30,6 +30,7 @@ function clinicaOk(over: Partial<SinaisDaClinica> = {}): SinaisDaClinica {
     eventos_mortos_7d: 0,
     avisos_abertos: 0,
     ultima_mensagem_at: "2026-10-06T11:55:00.000Z",
+    whatsapp_pulado: false,
     ...over,
   };
 }
@@ -91,6 +92,26 @@ describe("classificaClinica", () => {
     expect(r.canal.saude).toBe("critico");
     expect(r.canal.detalhe).toMatch(/Onboarding concluído/);
     expect(r.geral).toBe("critico");
+  });
+
+  it("⭐ WhatsApp PULADO no onboarding é atenção, não crítico — escolha não é canal que caiu (migration 0193)", () => {
+    // Sem isto, toda clínica que usou o "Pular por enquanto" abriria incidente
+    // no vigia (que só age em crítico) por ter feito o que o produto oferece.
+    const r = classificaClinica(
+      clinicaOk({ canais_total: 0, canais_working: 0, whatsapp_pulado: true }),
+      AGORA,
+    );
+    expect(r.canal.saude).toBe("atencao");
+    expect(r.canal.detalhe).toMatch(/pulado/i);
+    expect(r.geral).toBe("atencao");
+  });
+
+  it("pular o WhatsApp não esconde canal que EXISTE e caiu — a marca só vale com zero canal", () => {
+    const r = classificaClinica(
+      clinicaOk({ canais_total: 1, canais_working: 0, whatsapp_pulado: true }),
+      AGORA,
+    );
+    expect(r.canal.saude).toBe("critico");
   });
 
   it("⭐ fila parada há dias é crítica e o detalhe diz em DIAS (o backlog de 48 dias)", () => {

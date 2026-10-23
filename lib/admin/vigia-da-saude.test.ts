@@ -28,6 +28,7 @@ function sinais(over: Partial<SinaisDaClinica> = {}): SinaisDaClinica {
     eventos_mortos_7d: 0,
     avisos_abertos: 0,
     ultima_mensagem_at: null,
+    whatsapp_pulado: false,
     ...over,
   };
 }
