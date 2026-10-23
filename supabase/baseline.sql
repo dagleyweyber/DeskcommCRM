@@ -15740,7 +15740,7 @@ end $$;
 create or replace function public.fn_emit_message_event() returns trigger
     language plpgsql
     set search_path to 'public', 'pg_temp'
-    as $
+    as $$
 declare
   v_event text;
 begin
@@ -15773,7 +15773,7 @@ begin
     )
   );
   return new;
-end$;
+end$$;
 
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
