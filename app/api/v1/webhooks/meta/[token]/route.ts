@@ -27,6 +27,7 @@ import {
   ingestHistoryChunk,
   registrarHistoricoRecusado,
 } from "@/lib/channels/meta/coexistence-ingest";
+import { appSecretDoWebhook } from "@/lib/channels/meta/embedded-config";
 import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -64,7 +65,9 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   if (!session) return fail("not_found", "unknown webhook token", 404, { requestId });
 
   const rawBody = await req.text();
-  const appSecret = process.env.META_APP_SECRET ?? "";
+  // O segredo é o do APP dono da WABA: sessão em coexistência assina com o app do
+  // Tech Provider, as manuais com o `META_APP_SECRET` de sempre (ver `appSecretDoWebhook`).
+  const appSecret = appSecretDoWebhook(session.connectionMode);
   if (!verifyMetaSignature(rawBody, req.headers.get("x-hub-signature-256"), appSecret)) {
     return fail("unauthorized", "invalid_signature", 401, { requestId });
   }

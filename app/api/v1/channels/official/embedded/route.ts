@@ -82,7 +82,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const cfg = embeddedSignupConfig();
   const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
-  const appSecret = process.env.META_APP_SECRET?.trim();
+  const appSecret = process.env.META_EMBEDDED_APP_SECRET?.trim();
   if (!cfg || !verifyToken || !appSecret) {
     return fail("not_found", "embedded_signup_indisponivel", 404, { requestId });
   }

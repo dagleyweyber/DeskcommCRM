@@ -21,6 +21,8 @@ export interface MetaWebhookSession {
   wabaId: string | null;
   /** `sessionRef` deste canal em todo o resto do adapter — ver `meta-cloud.ts`. */
   phoneNumberId: string | null;
+  /** `byo` | `embedded_coexistence` — decide com qual App Secret a assinatura é conferida. */
+  connectionMode: string | null;
 }
 
 /**
@@ -48,7 +50,7 @@ export async function metaSessionByWebhookToken(
   const base = () =>
     admin
       .from("channel_sessions")
-      .select("id, organization_id, meta_waba_id, meta_phone_number_id")
+      .select("id, organization_id, meta_waba_id, meta_phone_number_id, meta_connection_mode")
       .eq("webhook_path_token", token)
       .eq("provider", CHANNEL_PROVIDER_META);
   const { data } = await queryTolerantToMissingArchived(
@@ -62,6 +64,7 @@ export async function metaSessionByWebhookToken(
     organizationId: data.organization_id,
     wabaId: data.meta_waba_id ?? null,
     phoneNumberId: data.meta_phone_number_id ?? null,
+    connectionMode: data.meta_connection_mode ?? null,
   };
 }
 
@@ -82,7 +85,7 @@ export async function metaSessionForOrg(
   const base = () =>
     admin
       .from("channel_sessions")
-      .select("id, organization_id, meta_waba_id, meta_phone_number_id")
+      .select("id, organization_id, meta_waba_id, meta_phone_number_id, meta_connection_mode")
       .eq("organization_id", organizationId)
       .eq("provider", CHANNEL_PROVIDER_META)
       .order("created_at", { ascending: true })
