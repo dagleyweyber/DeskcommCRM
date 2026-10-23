@@ -21,14 +21,20 @@ function dbFake() {
       if (tabela === "channel_sessions") {
         return {
           select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({
-                data: sessaoNoBanco.phoneNumberId
-                  ? { meta_phone_number_id: sessaoNoBanco.phoneNumberId, meta_token_encrypted: "\\xdeadbeef" }
-                  : null,
-                error: null,
-              }),
-            }),
+            eq: () => {
+              // `.is("archived_at", null)` entrou na busca de credencial (migration
+              // 0194): o falso aceita o filtro e segue a cadeia.
+              const consulta = {
+                is: () => consulta,
+                maybeSingle: async () => ({
+                  data: sessaoNoBanco.phoneNumberId
+                    ? { meta_phone_number_id: sessaoNoBanco.phoneNumberId, meta_token_encrypted: "\\xdeadbeef" }
+                    : null,
+                  error: null,
+                }),
+              };
+              return consulta;
+            },
           }),
         };
       }
@@ -106,12 +112,16 @@ describe("credencial vem da SESSÃO, não do process.env cru", () => {
         if (tabela === "channel_sessions") {
           return {
             select: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({
-                  data: { meta_phone_number_id: "1103328999528818", meta_token_encrypted: "\\xdeadbeef" },
-                  error: null,
-                }),
-              }),
+              eq: () => {
+                const consulta = {
+                  is: () => consulta,
+                  maybeSingle: async () => ({
+                    data: { meta_phone_number_id: "1103328999528818", meta_token_encrypted: "\\xdeadbeef" },
+                    error: null,
+                  }),
+                };
+                return consulta;
+              },
             }),
           };
         }

@@ -69,7 +69,17 @@ vi.mock("@/lib/supabase/admin", () => ({
       }),
     },
     from: () => ({
-      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      select: () => ({
+        eq: () => {
+          // `.is("archived_at", null)` entrou na busca de credencial (migration
+          // 0194): o falso aceita o filtro e segue a cadeia.
+          const consulta = {
+            is: () => consulta,
+            maybeSingle: async () => ({ data: null, error: null }),
+          };
+          return consulta;
+        },
+      }),
     }),
   }),
 }));

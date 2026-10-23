@@ -13,14 +13,20 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => ({
       select: () => ({
-        eq: () => ({
-          maybeSingle: async () => ({
-            data: sessaoNoBanco.token
-              ? { meta_phone_number_id: "sessao-pn", meta_token_encrypted: "\\xdeadbeef" }
-              : null,
-            error: null,
-          }),
-        }),
+        eq: () => {
+          // `.is("archived_at", null)` entrou na busca de credencial (migration
+          // 0194): o falso aceita o filtro e segue a cadeia, sem simular linhas.
+          const consulta = {
+            is: () => consulta,
+            maybeSingle: async () => ({
+              data: sessaoNoBanco.token
+                ? { meta_phone_number_id: "sessao-pn", meta_token_encrypted: "\\xdeadbeef" }
+                : null,
+              error: null,
+            }),
+          };
+          return consulta;
+        },
       }),
     }),
     rpc: async () => ({ data: sessaoNoBanco.token, error: null }),

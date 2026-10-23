@@ -177,16 +177,21 @@ describe("0087 · o canal da sessão chega ao clone", () => {
   it("sessões meta_cloud convivem: a UNIQUE de waha_session_name não barra NULLs", () => {
     // Consequência do `drop not null` que passa despercebida até o segundo número
     // Cloud API não entrar: no Postgres NULLs são distintos entre si numa UNIQUE.
+    //
+    // Os ids de número são do namespace DESTE teste, não `'111'`/`'222'`: desde a
+    // migration 0194 dois números Meta ATIVOS não podem repetir o id, e o banco
+    // efêmero é compartilhado entre arquivos em paralelo — `'111'` já é fixture de
+    // `agent-send-template-turn.test.ts`, e quem inserisse por último falharia.
     const org = novaOrg(`inv-0087-e-${Date.now()}`);
     insertSession(org, {
       provider: `'meta_cloud'`,
       waha_session_name: "null",
-      meta_phone_number_id: `'111'`,
+      meta_phone_number_id: `'inv-0087-e-fone-1'`,
     });
     insertSession(org, {
       provider: `'meta_cloud'`,
       waha_session_name: "null",
-      meta_phone_number_id: `'222'`,
+      meta_phone_number_id: `'inv-0087-e-fone-2'`,
     });
     expect(
       sql(`select count(*) from public.channel_sessions
