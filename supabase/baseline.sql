@@ -15715,6 +15715,26 @@ begin
   end if;
 end $$;
 
+-- ---- modo de conexão da sessão Meta (migration 0195) ----
+-- Fase 1 do Embedded Signup / Coexistência. Aditivo: o default 'byo' preserva toda
+-- linha existente. Racional completo na migration.
+alter table public.channel_sessions
+  add column if not exists meta_connection_mode text not null default 'byo',
+  add column if not exists meta_onboarded_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.channel_sessions'::regclass
+      and conname = 'channel_sessions_meta_connection_mode_check'
+  ) then
+    alter table public.channel_sessions
+      add constraint channel_sessions_meta_connection_mode_check
+      check (meta_connection_mode in ('byo', 'embedded_coexistence'));
+  end if;
+end $$;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
