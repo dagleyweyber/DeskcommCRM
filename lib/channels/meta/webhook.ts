@@ -93,8 +93,14 @@ export interface InboundMessageEvent {
    * `wa_id` do contato. **Pode vir sem o nono dígito** em celular brasileiro
    * (medido: 553198966398 para quem recebemos como 5531998966398) — quem resolve o
    * contato TEM de usar `phoneLookupVariants`, senão duplica a pessoa.
+   *
+   * `null` quando a Meta OMITE o telefone (pessoa com nome de usuário, sem contato nos
+   * últimos 30 dias): nesse caso `userId` é o único identificador, e a mensagem NÃO
+   * pode ser descartada.
    */
-  from: string;
+  from: string | null;
+  /** BSUID da pessoa (`from_user_id`/`contacts[].user_id`). Sempre presente nos webhooks novos. */
+  userId: string | null;
   profileName: string | null;
   sentAt: Date;
   /** `text` | `audio` | `image` | `video` | `document` | `sticker` | … */
@@ -236,9 +242,14 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
         for (const raw of v.messages as Record<string, unknown>[]) {
           const id = str(raw.id);
           const from = str(raw.from);
-          if (!id || !from) continue; // payload capenga não vira linha meia-boca
+          const fromUserId = str(raw.from_user_id);
+          // Precisa de ALGUM identificador: telefone ou BSUID. Sem os dois, é payload
+          // capenga e não vira linha meia-boca; com só o BSUID, é uma pessoa de verdade.
+          if (!id || (!from && !fromUserId)) continue;
 
-          const perfil = contatos.find((c) => str(c.wa_id) === from);
+          const perfil = contatos.find(
+            (c) => (from && str(c.wa_id) === from) || (fromUserId && str(c.user_id) === fromUserId),
+          );
           const tipo = str(raw.type) ?? "unknown";
           const corpoMidia = raw[tipo] as Record<string, unknown> | undefined;
 
@@ -248,6 +259,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             phoneNumberId: str(meta.phone_number_id) ?? "",
             externalId: id,
             from,
+            userId: fromUserId ?? str(perfil?.user_id),
             profileName: str((perfil?.profile as Record<string, unknown> | undefined)?.name),
             // A Meta manda epoch em SEGUNDOS, string. Passar direto ao Date daria 1970.
             sentAt: new Date(Number(str(raw.timestamp) ?? "0") * 1000),

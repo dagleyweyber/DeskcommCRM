@@ -27,7 +27,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { logger } from "@/lib/logger";
-import { findContactByVariants, sessionByPhoneNumberId } from "./ingest";
+import { findContactByVariants, resolverContatoMeta, sessionByPhoneNumberId } from "./ingest";
 import type {
   ContactSyncEvent,
   EchoEvent,
@@ -43,24 +43,18 @@ import { ORIGEM_HISTORICO, reabrirConversaImportada } from "./conversa-importada
 // Reexportada: é a marca que a migration 0196 (mensagens) e a 0197 (conversas) leem.
 export { ORIGEM_HISTORICO };
 
+/**
+ * Contato do eco/histórico/agenda. Nome SEMPRE `null`: no eco e no histórico o nome que
+ * a Meta traz é o do dono do número, e o `coalesce` do upsert o congelaria no contato do
+ * cliente. Telefone, BSUID ou os dois — `resolverContatoMeta` decide.
+ */
 async function resolverContato(
   admin: Admin,
   orgId: string,
-  waId: string,
+  quem: { phone?: string | null; bsuid?: string | null },
 ): Promise<string | null> {
-  const existente = await findContactByVariants(admin, orgId, waId);
-  const phone = existente?.phone_number ?? `+${waId.replace(/\D/g, "")}`;
-  const { data, error } = await admin.rpc("fn_upsert_wa_contact" as never, {
-    p_org: orgId,
-    p_kind: "phone",
-    p_phone: phone,
-    p_lid: null,
-    p_chat_id: waId,
-    // Nome do contato NUNCA vem daqui: no eco/histórico o `pushName` seria o do dono.
-    p_notify: null,
-  } as never);
-  if (error || !data) return null;
-  return data as unknown as string;
+  const r = await resolverContatoMeta(admin, orgId, { ...quem, nome: null });
+  return "id" in r ? r.id : null;
 }
 
 async function resolverConversa(
@@ -106,7 +100,7 @@ export async function ingestEcho(admin: Admin, e: EchoEvent): Promise<EcoOutcome
   if (!sessao) return { status: "no_session" };
   const orgId = sessao.organization_id;
 
-  const contactId = await resolverContato(admin, orgId, e.to);
+  const contactId = await resolverContato(admin, orgId, { phone: e.to, bsuid: e.toUserId });
   if (!contactId) return { status: "failed", reason: "contato" };
   const conversationId = await resolverConversa(admin, orgId, contactId, sessao.id);
   if (!conversationId) return { status: "failed", reason: "conversa" };
@@ -267,7 +261,10 @@ export async function ingestHistoryChunk(
   let threads = 0;
 
   for (const t of e.threads) {
-    const contactId = await resolverContato(admin, orgId, t.contactPhone);
+    const contactId = await resolverContato(admin, orgId, {
+      phone: t.contactPhone,
+      bsuid: t.contactUserId,
+    });
     if (!contactId) {
       skipped += t.messages.length;
       continue;

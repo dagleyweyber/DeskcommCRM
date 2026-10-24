@@ -62,6 +62,11 @@ export interface RecipientInput {
    */
   waLid?: string | null | undefined;
   /**
+   * `contacts.wa_bsuid` (0198): o BSUID da Meta, para contato que ela identifica SÓ por ele
+   * (telefone omitido). Opcional: só o canal oficial o usa, e só quando não há telefone.
+   */
+  waBsuid?: string | null | undefined;
+  /**
    * Nome/ref da sessão no provider (`resolveSessionRef`). OPCIONAL porque só
    * o WAHA precisa — é o que permite perguntar ao `check-exists` qual é o
    * chatId REAL de um telefone antes de montar `@c.us` às cegas (achado ao

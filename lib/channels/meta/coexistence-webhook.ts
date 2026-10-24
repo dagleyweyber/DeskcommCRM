@@ -16,6 +16,8 @@
  * re-tentativa em backoff por horas.
  */
 
+import { ehBsuid } from "./endereco";
+
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
@@ -39,8 +41,12 @@ export interface EchoEvent {
   phoneNumberId: string;
   /** `wamid`. A chave de idempotência — e o que casa com o envio do próprio CRM. */
   externalId: string;
-  /** O CONTATO (destinatário). `from` é o número do negócio e nunca vira contato. */
-  to: string;
+  /**
+   * O CONTATO (destinatário). `from` é o número do negócio e nunca vira contato.
+   * `null` quando a Meta omite o telefone — aí `toUserId` (BSUID) identifica a pessoa.
+   */
+  to: string | null;
+  toUserId: string | null;
   sentAt: Date;
   type: string;
   text: string | null;
@@ -70,8 +76,10 @@ export interface HistoricoMensagem {
 }
 
 export interface HistoricoConversa {
-  /** Telefone do contato (o `id` da thread). */
-  contactPhone: string;
+  /** Telefone do contato (o `id` da thread), ou `null` quando a thread é identificada por BSUID. */
+  contactPhone: string | null;
+  /** BSUID do contato, quando o `id` da thread é um BSUID. */
+  contactUserId: string | null;
   messages: HistoricoMensagem[];
 }
 
@@ -160,14 +168,16 @@ export function parseEchoes(
   for (const raw of lista) {
     const id = str(raw.id);
     const to = str(raw.to);
+    const toUserId = str(raw.to_user_id);
     const tipo = str(raw.type) ?? "unknown";
-    if (!id || !to || !TIPOS_DE_ECO_QUE_VIRAM_MENSAGEM.has(tipo)) continue;
+    if (!id || (!to && !toUserId) || !TIPOS_DE_ECO_QUE_VIRAM_MENSAGEM.has(tipo)) continue;
     out.push({
       kind: "echo",
       wabaId,
       phoneNumberId,
       externalId: id,
       to,
+      toUserId,
       sentAt: epoch(raw.timestamp),
       type: tipo,
       text: textoDe(raw, tipo),
@@ -237,8 +247,12 @@ export function parseHistory(
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
     const threads: HistoricoConversa[] = [];
     for (const t of Array.isArray(bloco.threads) ? (bloco.threads as Record<string, unknown>[]) : []) {
-      const contactPhone = str(t.id);
-      if (!contactPhone) continue;
+      const threadId = str(t.id);
+      if (!threadId) continue;
+      // O `id` da thread é o telefone do contato — ou, para quem a Meta identifica só
+      // pelo BSUID, o próprio BSUID.
+      const contactUserId = ehBsuid(threadId) ? threadId : null;
+      const contactPhone = contactUserId ? null : threadId;
       const messages: HistoricoMensagem[] = [];
       for (const raw of Array.isArray(t.messages) ? (t.messages as Record<string, unknown>[]) : []) {
         const id = str(raw.id);
@@ -247,7 +261,7 @@ export function parseHistory(
         messages.push({
           externalId: id,
           // `from` é o telefone do contato (mensagem dele) ou o do negócio (nossa).
-          inbound: str(raw.from) === contactPhone,
+          inbound: str(raw.from) === threadId || str(raw.from_user_id) === threadId,
           sentAt: epoch(raw.timestamp),
           type: tipo,
           text: textoDe(raw, tipo),
@@ -255,7 +269,7 @@ export function parseHistory(
           status: str((raw.history_context as Record<string, unknown> | undefined)?.status),
         });
       }
-      if (messages.length > 0) threads.push({ contactPhone, messages });
+      if (messages.length > 0) threads.push({ contactPhone, contactUserId, messages });
     }
     out.push({
       kind: "history_chunk",

@@ -15866,6 +15866,100 @@ revoke execute on function public.fn_reabrir_conversa_importada(uuid)
 grant execute on function public.fn_reabrir_conversa_importada(uuid)
   to service_role;
 
+-- ---- contato identificado só pelo BSUID da Meta (migration 0198) ----
+-- Racional na migration. Mesmo desenho da 0122 (wa_lid); a função nova revoga as DUAS origens de EXECUTE.
+-- 1 · a chave de correlação (gerada, pelo mesmo motivo de `wa_identity`/`wa_lid`)
+alter table public.contacts
+  add column if not exists wa_bsuid text
+  generated always as (nullif(source_metadata->>'wa_bsuid', '')) stored;
+
+-- 2 · único por organização entre contatos vivos. Coluna nova: nenhum dado a deduplicar
+-- antes do índice (todos nascem nulos), então o `update.sh` do clone não quebra.
+create unique index if not exists uniq_contacts_org_wa_bsuid
+  on public.contacts (organization_id, wa_bsuid)
+  where wa_bsuid is not null and is_merged_into is null;
+
+-- 3 · achar ou criar o contato por BSUID, vinculando ao telefone quando ele aparece
+create or replace function public.fn_upsert_wa_contact_bsuid(
+  p_org uuid, p_bsuid text, p_phone text, p_notify text
+) returns uuid
+  language plpgsql
+  security definer
+  set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_por_telefone uuid;
+begin
+  if p_bsuid is null or btrim(p_bsuid) = '' then
+    raise exception 'fn_upsert_wa_contact_bsuid: bsuid obrigatorio';
+  end if;
+
+  -- (a) já conhecemos este BSUID
+  select id into v_id
+    from public.contacts
+   where organization_id = p_org and wa_bsuid = p_bsuid and is_merged_into is null
+   limit 1;
+  if v_id is not null then
+    -- Ganhou telefone? Só preenche se o contato ainda não tem E o número não é de OUTRO
+    -- contato (nesse caso a unicidade da identidade quebraria o upsert).
+    if p_phone is not null then
+      update public.contacts c
+         set phone_number = p_phone, updated_at = now()
+       where c.id = v_id
+         and c.phone_number is null
+         and not exists (
+           select 1 from public.contacts o
+            where o.organization_id = p_org and o.phone_number = p_phone
+              and o.is_merged_into is null and o.id <> v_id
+         );
+    end if;
+    return v_id;
+  end if;
+
+  -- (b) não conhecemos o BSUID, mas conhecemos o telefone: é o mesmo contato — guarda o
+  -- BSUID nele em vez de criar uma segunda pessoa.
+  if p_phone is not null then
+    select id into v_por_telefone
+      from public.contacts
+     where organization_id = p_org and phone_number = p_phone and is_merged_into is null
+     limit 1;
+    if v_por_telefone is not null then
+      update public.contacts
+         set source_metadata = coalesce(source_metadata, '{}'::jsonb)
+                               || jsonb_build_object('wa_bsuid', p_bsuid),
+             updated_at = now()
+       where id = v_por_telefone;
+      return v_por_telefone;
+    end if;
+  end if;
+
+  -- (c) pessoa nova (com ou sem telefone)
+  begin
+    insert into public.contacts
+      (organization_id, phone_number, source, consent, tags, source_metadata, display_name)
+    values
+      (p_org, p_phone, 'whatsapp', '{}'::jsonb, '{}'::text[],
+       jsonb_build_object('wa_bsuid', p_bsuid, 'notify_name', nullif(p_notify, '')),
+       nullif(p_notify, ''))
+    returning id into v_id;
+  exception when unique_violation then
+    -- Perdeu a corrida para outra inserção da mesma pessoa: devolve a que ganhou.
+    select id into v_id
+      from public.contacts
+     where organization_id = p_org and is_merged_into is null
+       and (wa_bsuid = p_bsuid or (p_phone is not null and phone_number = p_phone))
+     limit 1;
+  end;
+  return v_id;
+end;
+$$;
+
+revoke execute on function public.fn_upsert_wa_contact_bsuid(uuid, text, text, text)
+  from public, anon, authenticated;
+grant execute on function public.fn_upsert_wa_contact_bsuid(uuid, text, text, text)
+  to service_role;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
