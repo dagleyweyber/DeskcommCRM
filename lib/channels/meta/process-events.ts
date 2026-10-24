@@ -21,6 +21,7 @@ import {
   ingestContactSync,
   ingestEcho,
   ingestHistoryChunk,
+  ingestHistoryMedia,
   registrarHistoricoRecusado,
 } from "./coexistence-ingest";
 import { ingestMetaInbound } from "./ingest";
@@ -145,7 +146,11 @@ export async function processarEventosMeta(input: {
     // inbound). Aqui exigimos que seja o número DESTA sessão: o token do caminho é o
     // que amarra o payload a uma organização, e o corpo não pode escolher outra.
     if (
-      (e.kind === "echo" || e.kind === "history_chunk" || e.kind === "history_declined" || e.kind === "contact_sync") &&
+      (e.kind === "echo" ||
+        e.kind === "history_chunk" ||
+        e.kind === "history_media" ||
+        e.kind === "history_declined" ||
+        e.kind === "contact_sync") &&
       session.phoneNumberId &&
       e.phoneNumberId !== session.phoneNumberId
     ) {
@@ -169,6 +174,10 @@ export async function processarEventosMeta(input: {
       desfechos.push(
         r.status === "imported" ? `history:${r.inserted}+${r.skipped}` : `history:${r.status}`,
       );
+      continue;
+    }
+    if (e.kind === "history_media") {
+      desfechos.push(`history_media:${await ingestHistoryMedia(admin, e)}`);
       continue;
     }
     if (e.kind === "history_declined") {

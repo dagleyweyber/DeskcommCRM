@@ -34,6 +34,7 @@ import type {
   HistoricoMensagem,
   HistoryChunkEvent,
   HistoryDeclinedEvent,
+  HistoryMediaEvent,
 } from "./coexistence-webhook";
 
 type Admin = SupabaseClient;
@@ -207,6 +208,24 @@ function statusDoHistorico(m: HistoricoMensagem): string {
  * das últimas 14 dias, e pedir milhares de downloads de uma vez é o jeito de derrubar
  * o worker de mídia. A mensagem entra como texto com marcador honesto.
  */
+/**
+ * Texto de uma mensagem do histórico que não tem texto. Só `media_placeholder` é mídia de
+ * verdade (e será trocada pelo arquivo quando o complemento chegar); `errors` é uma
+ * mensagem de um tipo que a API não entrega, e dizer "mídia" para ela engana a clínica.
+ */
+function textoDoMarcador(tipo: string): string {
+  if (tipo === "errors") return "[mensagem de um tipo que a API do WhatsApp não entrega — veja no celular]";
+  if (tipo === "text") return "[mensagem anterior à conexão — não disponível]";
+  return "[mídia anterior à conexão — não disponível]";
+}
+
+/**
+ * `edit` e `revoke` mexem em uma mensagem que já existe; gravá-los como mensagem nova
+ * inventaria uma linha sem conteúdo ("mídia indisponível") ao lado da original. O efeito
+ * certo (aplicar a edição, ocultar a apagada) é decisão de produto que não está aqui.
+ */
+const TIPOS_QUE_NAO_SAO_MENSAGEM = new Set(["edit", "revoke"]);
+
 function linhaDoHistorico(
   m: HistoricoMensagem,
   base: {
@@ -225,7 +244,7 @@ function linhaDoHistorico(
     direction: m.inbound ? "inbound" : "outbound",
     status: statusDoHistorico(m),
     type: "text",
-    body: m.text ?? `[${m.type === "text" ? "mensagem" : "mídia"} anterior à conexão — não disponível]`,
+    body: m.text ?? textoDoMarcador(m.type),
     external_id: m.externalId,
     sent_via: "external_device",
     sent_at: m.sentAt.toISOString(),
@@ -260,7 +279,12 @@ export async function ingestHistoryChunk(
   let skipped = 0;
   let threads = 0;
 
-  for (const t of e.threads) {
+  for (const thread of e.threads) {
+    const mensagensDaThread = thread.messages.filter((m) => !TIPOS_QUE_NAO_SAO_MENSAGEM.has(m.type));
+    skipped += thread.messages.length - mensagensDaThread.length;
+    if (mensagensDaThread.length === 0) continue;
+    const t = { ...thread, messages: mensagensDaThread };
+
     const contactId = await resolverContato(admin, orgId, {
       phone: t.contactPhone,
       bsuid: t.contactUserId,
@@ -340,4 +364,128 @@ export async function registrarHistoricoRecusado(
     channel_session_id: sessao.id,
     code: e.code,
   });
+}
+
+/**
+ * Pede ao worker de mídia que baixe e guarde o arquivo. Mesmo evento e mesmo payload do
+ * canal ao vivo: o consumidor é um só. Falha não derruba a ingestão — a mensagem já
+ * existe, e o que se perde é só o arquivo.
+ */
+async function pedirPersistencia(
+  admin: Admin,
+  orgId: string,
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  const { error } = await admin.rpc("emit_event" as never, {
+    p_event_type: "media.persist_requested",
+    p_entity_kind: "message",
+    p_entity_id: messageId,
+    p_payload: { message_id: messageId, conversation_id: conversationId },
+    p_metadata: { source: "meta_cloud_webhook" },
+    p_organization_id: orgId,
+  } as never);
+  if (error) {
+    logger.warn("[meta.history-media] emit media.persist_requested falhou", {
+      message_id: messageId,
+      detail: error.message,
+    });
+  }
+}
+
+export type HistoricoMidiaOutcome =
+  | "atualizada"
+  | "criada"
+  | "duplicada"
+  | "no_session"
+  | "falhou";
+
+/**
+ * Mídia do histórico (sticker, áudio, imagem, vídeo, documento).
+ *
+ * ─── O que se mediu ────────────────────────────────────────────────────────
+ * Na primeira coexistência real, a Meta mandou ~125 entregas `history` sem `threads`,
+ * só com `messages[]`/`message_echoes[]` carregando a mídia. O CRM as descartava com
+ * 200. Conferindo contra o banco: só 1 de 24 tinha um marcador (`media_placeholder`)
+ * correspondente, por \`id\` ou por horário. Ou seja, boa parte dessas entregas NÃO é
+ * "complemento de algo que já importamos": elas SÃO a mensagem, e o bloco principal
+ * nunca a trouxe.
+ *
+ * Então o tratamento serve aos dois casos:
+ *   - já existe o marcador com este `id` → ATUALIZA com a mídia (e troca o texto
+ *     "mídia anterior…" pela legenda, se houver);
+ *   - não existe → CRIA a mensagem numa conversa histórica fechada (a mesma regra do
+ *     bloco principal: nada de IA, lead ou evento — a marca \`historico_importado\`).
+ *
+ * Nunca sobrescreve conteúdo real: se a linha existe e NÃO é um marcador, é duplicata.
+ */
+export async function ingestHistoryMedia(
+  admin: Admin,
+  e: HistoryMediaEvent,
+): Promise<HistoricoMidiaOutcome> {
+  const sessao = await sessionByPhoneNumberId(admin, e.phoneNumberId);
+  if (!sessao) return "no_session";
+  const orgId = sessao.organization_id;
+
+  const metadataDaMidia = {
+    meta_media_id: e.media.id,
+    ...(e.media.voice ? { voice: true } : {}),
+  };
+
+  const { data: existente } = await admin
+    .from("messages")
+    .select("id, conversation_id, metadata")
+    .eq("organization_id", orgId)
+    .eq("external_id", e.externalId)
+    .maybeSingle();
+
+  if (existente) {
+    const atual = (existente.metadata as Record<string, unknown> | null) ?? {};
+    if (atual.tipo_original !== "media_placeholder") return "duplicada";
+    const { error } = await admin
+      .from("messages")
+      .update({
+        type: e.type,
+        body: e.text,
+        media_url: e.media.id,
+        media_mime: e.media.mime,
+        metadata: { ...atual, ...metadataDaMidia, tipo_original: e.type },
+      })
+      .eq("id", existente.id as string)
+      .eq("organization_id", orgId);
+    if (error) return "falhou";
+    await pedirPersistencia(admin, orgId, existente.conversation_id as string, existente.id as string);
+    return "atualizada";
+  }
+
+  const contactId = await resolverContato(admin, orgId, { phone: e.phone, bsuid: e.userId });
+  if (!contactId) return "falhou";
+  const conversationId = await resolverConversa(admin, orgId, contactId, sessao.id, true);
+  if (!conversationId) return "falhou";
+
+  const { data: inserida, error } = await admin
+    .from("messages")
+    .insert({
+      organization_id: orgId,
+      conversation_id: conversationId,
+      channel_session_id: sessao.id,
+      contact_id: contactId,
+      direction: e.inbound ? "inbound" : "outbound",
+      status: e.inbound ? "delivered" : "sent",
+      type: e.type,
+      body: e.text,
+      external_id: e.externalId,
+      media_url: e.media.id,
+      media_mime: e.media.mime,
+      sent_via: "external_device",
+      sent_at: e.sentAt.toISOString(),
+      metadata: { origem: ORIGEM_HISTORICO, tipo_original: e.type, ...metadataDaMidia },
+    })
+    .select("id")
+    .maybeSingle();
+  if (error) return error.code === "23505" ? "duplicada" : "falhou";
+
+  const id = (inserida as { id: string } | null)?.id;
+  if (id) await pedirPersistencia(admin, orgId, conversationId, id);
+  return "criada";
 }

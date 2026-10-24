@@ -31,6 +31,8 @@ function epoch(v: unknown): Date {
 export interface MidiaRecebida {
   id: string;
   mime: string | null;
+  /** Nota de voz de verdade (e não anexo de áudio). */
+  voice?: boolean;
 }
 
 /** Mensagem que o dono mandou pelo app do celular (ou aparelho pareado). */
@@ -128,7 +130,31 @@ export interface AccountUpdateEvent {
   restrictionType: string | null;
 }
 
+/**
+ * Mensagem de MÍDIA do histórico que chega fora do bloco principal: campo `history`
+ * sem `threads`, com `messages[]` (do contato) ou `message_echoes[]` (nossas). É a
+ * mensagem em si — não um complemento de algo que já importamos (ver
+ * `ingestHistoryMedia`).
+ */
+export interface HistoryMediaEvent {
+  kind: "history_media";
+  wabaId: string;
+  phoneNumberId: string;
+  externalId: string;
+  /** `messages[]` = o contato escreveu; `message_echoes[]` = a clínica enviou. */
+  inbound: boolean;
+  /** Telefone do CONTATO (`from` na entrada, `to` na saída); `null` quando a Meta o omite. */
+  phone: string | null;
+  /** BSUID do contato (`from_user_id` / `to_user_id`). */
+  userId: string | null;
+  sentAt: Date;
+  type: string;
+  text: string | null;
+  media: MidiaRecebida;
+}
+
 export type CoexistenceEvent =
+  | HistoryMediaEvent
   | EchoEvent
   | ContactSyncEvent
   | HistoryChunkEvent
@@ -138,7 +164,9 @@ export type CoexistenceEvent =
 function midiaDe(raw: Record<string, unknown>, tipo: string): MidiaRecebida | null {
   const corpo = raw[tipo] as Record<string, unknown> | undefined;
   const id = str(corpo?.id);
-  return id ? { id, mime: str(corpo?.mime_type) } : null;
+  return id
+    ? { id, mime: str(corpo?.mime_type), ...(corpo?.voice === true ? { voice: true } : {}) }
+    : null;
 }
 
 function textoDe(raw: Record<string, unknown>, tipo: string): string | null {
@@ -153,7 +181,9 @@ function textoDe(raw: Record<string, unknown>, tipo: string): string | null {
  * mensagem que já existe; tratá-los como mensagem nova inventaria uma linha — e o
  * efeito certo (apagar/editar a original) é decisão de produto que não está aqui.
  */
-const TIPOS_DE_ECO_QUE_VIRAM_MENSAGEM = new Set(["text", "image", "video", "document", "audio"]);
+// `sticker` entra: figurinha enviada pelo celular da clínica é mensagem como as outras (e a
+// Meta já a entrega pelo eco). Sem ele, esse eco era descartado em silêncio.
+const TIPOS_DE_ECO_QUE_VIRAM_MENSAGEM = new Set(["text", "image", "video", "document", "audio", "sticker"]);
 
 export function parseEchoes(
   wabaId: string,
@@ -313,6 +343,48 @@ export function parseAccountUpdate(
   ];
 }
 
+const TIPOS_DE_MIDIA_DO_HISTORICO = new Set(["image", "video", "audio", "document", "sticker"]);
+
+export function parseHistoryMedia(
+  wabaId: string,
+  value: Record<string, unknown>,
+): HistoryMediaEvent[] {
+  const meta = (value.metadata ?? {}) as Record<string, unknown>;
+  const phoneNumberId = str(meta.phone_number_id) ?? "";
+  const out: HistoryMediaEvent[] = [];
+  for (const [lista, inbound] of [
+    ["messages", true],
+    ["message_echoes", false],
+  ] as const) {
+    const itens = Array.isArray(value[lista]) ? (value[lista] as Record<string, unknown>[]) : [];
+    for (const raw of itens) {
+      const id = str(raw.id);
+      const tipo = str(raw.type) ?? "unknown";
+      if (!id || !TIPOS_DE_MIDIA_DO_HISTORICO.has(tipo)) continue;
+      const media = midiaDe(raw, tipo);
+      if (!media) continue;
+      const phone = inbound ? str(raw.from) : str(raw.to);
+      const userId = inbound ? str(raw.from_user_id) : str(raw.to_user_id);
+      // Sem NENHUM identificador do contato não há conversa a que ligar a mensagem.
+      if (!phone && !userId) continue;
+      out.push({
+        kind: "history_media",
+        wabaId,
+        phoneNumberId,
+        externalId: id,
+        inbound,
+        phone,
+        userId,
+        sentAt: epoch(raw.timestamp),
+        type: tipo,
+        text: textoDe(raw, tipo),
+        media,
+      });
+    }
+  }
+  return out;
+}
+
 /** Despacha um `change` para o parser do campo. Campo que não é daqui devolve `[]`. */
 export function parseCoexistenceChange(
   field: string | undefined,
@@ -321,7 +393,9 @@ export function parseCoexistenceChange(
 ): CoexistenceEvent[] {
   if (field === "smb_message_echoes") return parseEchoes(wabaId, value);
   if (field === "smb_app_state_sync") return parseContactSync(wabaId, value);
-  if (field === "history") return parseHistory(wabaId, value);
+  // `history` tem DUAS formas: o bloco principal (`history[].threads`) e a mídia solta
+  // (`messages[]`/`message_echoes[]`). Os dois parsers se ignoram quando a forma não é a sua.
+  if (field === "history") return [...parseHistory(wabaId, value), ...parseHistoryMedia(wabaId, value)];
   if (field === "account_update") return parseAccountUpdate(wabaId, value);
   return [];
 }
