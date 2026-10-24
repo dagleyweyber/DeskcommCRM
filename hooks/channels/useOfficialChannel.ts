@@ -84,3 +84,21 @@ export function useConcluirEmbeddedSignup() {
     },
   });
 }
+
+export interface ResultadoReativacao {
+  reactivated: boolean;
+  sync: Record<string, { ok: boolean; motivo?: string; requestId?: string | null }>;
+}
+
+/** Refaz recebimento + pedido de histórico de uma conexão em coexistência que ficou pela metade. */
+export function useReativarCoexistencia() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      apiClient.post<{ data: ResultadoReativacao }>("/api/v1/channels/official/embedded/reativar", {}),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["official-channel"] });
+    },
+  });
+}

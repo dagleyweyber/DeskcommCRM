@@ -75,20 +75,36 @@ describe("numerosDoAppNaWaba", () => {
 });
 
 describe("subscribeWabaComOverride", () => {
-  it("POST com override_callback_uri + verify_token em JSON e Bearer", async () => {
+  it("⭐ DOIS passos, nesta ordem: assinatura simples e SÓ DEPOIS o override (a Meta recusa o inverso)", async () => {
     const f = resposta({ success: true });
     const r = await subscribeWabaComOverride({
       wabaId: "W", token: "t", callbackUri: "https://x.test/api/v1/webhooks/meta/abc", verifyToken: "v", fetchImpl: f,
     });
     expect(r.ok).toBe(true);
-    const [url, init] = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(String(url)).toContain("/W/subscribed_apps");
-    expect(init.method).toBe("POST");
-    expect(init.headers.Authorization).toBe("Bearer t");
-    expect(JSON.parse(init.body)).toEqual({
+    const chamadas = (f as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(chamadas).toHaveLength(2);
+
+    const [url1, init1] = chamadas[0]!;
+    expect(String(url1)).toContain("/W/subscribed_apps");
+    expect(init1.method).toBe("POST");
+    expect(init1.body).toBeUndefined(); // simples: sem corpo
+
+    const [url2, init2] = chamadas[1]!;
+    expect(String(url2)).toContain("/W/subscribed_apps");
+    expect(init2.headers.Authorization).toBe("Bearer t");
+    expect(JSON.parse(init2.body)).toEqual({
       override_callback_uri: "https://x.test/api/v1/webhooks/meta/abc",
       verify_token: "v",
     });
+  });
+
+  it("⭐ se a assinatura simples falha, o override NEM é tentado", async () => {
+    const f = resposta({ error: { message: "(#100) denied" } }, false);
+    const r = await subscribeWabaComOverride({
+      wabaId: "W", token: "t", callbackUri: "https://x.test/p", verifyToken: "v", fetchImpl: f,
+    });
+    expect(r).toEqual({ ok: false, motivo: "(#100) denied" });
+    expect(f).toHaveBeenCalledTimes(1);
   });
 
   it("URL acima de 200 caracteres é recusada ANTES de chamar a Meta", async () => {

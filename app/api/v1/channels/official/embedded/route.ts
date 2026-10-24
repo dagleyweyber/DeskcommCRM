@@ -27,13 +27,12 @@ import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
+import { ativarCoexistencia } from "@/lib/channels/meta/embedded-activate";
 import { embeddedSignupConfig } from "@/lib/channels/meta/embedded-config";
 import {
   exchangeEmbeddedCode,
   infoDoNumero,
   numerosDoAppNaWaba,
-  pedirSincronizacao,
-  subscribeWabaComOverride,
   wabaIdsDoToken,
 } from "@/lib/channels/meta/embedded-signup";
 import { reactivateChannelSession } from "@/lib/channels/reactivate";
@@ -244,15 +243,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail("internal_error", "channel_session_not_found_after_write", 500, { requestId });
   }
 
-  const assinatura = await subscribeWabaComOverride({
+  // 4+5. Recebimento e depois agenda/histórico — mesma sequência da reativação
+  // (`ativarCoexistencia`). O histórico vale UMA vez e só nas 24h do onboarding, então
+  // só é pedido com o recebimento já de pé.
+  const ativacao = await ativarCoexistencia({
     wabaId: waba_id,
+    phoneNumberId: phone_number_id,
     token: troca.token,
     callbackUri: `${publicBase(req)}/api/v1/webhooks/meta/${sessao.webhook_path_token}`,
     verifyToken,
   });
-  if (!assinatura.ok) {
-    // A sessão fica gravada, mas SEM receber: marcar como falha é o que impede a
-    // tela de dizer "conectado" para um canal que nunca vai ouvir o cliente.
+  if (!ativacao.ok) {
+    // A sessão fica gravada, mas SEM receber. Marcar como falha impede a tela de dizer
+    // "conectado" para um canal que não ouve o cliente; a tela oferece "Reativar".
     await admin
       .from("channel_sessions")
       .update({ status: "FAILED" })
@@ -261,23 +264,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     logger.warn("embedded-signup: assinatura da WABA falhou", {
       request_id: requestId,
       waba_id,
-      motivo: assinatura.motivo,
+      motivo: ativacao.motivo,
     });
     return fail(
       "bad_gateway",
-      `Número conectado, mas não consegui ativar o recebimento de mensagens: ${assinatura.motivo}`,
+      `Número conectado, mas não consegui ativar o recebimento de mensagens: ${ativacao.motivo}. Use "Reativar recebimento" na tela de Conexões.`,
       502,
       { requestId },
     );
   }
-
-  // 5. Agenda e histórico do app — UMA vez cada, dentro de 24h do onboarding. Só agora
-  // que o recebimento está assinado. Falha aqui NÃO desfaz a conexão (o número já
-  // atende); fica no log com o motivo para o suporte da Meta.
-  const sync: Record<string, { ok: boolean; motivo?: string; requestId?: string | null }> = {};
-  for (const tipo of ["smb_app_state_sync", "history"] as const) {
-    const r = await pedirSincronizacao({ phoneNumberId: phone_number_id, token: troca.token, tipo });
-    sync[tipo] = r.ok ? { ok: true, requestId: r.requestId } : { ok: false, motivo: r.motivo };
+  const sync = ativacao.sync;
+  for (const [tipo, r] of Object.entries(sync)) {
     if (!r.ok) {
       logger.warn("embedded-signup: pedido de sincronização falhou", {
         request_id: requestId,

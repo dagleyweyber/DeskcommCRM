@@ -129,10 +129,17 @@ export async function infoDoNumero(
 }
 
 /**
- * Assina o app à WABA apontando as entregas DESTA WABA para a URL da sessão.
+ * Assina o app à WABA — PRIMEIRO de forma simples, DEPOIS com `override_callback_uri`.
+ *
+ * A ordem não é opcional: a Meta recusa o override de uma WABA em que o app ainda não
+ * está assinado (`(#100) Before override the current callback uri, your app must be
+ * subscribed…`, medido ao vivo na primeira conexão real). A doc diz o mesmo em
+ * "Requirements": o app precisa estar assinado antes. Assinar de novo uma WABA já
+ * assinada é idempotente, então reexecutar (reativação) é seguro.
+ *
  * `override_callback_uri` tem teto de 200 caracteres (doc da Meta) — a URL com o
- * token do caminho cabe, mas o teste trava para não regredir em silêncio.
- * Template e `account_update` seguem indo à URL padrão do app (doc da Meta).
+ * token do caminho cabe, mas o teste trava para não regredir em silêncio. Template e
+ * `account_update` seguem indo à URL padrão do app (doc da Meta).
  */
 export async function subscribeWabaComOverride(
   input: { wabaId: string; token: string; callbackUri: string; verifyToken: string } & Opcoes,
@@ -141,26 +148,31 @@ export async function subscribeWabaComOverride(
     return { ok: false, motivo: "callback_uri_maior_que_200_caracteres" };
   }
   const f = input.fetchImpl ?? fetch;
-  try {
-    const res = await f(
-      `https://graph.facebook.com/${versao(input.graphVersion)}/${input.wabaId}/subscribed_apps`,
-      {
+  const url = `https://graph.facebook.com/${versao(input.graphVersion)}/${input.wabaId}/subscribed_apps`;
+  const cabecalho = { Authorization: `Bearer ${input.token}` };
+
+  async function chamar(corpo: Record<string, string> | null): Promise<ResultadoEmbedded<object>> {
+    try {
+      const res = await f(url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${input.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          override_callback_uri: input.callbackUri,
-          verify_token: input.verifyToken,
-        }),
-      },
-    );
-    const body = (await res.json().catch(() => ({}))) as GraphErro & { success?: boolean };
-    if (!res.ok || body.error || body.success === false) {
-      return { ok: false, motivo: motivoDe(body, res.status) };
+        headers: corpo ? { ...cabecalho, "Content-Type": "application/json" } : cabecalho,
+        ...(corpo ? { body: JSON.stringify(corpo) } : {}),
+      });
+      const body = (await res.json().catch(() => ({}))) as GraphErro & { success?: boolean };
+      if (!res.ok || body.error || body.success === false) {
+        return { ok: false, motivo: motivoDe(body, res.status) };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
     }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, motivo: `rede indisponível: ${err instanceof Error ? err.message : "erro"}` };
   }
+
+  // 1. assinatura simples (sem corpo)
+  const simples = await chamar(null);
+  if (!simples.ok) return simples;
+  // 2. endereço de recebimento desta sessão
+  return chamar({ override_callback_uri: input.callbackUri, verify_token: input.verifyToken });
 }
 
 /**

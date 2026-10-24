@@ -12,6 +12,7 @@ import {
   useConnectOfficialChannel,
   useEmbeddedSignupConfig,
   useOfficialChannel,
+  useReativarCoexistencia,
 } from "@/hooks/channels/useOfficialChannel";
 import { abrirEmbeddedSignup } from "@/lib/channels/meta/embedded-popup";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -57,6 +58,7 @@ export function CanalOficialClient() {
   const conectar = useConnectOfficialChannel();
   const embeddedCfg = useEmbeddedSignupConfig();
   const concluirEmbedded = useConcluirEmbeddedSignup();
+  const reativar = useReativarCoexistencia();
   const [abrindo, setAbrindo] = useState(false);
   const [form, setForm] = useState({ phone_number_id: "", waba_id: "", app_id: "", token: "" });
 
@@ -92,6 +94,19 @@ export function CanalOficialClient() {
       toast.success(`Conectado: ${res.data.displayName} ${res.data.phoneNumber ?? ""}`.trim());
     } finally {
       setAbrindo(false);
+    }
+  }
+
+  async function reativarRecebimento() {
+    const r = await reativar.mutateAsync();
+    const pend = Object.entries(r.data.sync).filter(([, v]) => !v.ok);
+    if (pend.length === 0) {
+      toast.success("Recebimento ativado e histórico solicitado à Meta.");
+    } else {
+      // A Meta só aceita cada pedido UMA vez: recusa de pedido repetido não é falha da conexão.
+      toast.success("Recebimento ativado.", {
+        description: pend.map(([k, v]) => `${k}: ${v.motivo ?? "recusado"}`).join(" · "),
+      });
     }
   }
 
@@ -133,6 +148,23 @@ export function CanalOficialClient() {
               </span>
             )}
           </p>
+          {estado.connectionMode === "embedded_coexistence" ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={reativarRecebimento}
+                disabled={reativar.isPending}
+                data-testid="btn-reativar-coexistencia"
+              >
+                {reativar.isPending ? "Reativando…" : "Reativar recebimento"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Use se as mensagens do cliente não estiverem chegando. Reassina a conta na Meta e
+                pede o histórico (a Meta só aceita esse pedido nas primeiras 24 horas).
+              </span>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 
