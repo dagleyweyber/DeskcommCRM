@@ -73,6 +73,7 @@ const eco: EchoEvent = {
   phoneNumberId: "PN1",
   externalId: "wamid.E1",
   to: "5584988887777",
+  toUserId: null,
   sentAt: new Date("2026-10-23T12:00:00Z"),
   type: "text",
   text: "oi",
@@ -137,6 +138,7 @@ const chunk = (msgs: Array<[string, boolean]>): HistoryChunkEvent => ({
   threads: [
     {
       contactPhone: "5584988887777",
+      contactUserId: null,
       messages: msgs.map(([id, inbound], i) => ({
         externalId: id,
         inbound,
