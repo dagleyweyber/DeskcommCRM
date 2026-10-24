@@ -73,9 +73,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       motivo: ativacao.motivo,
     });
     return fail(
-      "bad_gateway",
+      "external_dependency_failed",
       `Não consegui ativar o recebimento de mensagens: ${ativacao.motivo}`,
-      502,
+      424,
       { requestId },
     );
   }

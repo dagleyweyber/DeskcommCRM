@@ -27,6 +27,7 @@ import { logger } from "@/lib/logger";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { phoneLookupVariants } from "../phone-variants";
+import { reabrirConversaImportada } from "./conversa-importada";
 import type { InboundMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
@@ -195,6 +196,10 @@ export async function ingestMetaInbound(
     if (erroInsert.code === "23505") return { status: "duplicate" };
     return { status: "failed", reason: `mensagem: ${erroInsert.message}` };
   }
+
+  // Conversa que veio do histórico da coexistência está FECHADA; o cliente voltou a
+  // falar, então ela reabre (e pede roteamento) ANTES dos efeitos de negócio abaixo.
+  await reabrirConversaImportada(admin, conversationId as string);
 
   // Carimba a conversa — é ISTO que move `last_inbound_at` e abre a janela de 24h.
   // Falha aqui não derruba a ingestão (a mensagem já entrou), mas o preview e a

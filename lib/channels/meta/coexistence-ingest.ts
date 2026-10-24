@@ -38,11 +38,10 @@ import type {
 
 type Admin = SupabaseClient;
 
-/**
- * Marca de linha importada. A migration 0196 lê esta MESMA string — mudar um lado
- * sem o outro reabre a enxurrada de eventos.
- */
-export const ORIGEM_HISTORICO = "historico_importado";
+import { ORIGEM_HISTORICO, reabrirConversaImportada } from "./conversa-importada";
+
+// Reexportada: é a marca que a migration 0196 (mensagens) e a 0197 (conversas) leem.
+export { ORIGEM_HISTORICO };
 
 async function resolverContato(
   admin: Admin,
@@ -69,12 +68,13 @@ async function resolverConversa(
   orgId: string,
   contactId: string,
   sessionId: string,
+  /** Histórico cria a conversa FECHADA e marcada (migration 0197); o eco usa a comum. */
+  historica = false,
 ): Promise<string | null> {
-  const { data, error } = await admin.rpc("fn_upsert_wa_conversation" as never, {
-    p_org: orgId,
-    p_contact: contactId,
-    p_session: sessionId,
-  } as never);
+  const { data, error } = await admin.rpc(
+    (historica ? "fn_upsert_wa_conversation_historica" : "fn_upsert_wa_conversation") as never,
+    { p_org: orgId, p_contact: contactId, p_session: sessionId } as never,
+  );
   if (error || !data) return null;
   return data as unknown as string;
 }
@@ -139,6 +139,10 @@ export async function ingestEcho(admin: Admin, e: EchoEvent): Promise<EcoOutcome
     return { status: "failed", reason: `mensagem: ${error.message}` };
   }
 
+  // A clínica respondeu pelo celular numa conversa que veio do histórico: ela está
+  // ativa de novo. Reabre ANTES de carimbar, para o carimbo cair numa conversa aberta.
+  await reabrirConversaImportada(admin, conversationId);
+
   // Direção `outbound`: move `last_outbound_at` e NÃO toca `last_inbound_at` — é o que
   // impede o eco de renovar a janela de 24h do cliente.
   await admin.rpc("fn_mark_conversation_message" as never, {
@@ -189,8 +193,11 @@ export async function ingestContactSync(
 function statusDoHistorico(m: HistoricoMensagem): string {
   if (m.inbound) return "delivered";
   switch (m.status) {
+    // ERROR no histórico é um fato antigo do app do celular. Gravá-lo como `failed`
+    // faria mensagens de meses atrás contarem como falhas recentes no painel de saúde
+    // (que mede por `created_at`, e a linha nasce agora). O original fica em metadata.
     case "ERROR":
-      return "failed";
+      return "sent";
     case "DELIVERED":
       return "delivered";
     case "READ":
@@ -228,7 +235,12 @@ function linhaDoHistorico(
     external_id: m.externalId,
     sent_via: "external_device",
     sent_at: m.sentAt.toISOString(),
-    metadata: { origem: ORIGEM_HISTORICO, tipo_original: m.type, fase: base.phase },
+    metadata: {
+      origem: ORIGEM_HISTORICO,
+      tipo_original: m.type,
+      fase: base.phase,
+      ...(m.status === "ERROR" ? { status_original: "ERROR" } : {}),
+    },
   };
 }
 
@@ -260,7 +272,7 @@ export async function ingestHistoryChunk(
       skipped += t.messages.length;
       continue;
     }
-    const conversationId = await resolverConversa(admin, orgId, contactId, sessao.id);
+    const conversationId = await resolverConversa(admin, orgId, contactId, sessao.id, true);
     if (!conversationId) {
       skipped += t.messages.length;
       continue;

@@ -33,7 +33,10 @@ function fakeAdmin(opts: { jaExistem?: string[]; erroInsert?: { code: string; me
     rpc: async (nome: string, args: Record<string, unknown>) => {
       rpcs.push({ nome, args });
       if (nome === "fn_upsert_wa_contact") return { data: "contact-1", error: null };
-      if (nome === "fn_upsert_wa_conversation") return { data: "conv-1", error: null };
+      if (nome === "fn_upsert_wa_conversation" || nome === "fn_upsert_wa_conversation_historica") {
+        return { data: "conv-1", error: null };
+      }
+      if (nome === "fn_reabrir_conversa_importada") return { data: false, error: null };
       return { data: null, error: null };
     },
     from: (tabela: string) => ({
@@ -102,6 +105,16 @@ describe("ingestEcho", () => {
     expect(posEntrada).not.toHaveBeenCalled();
   });
 
+  it("⭐ a clínica respondeu pelo celular numa conversa do histórico: tenta reabri-la (e antes de carimbar)", async () => {
+    const { admin, rpcs } = fakeAdmin();
+    await ingestEcho(admin, eco);
+    const nomes = rpcs.map((x) => x.nome);
+    expect(nomes).toContain("fn_reabrir_conversa_importada");
+    expect(nomes.indexOf("fn_reabrir_conversa_importada")).toBeLessThan(
+      nomes.indexOf("fn_mark_conversation_message"),
+    );
+  });
+
   it("o eco de mensagem que o próprio CRM mandou (mesmo wamid) é duplicata, não erro", async () => {
     const { admin } = fakeAdmin({ erroInsert: { code: "23505", message: "dup" } });
     expect(await ingestEcho(admin, eco)).toEqual({ status: "duplicate" });
@@ -150,6 +163,24 @@ describe("ingestHistoryChunk", () => {
       expect(l.sent_via).toBe("external_device");
     }
     expect(linhas.map((l) => l.direction)).toEqual(["inbound", "outbound"]);
+  });
+
+  it("⭐ cria a conversa pela função HISTÓRICA (fechada e marcada) — nunca pela comum, que a deixaria aberta e roteada", async () => {
+    const { admin, rpcs } = fakeAdmin();
+    await ingestHistoryChunk(admin, chunk([["a", true]]));
+    const nomes = rpcs.map((x) => x.nome);
+    expect(nomes).toContain("fn_upsert_wa_conversation_historica");
+    expect(nomes).not.toContain("fn_upsert_wa_conversation");
+  });
+
+  it("mensagem antiga com ERRO de envio entra como enviada — não polui as falhas recentes do painel de saúde", async () => {
+    const { admin, chamadas } = fakeAdmin();
+    const c = chunk([["a", false]]);
+    c.threads[0]!.messages[0] = { ...c.threads[0]!.messages[0]!, status: "ERROR" };
+    await ingestHistoryChunk(admin, c);
+    const [linha] = chamadas.find((x) => x.tabela === "messages")!.arg as Array<Record<string, unknown>>;
+    expect(linha!.status).toBe("sent");
+    expect((linha!.metadata as Record<string, unknown>).status_original).toBe("ERROR");
   });
 
   it("não aciona pos-entrada e não mexe em janela/não-lidas (nada de fn_mark_conversation_message)", async () => {

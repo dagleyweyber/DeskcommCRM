@@ -179,14 +179,28 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
             ).join(" — ") || null
           : null;
 
+      // Falha com motivo: MESCLA no metadata existente. Substituir apagava as outras
+      // chaves da linha (marca do histórico, id da mídia, flag de voz).
+      let metadataMesclado: Record<string, unknown> | null = null;
+      if (detalheErro) {
+        const { data: atual } = await admin
+          .from("messages")
+          .select("metadata")
+          .eq("organization_id", session.organizationId)
+          .eq("external_id", e.externalId)
+          .maybeSingle();
+        metadataMesclado = {
+          ...((atual?.metadata as Record<string, unknown> | null) ?? {}),
+          failure_code: e.errorCode,
+          failure_reason: detalheErro,
+        };
+      }
       await admin
         .from("messages")
         .update({
           status: e.status === "failed" ? "failed" : "sent",
           updated_at: now,
-          ...(detalheErro
-            ? { metadata: { failure_code: e.errorCode, failure_reason: detalheErro } }
-            : {}),
+          ...(metadataMesclado ? { metadata: metadataMesclado } : {}),
         })
         .eq("organization_id", session.organizationId)
         .eq("external_id", e.externalId);
