@@ -8,9 +8,13 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  useConcluirEmbeddedSignup,
   useConnectOfficialChannel,
+  useEmbeddedSignupConfig,
   useOfficialChannel,
+  useReativarCoexistencia,
 } from "@/hooks/channels/useOfficialChannel";
+import { abrirEmbeddedSignup } from "@/lib/channels/meta/embedded-popup";
 import { copyToClipboard } from "@/lib/clipboard";
 
 /** Campo somente-leitura com botão de copiar — o que o operador cola na Meta. */
@@ -52,6 +56,10 @@ function ParaColar({ rotulo, valor }: { rotulo: string; valor: string | null }) 
 export function CanalOficialClient() {
   const { data, isPending } = useOfficialChannel();
   const conectar = useConnectOfficialChannel();
+  const embeddedCfg = useEmbeddedSignupConfig();
+  const concluirEmbedded = useConcluirEmbeddedSignup();
+  const reativar = useReativarCoexistencia();
+  const [abrindo, setAbrindo] = useState(false);
   const [form, setForm] = useState({ phone_number_id: "", waba_id: "", app_id: "", token: "" });
 
   const estado = data?.data;
@@ -68,6 +76,40 @@ export function CanalOficialClient() {
     setForm((f) => ({ ...f, token: "" }));
   }
 
+  async function conectarComMeta() {
+    const cfg = embeddedCfg.data?.data;
+    if (!cfg?.enabled) return;
+    setAbrindo(true);
+    try {
+      const r = await abrirEmbeddedSignup(cfg);
+      if (!r.ok) {
+        if (r.motivo === "erro") toast.error(r.detalhe ?? "Não foi possível abrir a conexão com a Meta.");
+        return;
+      }
+      const res = await concluirEmbedded.mutateAsync({
+        code: r.code,
+        waba_id: r.wabaId,
+        ...(r.phoneNumberId ? { phone_number_id: r.phoneNumberId } : {}),
+      });
+      toast.success(`Conectado: ${res.data.displayName} ${res.data.phoneNumber ?? ""}`.trim());
+    } finally {
+      setAbrindo(false);
+    }
+  }
+
+  async function reativarRecebimento() {
+    const r = await reativar.mutateAsync();
+    const pend = Object.entries(r.data.sync).filter(([, v]) => !v.ok);
+    if (pend.length === 0) {
+      toast.success("Recebimento ativado e histórico solicitado à Meta.");
+    } else {
+      // A Meta só aceita cada pedido UMA vez: recusa de pedido repetido não é falha da conexão.
+      toast.success("Recebimento ativado.", {
+        description: pend.map(([k, v]) => `${k}: ${v.motivo ?? "recusado"}`).join(" · "),
+      });
+    }
+  }
+
   if (isPending) return <p className="text-sm text-muted-foreground">Carregando…</p>;
 
   return (
@@ -82,6 +124,9 @@ export function CanalOficialClient() {
               </Badge>
             ) : null}
             <Badge>{estado.status ?? "—"}</Badge>
+            {estado.connectionMode === "embedded_coexistence" ? (
+              <Badge variant="outline">coexistência (app do celular mantido)</Badge>
+            ) : null}
             {/* Mostra que o token EXISTE, nunca qual é. */}
             <Badge variant={estado.hasToken ? "outline" : "destructive"}>
               {estado.hasToken ? "credencial guardada" : "sem credencial"}
@@ -103,6 +148,23 @@ export function CanalOficialClient() {
               </span>
             )}
           </p>
+          {estado.connectionMode === "embedded_coexistence" ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={reativarRecebimento}
+                disabled={reativar.isPending}
+                data-testid="btn-reativar-coexistencia"
+              >
+                {reativar.isPending ? "Reativando…" : "Reativar recebimento"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Use se as mensagens do cliente não estiverem chegando. Reassina a conta na Meta e
+                pede o histórico (a Meta só aceita esse pedido nas primeiras 24 horas).
+              </span>
+            </div>
+          ) : null}
         </Card>
       ) : null}
 
@@ -129,6 +191,28 @@ export function CanalOficialClient() {
                 </Badge>
               ))}
             </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {embeddedCfg.data?.data.enabled ? (
+        <Card className="flex flex-col gap-3 p-4" data-testid="card-conectar-meta">
+          <div>
+            <h2 className="font-medium">Conectar com a Meta (mantém o app do celular)</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Use o número que você já tem no <strong>app WhatsApp Business</strong>. O app
+              continua funcionando no celular e o CRM passa a atender no mesmo número, sem
+              perder as conversas. Você vai autorizar na janela da Meta — nada de colar token.
+            </p>
+          </div>
+          <div>
+            <Button
+              onClick={conectarComMeta}
+              disabled={abrindo || concluirEmbedded.isPending}
+              data-testid="btn-conectar-meta"
+            >
+              {abrindo || concluirEmbedded.isPending ? "Conectando…" : "Conectar com a Meta"}
+            </Button>
           </div>
         </Card>
       ) : null}

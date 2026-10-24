@@ -29,6 +29,7 @@ import {
   type TemplateBinding,
 } from "./template-binding";
 import { deriveTemplateContract } from "./template-contract";
+import { destinoNoCorpo } from "./endereco";
 
 export interface SendTemplateInput {
   phoneNumberId: string;
@@ -105,7 +106,7 @@ export async function sendTemplate(input: SendTemplateInput): Promise<SendTempla
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
-      to: input.to,
+      ...destinoNoCorpo(input.to),
       type: "template",
       template: {
         name: input.binding.name,

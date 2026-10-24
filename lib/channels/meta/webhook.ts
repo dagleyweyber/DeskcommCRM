@@ -17,6 +17,12 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import {
+  parseCoexistenceChange,
+  parseHistoryDeclinedTopLevel,
+  type CoexistenceEvent,
+} from "./coexistence-webhook";
+
 /** Assinatura da Meta: `sha256=<hex>` no header `X-Hub-Signature-256`. */
 export function verifyMetaSignature(
   rawBody: string,
@@ -87,8 +93,14 @@ export interface InboundMessageEvent {
    * `wa_id` do contato. **Pode vir sem o nono dígito** em celular brasileiro
    * (medido: 553198966398 para quem recebemos como 5531998966398) — quem resolve o
    * contato TEM de usar `phoneLookupVariants`, senão duplica a pessoa.
+   *
+   * `null` quando a Meta OMITE o telefone (pessoa com nome de usuário, sem contato nos
+   * últimos 30 dias): nesse caso `userId` é o único identificador, e a mensagem NÃO
+   * pode ser descartada.
    */
-  from: string;
+  from: string | null;
+  /** BSUID da pessoa (`from_user_id`/`contacts[].user_id`). Sempre presente nos webhooks novos. */
+  userId: string | null;
   profileName: string | null;
   sentAt: Date;
   /** `text` | `audio` | `image` | `video` | `document` | `sticker` | … */
@@ -125,7 +137,11 @@ export interface MessageStatusEvent {
   errorDetails: string | null;
 }
 
-export type MetaWebhookEvent = TemplateStatusEvent | MessageStatusEvent | InboundMessageEvent;
+export type MetaWebhookEvent =
+  | TemplateStatusEvent
+  | MessageStatusEvent
+  | InboundMessageEvent
+  | CoexistenceEvent;
 
 interface MetaChange {
   field?: string;
@@ -184,12 +200,23 @@ function parseAdReferral(raw: Record<string, unknown>): AdReferral | null {
  */
 export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEvent[] {
   const out: MetaWebhookEvent[] = [];
+  // A recusa de histórico (erro 2593109) chega sem envelope — ver `coexistence-webhook.ts`.
+  if (envelope && (envelope as { object?: unknown }).object === undefined) {
+    return parseHistoryDeclinedTopLevel(envelope);
+  }
   if (envelope?.object !== "whatsapp_business_account") return out;
 
   for (const entry of envelope.entry ?? []) {
     const wabaId = str(entry.id) ?? "";
     for (const change of entry.changes ?? []) {
       const v = change.value ?? {};
+
+      // Coexistência: ecos do celular, histórico e agenda. Parsers em módulo próprio.
+      const coex = parseCoexistenceChange(change.field, wabaId, v);
+      if (coex.length > 0) {
+        out.push(...coex);
+        continue;
+      }
 
       if (change.field === "message_template_status_update") {
         const name = str(v.message_template_name);
@@ -215,9 +242,14 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
         for (const raw of v.messages as Record<string, unknown>[]) {
           const id = str(raw.id);
           const from = str(raw.from);
-          if (!id || !from) continue; // payload capenga não vira linha meia-boca
+          const fromUserId = str(raw.from_user_id);
+          // Precisa de ALGUM identificador: telefone ou BSUID. Sem os dois, é payload
+          // capenga e não vira linha meia-boca; com só o BSUID, é uma pessoa de verdade.
+          if (!id || (!from && !fromUserId)) continue;
 
-          const perfil = contatos.find((c) => str(c.wa_id) === from);
+          const perfil = contatos.find(
+            (c) => (from && str(c.wa_id) === from) || (fromUserId && str(c.user_id) === fromUserId),
+          );
           const tipo = str(raw.type) ?? "unknown";
           const corpoMidia = raw[tipo] as Record<string, unknown> | undefined;
 
@@ -227,6 +259,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             phoneNumberId: str(meta.phone_number_id) ?? "",
             externalId: id,
             from,
+            userId: fromUserId ?? str(perfil?.user_id),
             profileName: str((perfil?.profile as Record<string, unknown> | undefined)?.name),
             // A Meta manda epoch em SEGUNDOS, string. Passar direto ao Date daria 1970.
             sentAt: new Date(Number(str(raw.timestamp) ?? "0") * 1000),

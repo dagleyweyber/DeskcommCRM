@@ -15715,6 +15715,251 @@ begin
   end if;
 end $$;
 
+-- ---- modo de conexão da sessão Meta (migration 0195) ----
+-- Fase 1 do Embedded Signup / Coexistência. Aditivo: o default 'byo' preserva toda
+-- linha existente. Racional completo na migration.
+alter table public.channel_sessions
+  add column if not exists meta_connection_mode text not null default 'byo',
+  add column if not exists meta_onboarded_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.channel_sessions'::regclass
+      and conname = 'channel_sessions_meta_connection_mode_check'
+  ) then
+    alter table public.channel_sessions
+      add constraint channel_sessions_meta_connection_mode_check
+      check (meta_connection_mode in ('byo', 'embedded_coexistence'));
+  end if;
+end $$;
+
+-- ---- histórico importado não emite evento de mensagem (migration 0196) ----
+-- Racional na migration. `create or replace` não muda grants nem o gatilho.
+create or replace function public.fn_emit_message_event() returns trigger
+    language plpgsql
+    set search_path to 'public', 'pg_temp'
+    as $$
+declare
+  v_event text;
+begin
+  -- Linha importada do histórico da coexistência: é PASSADO, não evento. Os
+  -- consumidores de `message.received` (sentimento pago, automações do usuário,
+  -- follow-up, agente) tratariam seis meses de conversa como mensagem nova.
+  if new.metadata ->> 'origem' = 'historico_importado' then
+    return new;
+  end if;
+
+  if new.direction = 'inbound' then
+    v_event := 'message.received';
+  else
+    v_event := case new.status
+                 when 'sending' then 'message.sending'
+                 when 'sent' then 'message.sent'
+                 when 'failed' then 'message.failed'
+                 else 'message.outbound'
+               end;
+  end if;
+
+  perform public.fn_log_event(
+    new.organization_id, v_event,
+    jsonb_build_object(
+      'message_id', new.id, 'conversation_id', new.conversation_id,
+      'contact_id', new.contact_id, 'direction', new.direction,
+      'type', new.type, 'status', new.status, 'external_id', new.external_id,
+      'channel_session_id', new.channel_session_id,
+      'body_preview', left(new.body, 280)
+    )
+  );
+  return new;
+end$$;
+
+-- ---- conversa importada: fechada e reabre ao falar (migration 0197) ----
+-- Racional na migration. Funções novas: as DUAS origens de EXECUTE revogadas no fim.
+create or replace function public.fn_upsert_wa_conversation_historica(
+  p_org uuid, p_contact uuid, p_session uuid
+) returns uuid
+  language plpgsql
+  security definer
+  set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  -- Já existe conversa (viva ou não): não mexe nela, só devolve o id.
+  select id into v_id
+    from public.conversations
+   where organization_id = p_org and contact_id = p_contact
+     and channel_session_id = p_session and is_group = false
+   limit 1;
+  if v_id is not null then
+    return v_id;
+  end if;
+
+  insert into public.conversations
+    (organization_id, contact_id, channel_session_id, channel, status, is_group,
+     unread_count_for_assignee, metadata)
+  values
+    (p_org, p_contact, p_session, 'whatsapp', 'closed', false, 0,
+     jsonb_build_object('origem', 'historico_importado'))
+  on conflict (organization_id, contact_id, channel_session_id) where is_group = false
+  do nothing
+  returning id into v_id;
+
+  -- Perdeu a corrida para outra inserção: devolve a que ganhou.
+  if v_id is null then
+    select id into v_id
+      from public.conversations
+     where organization_id = p_org and contact_id = p_contact
+       and channel_session_id = p_session and is_group = false
+     limit 1;
+  end if;
+  return v_id;
+end;
+$$;
+
+create or replace function public.fn_reabrir_conversa_importada(p_conv uuid)
+returns boolean
+  language plpgsql
+  security definer
+  set search_path = public
+as $$
+declare
+  v_org uuid;
+begin
+  update public.conversations
+     set status = 'open',
+         status_changed_at = now(),
+         updated_at = now(),
+         metadata = metadata - 'origem'
+   where id = p_conv
+     and status = 'closed'
+     and metadata ->> 'origem' = 'historico_importado'
+  returning organization_id into v_org;
+
+  if v_org is null then
+    return false;
+  end if;
+
+  -- O gatilho de roteamento só vê INSERT; ao reabrir, a conversa volta à fila e
+  -- precisa pedir atribuição como qualquer conversa nova.
+  perform public.emit_event(
+    'conversation.routing_requested',
+    'conversation',
+    p_conv,
+    jsonb_build_object('conversation_id', p_conv, 'organization_id', v_org),
+    '{}'::jsonb,
+    v_org
+  );
+  return true;
+end;
+$$;
+
+revoke execute on function public.fn_upsert_wa_conversation_historica(uuid, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.fn_upsert_wa_conversation_historica(uuid, uuid, uuid)
+  to service_role;
+
+revoke execute on function public.fn_reabrir_conversa_importada(uuid)
+  from public, anon, authenticated;
+grant execute on function public.fn_reabrir_conversa_importada(uuid)
+  to service_role;
+
+-- ---- contato identificado só pelo BSUID da Meta (migration 0198) ----
+-- Racional na migration. Mesmo desenho da 0122 (wa_lid); a função nova revoga as DUAS origens de EXECUTE.
+-- 1 · a chave de correlação (gerada, pelo mesmo motivo de `wa_identity`/`wa_lid`)
+alter table public.contacts
+  add column if not exists wa_bsuid text
+  generated always as (nullif(source_metadata->>'wa_bsuid', '')) stored;
+
+-- 2 · único por organização entre contatos vivos. Coluna nova: nenhum dado a deduplicar
+-- antes do índice (todos nascem nulos), então o `update.sh` do clone não quebra.
+create unique index if not exists uniq_contacts_org_wa_bsuid
+  on public.contacts (organization_id, wa_bsuid)
+  where wa_bsuid is not null and is_merged_into is null;
+
+-- 3 · achar ou criar o contato por BSUID, vinculando ao telefone quando ele aparece
+create or replace function public.fn_upsert_wa_contact_bsuid(
+  p_org uuid, p_bsuid text, p_phone text, p_notify text
+) returns uuid
+  language plpgsql
+  security definer
+  set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_por_telefone uuid;
+begin
+  if p_bsuid is null or btrim(p_bsuid) = '' then
+    raise exception 'fn_upsert_wa_contact_bsuid: bsuid obrigatorio';
+  end if;
+
+  -- (a) já conhecemos este BSUID
+  select id into v_id
+    from public.contacts
+   where organization_id = p_org and wa_bsuid = p_bsuid and is_merged_into is null
+   limit 1;
+  if v_id is not null then
+    -- Ganhou telefone? Só preenche se o contato ainda não tem E o número não é de OUTRO
+    -- contato (nesse caso a unicidade da identidade quebraria o upsert).
+    if p_phone is not null then
+      update public.contacts c
+         set phone_number = p_phone, updated_at = now()
+       where c.id = v_id
+         and c.phone_number is null
+         and not exists (
+           select 1 from public.contacts o
+            where o.organization_id = p_org and o.phone_number = p_phone
+              and o.is_merged_into is null and o.id <> v_id
+         );
+    end if;
+    return v_id;
+  end if;
+
+  -- (b) não conhecemos o BSUID, mas conhecemos o telefone: é o mesmo contato — guarda o
+  -- BSUID nele em vez de criar uma segunda pessoa.
+  if p_phone is not null then
+    select id into v_por_telefone
+      from public.contacts
+     where organization_id = p_org and phone_number = p_phone and is_merged_into is null
+     limit 1;
+    if v_por_telefone is not null then
+      update public.contacts
+         set source_metadata = coalesce(source_metadata, '{}'::jsonb)
+                               || jsonb_build_object('wa_bsuid', p_bsuid),
+             updated_at = now()
+       where id = v_por_telefone;
+      return v_por_telefone;
+    end if;
+  end if;
+
+  -- (c) pessoa nova (com ou sem telefone)
+  begin
+    insert into public.contacts
+      (organization_id, phone_number, source, consent, tags, source_metadata, display_name)
+    values
+      (p_org, p_phone, 'whatsapp', '{}'::jsonb, '{}'::text[],
+       jsonb_build_object('wa_bsuid', p_bsuid, 'notify_name', nullif(p_notify, '')),
+       nullif(p_notify, ''))
+    returning id into v_id;
+  exception when unique_violation then
+    -- Perdeu a corrida para outra inserção da mesma pessoa: devolve a que ganhou.
+    select id into v_id
+      from public.contacts
+     where organization_id = p_org and is_merged_into is null
+       and (wa_bsuid = p_bsuid or (p_phone is not null and phone_number = p_phone))
+     limit 1;
+  end;
+  return v_id;
+end;
+$$;
+
+revoke execute on function public.fn_upsert_wa_contact_bsuid(uuid, text, text, text)
+  from public, anon, authenticated;
+grant execute on function public.fn_upsert_wa_contact_bsuid(uuid, text, text, text)
+  to service_role;
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

@@ -11,6 +11,7 @@ export interface OfficialChannelState {
   phoneNumberId: string | null;
   wabaId: string | null;
   appId: string | null;
+  connectionMode: "byo" | "embedded_coexistence" | null;
   displayName: string | null;
   phoneNumber: string | null;
   status: string | null;
@@ -44,6 +45,57 @@ export function useConnectOfficialChannel() {
         "/api/v1/channels/official",
         input,
       ),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["official-channel"] });
+    },
+  });
+}
+
+export type EmbeddedConfig = { enabled: false } | { enabled: true; appId: string; configId: string };
+
+/** O modo "Conectar com a Meta" existe nesta instalação? Config vem em runtime (ver a rota). */
+export function useEmbeddedSignupConfig() {
+  return useQuery({
+    queryKey: ["official-channel-embedded"],
+    queryFn: async () =>
+      apiClient.get<{ data: EmbeddedConfig }>("/api/v1/channels/official/embedded"),
+    staleTime: 60_000,
+  });
+}
+
+export interface ConcluirEmbeddedInput {
+  code: string;
+  waba_id: string;
+  phone_number_id?: string;
+}
+
+export function useConcluirEmbeddedSignup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ConcluirEmbeddedInput) =>
+      apiClient.post<{ data: { connected: boolean; displayName: string; phoneNumber: string | null } }>(
+        "/api/v1/channels/official/embedded",
+        input,
+      ),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["official-channel"] });
+    },
+  });
+}
+
+export interface ResultadoReativacao {
+  reactivated: boolean;
+  sync: Record<string, { ok: boolean; motivo?: string; requestId?: string | null }>;
+}
+
+/** Refaz recebimento + pedido de histórico de uma conexão em coexistência que ficou pela metade. */
+export function useReativarCoexistencia() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      apiClient.post<{ data: ResultadoReativacao }>("/api/v1/channels/official/embedded/reativar", {}),
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
