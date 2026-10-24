@@ -15,6 +15,8 @@ let contatoExistente: { id: string; phone_number: string } | null = null;
 vi.mock("./ingest", () => ({
   sessionByPhoneNumberId: async (_a: unknown, pn: string) => (pn === "PN1" ? sessao : null),
   findContactByVariants: async () => contatoExistente,
+  // A resolução do contato (telefone ou BSUID) tem testes próprios em `bsuid.test.ts`.
+  resolverContatoMeta: async () => ({ id: "contact-1" }),
 }));
 
 import {
