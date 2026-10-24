@@ -104,3 +104,45 @@ export async function metaSessionForOrg(
     connectionMode: data.meta_connection_mode ?? null,
   };
 }
+
+/**
+ * Sessão ATIVA dona de uma conta de WhatsApp (WABA) ou, na falta dela, de um número.
+ *
+ * Serve ao endpoint global do app (`/api/v1/webhooks/meta`): a Meta entrega ali o que
+ * não admite `override_callback_uri` (`account_update`, status de modelo), sem o token
+ * de caminho que identifica a sessão. A WABA do evento SÓ ESCOLHE a sessão depois de a
+ * assinatura ter provado a origem — nunca antes — e o resultado é sempre uma sessão que
+ * o CRM já conhece: WABA desconhecida devolve `null` e o evento é ignorado.
+ *
+ * Só sessões em coexistência: o endpoint global confere a assinatura com o segredo do
+ * app Tech Provider, e uma sessão manual (outro app) nunca deveria chegar por ele.
+ */
+export async function metaSessionByWabaOrPhone(input: {
+  wabaId?: string | null;
+  phoneNumberId?: string | null;
+}): Promise<MetaWebhookSession | null> {
+  const coluna = input.wabaId ? "meta_waba_id" : input.phoneNumberId ? "meta_phone_number_id" : null;
+  const valor = input.wabaId || input.phoneNumberId;
+  if (!coluna || !valor) return null;
+
+  const admin = createAdminClient();
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select("id, organization_id, meta_waba_id, meta_phone_number_id, meta_connection_mode")
+      .eq(coluna, valor)
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .eq("meta_connection_mode", "embedded_coexistence");
+  const { data } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).maybeSingle(),
+    () => base().maybeSingle(),
+  );
+  if (!data) return null;
+  return {
+    id: data.id,
+    organizationId: data.organization_id,
+    wabaId: data.meta_waba_id ?? null,
+    phoneNumberId: data.meta_phone_number_id ?? null,
+    connectionMode: data.meta_connection_mode ?? null,
+  };
+}

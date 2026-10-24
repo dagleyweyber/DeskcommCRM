@@ -21,14 +21,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { fail } from "@/lib/api/wrappers";
 import { parseMetaWebhook, verificationChallenge, verifyMetaSignature } from "@/lib/channels/meta/webhook";
-import {
-  ingestContactSync,
-  ingestEcho,
-  ingestHistoryChunk,
-  registrarHistoricoRecusado,
-} from "@/lib/channels/meta/coexistence-ingest";
+import { processarEventosMeta } from "@/lib/channels/meta/process-events";
 import { appSecretDoWebhook } from "@/lib/channels/meta/embedded-config";
-import { ingestMetaInbound } from "@/lib/channels/meta/ingest";
 import { metaSessionByWebhookToken } from "@/lib/channels/meta/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -81,131 +75,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
 
   const eventos = parseMetaWebhook(envelope as Parameters<typeof parseMetaWebhook>[0]);
   const admin = createAdminClient();
-  const now = new Date().toISOString();
-  /**
-   * Desfecho de cada ingestão. Existe porque a versão anterior fazia
-   * `await ingestMetaInbound(...)` e DESCARTAVA o retorno: um insert que falhava
-   * virava `{"received": 1}` com nada gravado, e "chegou e falhou" ficava
-   * indistinguível de "não chegou". Custou uma hora de diagnóstico no lugar errado.
-   */
-  const desfechos: string[] = [];
-
-  for (const e of eventos) {
-    // O evento chega carimbado com a WABA; se não for a desta sessão, ignoramos.
-    // Confiar no `entry.id` para escolher a org seria aceitar o corpo como fonte.
-    if (session.wabaId && e.wabaId && e.wabaId !== session.wabaId) continue;
-
-    if (e.kind === "inbound_message") {
-      // A metade que faltava: mensagem do contato vira linha no inbox, move lead,
-      // acorda o agente — e carimba `last_inbound_at`, que é o que ABRE a janela
-      // de 24h que o gate da Fase 4 calcula.
-      const r = await ingestMetaInbound(admin, e, requestId);
-      desfechos.push(r.status);
-      if (r.status === "failed" || r.status === "no_session") {
-        // 2xx continua (a Meta re-entregaria em loop), mas a falha NÃO fica muda:
-        // vai ao log estruturado e ao corpo da resposta.
-        console.error("[meta.ingest] inbound não ingerido", {
-          status: r.status,
-          reason: r.status === "failed" ? r.reason : undefined,
-          external_id: e.externalId,
-          phone_number_id: e.phoneNumberId,
-        });
-      }
-      continue;
-    }
-
-    // Os eventos da coexistência resolvem a sessão pelo NÚMERO do corpo (como o
-    // inbound). Aqui exigimos que seja o número DESTA sessão: o token do caminho é o
-    // que amarra o payload a uma organização, e o corpo não pode escolher outra.
-    if (
-      (e.kind === "echo" || e.kind === "history_chunk" || e.kind === "history_declined" || e.kind === "contact_sync") &&
-      session.phoneNumberId &&
-      e.phoneNumberId !== session.phoneNumberId
-    ) {
-      desfechos.push(`${e.kind}:numero_de_outra_sessao`);
-      continue;
-    }
-
-    // ── Coexistência (o app do celular). Nada aqui passa por `pos-entrada`: eco,
-    // histórico e agenda NÃO acordam o agente nem criam lead — ver
-    // `lib/channels/meta/coexistence-ingest.ts`.
-    if (e.kind === "echo") {
-      const r = await ingestEcho(admin, e);
-      desfechos.push(`echo:${r.status}`);
-      if (r.status === "failed") {
-        console.error("[meta.echo] eco não ingerido", { reason: r.reason, external_id: e.externalId });
-      }
-      continue;
-    }
-    if (e.kind === "history_chunk") {
-      const r = await ingestHistoryChunk(admin, e);
-      desfechos.push(
-        r.status === "imported" ? `history:${r.inserted}+${r.skipped}` : `history:${r.status}`,
-      );
-      continue;
-    }
-    if (e.kind === "history_declined") {
-      await registrarHistoricoRecusado(admin, e);
-      desfechos.push("history:declined");
-      continue;
-    }
-    if (e.kind === "contact_sync") {
-      desfechos.push(`contact_sync:${await ingestContactSync(admin, e)}`);
-      continue;
-    }
-
-    if (e.kind === "template_status") {
-      await admin
-        .from("meta_templates")
-        .update({ status: e.event, rejected_reason: e.reason, updated_at: now })
-        .eq("organization_id", session.organizationId)
-        .eq("waba_id", e.wabaId)
-        .eq("name", e.templateName)
-        .eq("language", e.templateLanguage);
-    } else if (e.kind === "message_status") {
-      // Achado ao vivo (RevitaFio Mossoró): campanha com TODO envio "failed"
-      // e nenhum jeito de saber por quê — o `errorCode`/`errorTitle` que a
-      // Meta manda no próprio webhook de status era descartado aqui, e
-      // `messages.metadata` ficava `{}` pra sempre. Falha de entrega
-      // (assíncrona, depois de um `wamid` válido) é diferente de recusa na
-      // submissão (síncrona, já tratada em `template-ops.ts`) — as duas
-      // precisam do motivo real, cada uma na sua camada.
-      const detalheErro =
-        e.status === "failed"
-          ? Array.from(
-              new Set([e.errorTitle, e.errorMessage, e.errorDetails].filter(
-                (p): p is string => Boolean(p && p.trim()),
-              )),
-            ).join(" — ") || null
-          : null;
-
-      // Falha com motivo: MESCLA no metadata existente. Substituir apagava as outras
-      // chaves da linha (marca do histórico, id da mídia, flag de voz).
-      let metadataMesclado: Record<string, unknown> | null = null;
-      if (detalheErro) {
-        const { data: atual } = await admin
-          .from("messages")
-          .select("metadata")
-          .eq("organization_id", session.organizationId)
-          .eq("external_id", e.externalId)
-          .maybeSingle();
-        metadataMesclado = {
-          ...((atual?.metadata as Record<string, unknown> | null) ?? {}),
-          failure_code: e.errorCode,
-          failure_reason: detalheErro,
-        };
-      }
-      await admin
-        .from("messages")
-        .update({
-          status: e.status === "failed" ? "failed" : "sent",
-          updated_at: now,
-          ...(metadataMesclado ? { metadata: metadataMesclado } : {}),
-        })
-        .eq("organization_id", session.organizationId)
-        .eq("external_id", e.externalId);
-    }
-  }
+  const desfechos = await processarEventosMeta({ admin, session, eventos, requestId });
 
   // 200 SEMPRE que a assinatura confere, inclusive para evento que não nos
   // interessa: a Meta re-entrega tudo que não recebe 2xx, e recusar o que

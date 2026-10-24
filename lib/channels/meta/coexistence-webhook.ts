@@ -6,9 +6,10 @@
  *   - `smb_message_echoes`  — o que o dono digitou no celular (SAÍDA, não entrada);
  *   - `history`             — as conversas anteriores, em blocos fora de ordem;
  *   - `smb_app_state_sync`  — a agenda de contatos do app;
- *   - `account_update`      — NÃO é tratado aqui: a Meta o entrega sempre na URL
- *                             padrão do app, nunca no `override_callback_uri` da
- *                             sessão (ver `docs/doctrine/restricao-de-canal.md`).
+ *   - `account_update`      — a Meta o entrega sempre na URL PADRÃO do app, nunca no
+ *                             `override_callback_uri` da sessão; por isso quem o recebe
+ *                             é o endpoint global (`/api/v1/webhooks/meta`), que acha a
+ *                             clínica pela WABA.
  *
  * Mesma regra do resto do canal: **campo/tipo desconhecido é ignorado, nunca erro**.
  * A Meta re-entrega tudo que não recebe 2xx; recusar o que não entendemos vira
@@ -95,11 +96,36 @@ export interface HistoryDeclinedEvent {
   code: number | null;
 }
 
+/**
+ * Aviso da CONTA (`account_update`): desconexão, banimento, restrição, volta.
+ *
+ * Guarda só o que decide algo — o nome do evento e os poucos campos de que a tradução
+ * em saúde/aviso precisa. O corpo inteiro não é copiado: traz IDs de negócio que não
+ * vão a lugar nenhum.
+ */
+export interface AccountUpdateEvent {
+  kind: "account_update";
+  wabaId: string;
+  /** `value.event`: PARTNER_REMOVED, DISABLED_UPDATE, ACCOUNT_RECONNECTED… */
+  event: string;
+  /** `ban_info.waba_ban_state` (DISABLE | REINSTATE | SCHEDULE_FOR_DISABLE), em DISABLED_UPDATE. */
+  banState: string | null;
+  /** `disconnection_info.reason` (PARTNER_REMOVED): CHANGE_NUMBER, PRIMARY_INACTIVITY… */
+  disconnectReason: string | null;
+  /** `disconnection_info.initiated_by`: USER | SYSTEM. */
+  disconnectInitiatedBy: string | null;
+  /** `violation_info.violation_type` (ACCOUNT_VIOLATION). */
+  violationType: string | null;
+  /** `restriction_info[0].restriction_type` (ACCOUNT_RESTRICTION). */
+  restrictionType: string | null;
+}
+
 export type CoexistenceEvent =
   | EchoEvent
   | ContactSyncEvent
   | HistoryChunkEvent
-  | HistoryDeclinedEvent;
+  | HistoryDeclinedEvent
+  | AccountUpdateEvent;
 
 function midiaDe(raw: Record<string, unknown>, tipo: string): MidiaRecebida | null {
   const corpo = raw[tipo] as Record<string, unknown> | undefined;
@@ -244,6 +270,35 @@ export function parseHistory(
   return out;
 }
 
+export function parseAccountUpdate(
+  wabaId: string,
+  value: Record<string, unknown>,
+): AccountUpdateEvent[] {
+  const event = str(value.event);
+  if (!event) return [];
+  const obj = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const ban = obj(value.ban_info);
+  const desconexao = obj(value.disconnection_info);
+  const violacao = obj(value.violation_info);
+  const restricoes = Array.isArray(value.restriction_info) ? (value.restriction_info as unknown[]) : [];
+  // `waba_info.waba_id` é o id da conta nos eventos de parceiro; `entry.id` nos demais.
+  const wabaDoEvento = str(obj(value.waba_info).waba_id) ?? wabaId;
+  return [
+    {
+      kind: "account_update",
+      wabaId: wabaDoEvento,
+      event,
+      banState: str(ban.waba_ban_state)
+        ?? (Array.isArray(ban.waba_ban_state) ? str((ban.waba_ban_state as unknown[])[0]) : null),
+      disconnectReason: str(desconexao.reason),
+      disconnectInitiatedBy: str(desconexao.initiated_by),
+      violationType: str(violacao.violation_type),
+      restrictionType: str(obj(restricoes[0]).restriction_type),
+    },
+  ];
+}
+
 /** Despacha um `change` para o parser do campo. Campo que não é daqui devolve `[]`. */
 export function parseCoexistenceChange(
   field: string | undefined,
@@ -253,6 +308,7 @@ export function parseCoexistenceChange(
   if (field === "smb_message_echoes") return parseEchoes(wabaId, value);
   if (field === "smb_app_state_sync") return parseContactSync(wabaId, value);
   if (field === "history") return parseHistory(wabaId, value);
+  if (field === "account_update") return parseAccountUpdate(wabaId, value);
   return [];
 }
 
