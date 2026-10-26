@@ -12,6 +12,9 @@ export interface AutomationSummary {
   status: "draft" | "active" | "paused";
   template_name: string;
   template_language: string;
+  /** O serviço da Agenda a que responde; `null` = todos os serviços. */
+  event_type_id: string | null;
+  event_type: { name: string } | null;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +35,8 @@ export interface CreateAutomationInput {
   template_name: string;
   template_language: string;
   variable_mapping: VariableMapping;
+  /** `null`/ausente = todos os serviços. */
+  event_type_id?: string | null;
 }
 
 export function useCreateAutomation() {

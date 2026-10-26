@@ -23,7 +23,7 @@ export async function GET(
   const { data: automacao } = await admin
     .from("whatsapp_template_automations")
     .select(
-      "id, name, trigger_kind, channel_session_id, template_name, template_language, variable_mapping, status, created_at, updated_at",
+      "id, name, trigger_kind, channel_session_id, template_name, template_language, variable_mapping, event_type_id, status, created_at, updated_at",
     )
     .eq("id", id)
     .eq("organization_id", authz.org.orgId)

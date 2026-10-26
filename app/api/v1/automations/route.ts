@@ -40,6 +40,9 @@ const createAutomationSchema = z.object({
   template_name: z.string().trim().min(1).max(512),
   template_language: z.string().trim().min(2).max(16),
   variable_mapping: z.record(z.string(), variableSourceSchema).default({}),
+  // O SERVIÇO da Agenda a que esta automação responde. `null` = todos os serviços (o
+  // comportamento de sempre). Uma automação ativa por serviço: ver migration 0199.
+  event_type_id: z.string().uuid().nullable().default(null),
 });
 
 export async function GET(): Promise<Response> {
@@ -50,7 +53,9 @@ export async function GET(): Promise<Response> {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("whatsapp_template_automations")
-    .select("id, name, trigger_kind, status, template_name, template_language, created_at, updated_at")
+    .select(
+      "id, name, trigger_kind, status, template_name, template_language, event_type_id, event_type:calendar_event_types(name), created_at, updated_at",
+    )
     .eq("organization_id", authz.org.orgId)
     .order("created_at", { ascending: false });
 
@@ -104,6 +109,20 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  // O serviço precisa ser desta organização e estar ativo na Agenda: uma automação presa a
+  // um serviço que não existe nunca dispararia, e em silêncio.
+  if (input.event_type_id) {
+    const { data: servico } = await admin
+      .from("calendar_event_types")
+      .select("id, is_active")
+      .eq("id", input.event_type_id)
+      .eq("organization_id", authz.org.orgId)
+      .maybeSingle();
+    if (!servico || servico.is_active === false) {
+      return fail("invalid_request", "Serviço não encontrado na Agenda desta organização.", 422, { requestId });
+    }
+  }
+
   // Toda variável do modelo precisa de uma origem (mesma regra de Campanhas): sem isso toda
   // ocorrência falharia com `template_missing_values` no primeiro envio.
   const faltando = valoresSemFonte(
@@ -132,6 +151,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       template_name: input.template_name,
       template_language: input.template_language,
       variable_mapping: input.variable_mapping,
+      event_type_id: input.event_type_id,
       status: "draft",
       created_by: authz.user.id,
     })

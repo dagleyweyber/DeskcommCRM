@@ -96,6 +96,9 @@ export function AutomacoesClient() {
                   {ROTULO_DO_GATILHO[a.trigger_kind] ?? a.trigger_kind} · {a.template_name} (
                   {a.template_language})
                 </span>
+                <Badge variant="outline" data-testid="automacao-servico">
+                  {a.event_type?.name ?? "Todos os serviços"}
+                </Badge>
                 <div className="ml-auto">
                   <AcoesDaAutomacao automacao={a} />
                 </div>
