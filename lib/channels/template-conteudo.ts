@@ -136,6 +136,43 @@ export function contarVariaveis(texto: string): number {
 }
 
 /**
+ * Transforma o que a pessoa digita no NOME que a plataforma aceita: só letras
+ * minúsculas, números e sublinhado.
+ *
+ * ─── Por que normaliza na tela, e não confia na recusa ────────────────────
+ * O nome é o primeiro campo do formulário e o último a ser conferido: a plataforma
+ * o recusa só depois que o corpo, os exemplos e os botões já foram preenchidos, com
+ * uma frase em inglês traduzida ("o nome só pode ter letras minúsculas e
+ * sublinhados"). Quem digita "Confirmação de Agendamento" perdia a paciência antes de
+ * entender o que errou.
+ *
+ * A PLATAFORMA continua sendo a autoridade — se ela mudar a regra, a recusa vem como
+ * sempre. Isto só converte o que é conversível sem mudar o sentido: caixa alta vira
+ * baixa, acento sai, espaço e hífen viram sublinhado, o resto é descartado.
+ */
+export function normalizarNomeDoModelo(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // acentos: ç→c, ã→a, é→e
+    .toLowerCase()
+    .replace(/[s-]+/g, "_") // espaço e hífen viram sublinhado
+    .replace(/[^a-z0-9_]/g, "") // o que sobrar de inválido sai
+    .replace(/_{2,}/g, "_") // sublinhado repetido (por " - ") vira um só
+    // Sem sublinhado no COMEÇO. O do FIM fica de propósito: é o que a pessoa acabou de
+    // digitar ao apertar a barra de espaço entre duas palavras — tirá-lo a cada tecla
+    // impediria de escrever um nome com mais de uma. Quem envia usa `semSublinhadoNoFim`.
+    .replace(/^_+/, "");
+}
+
+/** O nome na hora de ENVIAR: sem o sublinhado que sobrou de um espaço no fim. */
+export function semSublinhadoNoFim(nome: string): string {
+  return nome.replace(/_+$/, "");
+}
+
+/** Limite de caracteres do nome (documentado pela plataforma). */
+export const LIMITE_NOME_DO_MODELO = 512;
+
+/**
  * Monta os `components` de uma definição nova, com os exemplos que a revisão
  * exige.
  *

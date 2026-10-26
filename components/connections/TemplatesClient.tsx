@@ -15,10 +15,13 @@ import {
 import {
   contarVariaveis,
   IDIOMAS_DA_DEFINICAO,
+  LIMITE_NOME_DO_MODELO,
   LIMITE_BOTOES,
   LIMITE_CORPO,
   LIMITE_RODAPE,
   montarComponents,
+  normalizarNomeDoModelo,
+  semSublinhadoNoFim,
   type BotaoDaDefinicao,
 } from "@/lib/channels/template-conteudo";
 import { cn } from "@/lib/utils";
@@ -113,8 +116,13 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
         <div className="flex flex-wrap gap-2">
           <input
             value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            placeholder="nome_do_modelo"
+            // Normaliza ENQUANTO digita: "Confirmação de Agendamento" vira
+            // `confirmacao_de_agendamento`. A plataforma só aceita minúsculas, números e
+            // sublinhado, e antes a recusa vinha depois do formulário inteiro preenchido.
+            onChange={(e) =>
+              setNome(normalizarNomeDoModelo(e.target.value).slice(0, LIMITE_NOME_DO_MODELO))
+            }
+            placeholder="nome_do_modelo (ex.: agendamento_confirmado)"
             aria-label="Nome do modelo"
             className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm"
           />
@@ -133,6 +141,10 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
             ))}
           </select>
         </div>
+        <p className="-mt-1 text-xs text-muted-foreground">
+          O nome aceita só letras minúsculas, números e sublinhado — espaços e acentos são
+          ajustados sozinhos. Depois de enviado, não dá para trocar o nome.
+        </p>
 
         <select
           value={categoria}
@@ -346,11 +358,11 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
           <Button
             type="button"
             size="sm"
-            disabled={!nome.trim() || !corpo.trim() || criar.isPending}
+            disabled={!semSublinhadoNoFim(nome) || !corpo.trim() || criar.isPending}
             onClick={() =>
               criar.mutate(
                 {
-                  name: nome.trim(),
+                  name: semSublinhadoNoFim(nome),
                   language: idioma.trim(),
                   category: categoria,
                   components: montarComponents({
