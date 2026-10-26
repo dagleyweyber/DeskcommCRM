@@ -12,6 +12,12 @@ import { z } from "zod";
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import {
+  fraseDosValoresSemFonte,
+  valoresSemFonte,
+  type Definicao,
+} from "@/lib/channels/valores-sem-fonte";
+import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +89,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const { data: template } = await admin
     .from("meta_templates")
-    .select("status")
+    .select("status, components, parameter_format")
     .eq("organization_id", authz.org.orgId)
     .eq("channel_session_id", input.channel_session_id)
     .eq("name", input.template_name)
@@ -96,6 +102,24 @@ export async function POST(req: NextRequest): Promise<Response> {
       422,
       { requestId },
     );
+  }
+
+  // Toda variável do modelo precisa de uma origem (mesma regra de Campanhas): sem isso toda
+  // ocorrência falharia com `template_missing_values` no primeiro envio.
+  const faltando = valoresSemFonte(
+    {
+      name: input.template_name,
+      language: input.template_language,
+      parameter_format: template.parameter_format ?? undefined,
+      components: template.components as Definicao["components"],
+    },
+    input.variable_mapping as VariableMapping,
+  );
+  if (faltando.length > 0) {
+    return fail("invalid_request", fraseDosValoresSemFonte(faltando), 422, {
+      requestId,
+      details: { variaveis_sem_origem: faltando.map((f) => f.rotulo) },
+    });
   }
 
   const { data: automacao, error: erroCriar } = await admin

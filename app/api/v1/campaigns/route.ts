@@ -13,6 +13,11 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
+import {
+  fraseDosValoresSemFonte,
+  valoresSemFonte,
+  type Definicao,
+} from "@/lib/channels/valores-sem-fonte";
 import { resolveValuesForRecipient, type VariableMapping } from "@/lib/messaging/variable-mapping";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -93,7 +98,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // condenado a `failed` no primeiro tick do despachante.
   const { data: template } = await admin
     .from("meta_templates")
-    .select("status")
+    .select("status, components, parameter_format")
     .eq("organization_id", authz.org.orgId)
     .eq("channel_session_id", input.channel_session_id)
     .eq("name", input.template_name)
@@ -106,6 +111,25 @@ export async function POST(req: NextRequest): Promise<Response> {
       422,
       { requestId },
     );
+  }
+
+  // Toda variável do modelo precisa de uma origem. Sem isso o primeiro tick do despachante
+  // devolveria `template_missing_values` para TODO destinatário — a mesma razão de recusar
+  // canal fora do ar e modelo não aprovado, logo acima.
+  const faltando = valoresSemFonte(
+    {
+      name: input.template_name,
+      language: input.template_language,
+      parameter_format: template.parameter_format ?? undefined,
+      components: template.components as Definicao["components"],
+    },
+    input.variable_mapping as VariableMapping,
+  );
+  if (faltando.length > 0) {
+    return fail("invalid_request", fraseDosValoresSemFonte(faltando), 422, {
+      requestId,
+      details: { variaveis_sem_origem: faltando.map((f) => f.rotulo) },
+    });
   }
 
   const publico = await resolveAudience(admin, authz.org.orgId, input.audience);
