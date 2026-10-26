@@ -155,7 +155,7 @@ export function normalizarNomeDoModelo(texto: string): string {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "") // acentos: ç→c, ã→a, é→e
     .toLowerCase()
-    .replace(/[s-]+/g, "_") // espaço e hífen viram sublinhado
+    .replace(/[\s-]+/g, "_") // espaço e hífen viram sublinhado
     .replace(/[^a-z0-9_]/g, "") // o que sobrar de inválido sai
     .replace(/_{2,}/g, "_") // sublinhado repetido (por " - ") vira um só
     // Sem sublinhado no COMEÇO. O do FIM fica de propósito: é o que a pessoa acabou de
