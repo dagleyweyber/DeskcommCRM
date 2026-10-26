@@ -3,6 +3,11 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  fraseDosValoresSemFonte,
+  valoresSemFonte,
+  type Definicao,
+} from "@/lib/channels/valores-sem-fonte";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
 import { useCreateCampaign, usePreviewAudience } from "@/hooks/campaigns/useCampaigns";
 import { useTemplates } from "@/hooks/channels/useTemplates";
@@ -34,6 +39,25 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
     [templates.data],
   );
   const atual = aprovados.find((t) => `${t.name}|${t.language}` === templateEscolhido) ?? null;
+
+  // Toda variável do modelo precisa de uma origem ANTES de criar: sem isso o primeiro
+  // disparo é recusado (`template_missing_values`) para todo destinatário. A API confere
+  // de novo — esta é a mesma regra, só que dita na hora em vez de depois.
+  const semFonte = useMemo(
+    () =>
+      atual
+        ? valoresSemFonte(
+            {
+              name: atual.name,
+              language: atual.language,
+              parameter_format: atual.parameterFormat,
+              components: atual.components as Definicao["components"],
+            },
+            mapping,
+          )
+        : [],
+    [atual, mapping],
+  );
 
   function audience(): AudienceFilter | null {
     if (audienceKind === "tag") return tag.trim() ? { kind: "tag", tag: tag.trim() } : null;
@@ -188,11 +212,23 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         </div>
       </div>
 
+      {semFonte.length > 0 && (
+        <p className="text-sm text-amber-700 dark:text-amber-500" data-testid="campanha-variaveis-faltando">
+          {fraseDosValoresSemFonte(semFonte)}
+        </p>
+      )}
+
       <div className="flex justify-end">
         <Button
           type="button"
           onClick={criarCampanha}
-          disabled={!nome.trim() || !atual || criar.isPending || !templates.data?.data.channelSessionId}
+          disabled={
+            !nome.trim() ||
+            !atual ||
+            semFonte.length > 0 ||
+            criar.isPending ||
+            !templates.data?.data.channelSessionId
+          }
         >
           {criar.isPending ? "Criando…" : "Criar campanha"}
         </Button>

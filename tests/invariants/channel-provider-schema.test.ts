@@ -75,8 +75,12 @@ describe("0087 · o canal da sessão chega ao clone", () => {
     const cols = sql(`select column_name from information_schema.columns
                        where table_schema = 'public' and table_name = 'channel_sessions'
                          and column_name like 'meta\\_%' order by 1`).split("\n");
+    // 0195 somou o modo de conexão (byo | embedded_coexistence) e o fim do
+    // onboarding — também dado da sessão Meta, não de outro provider.
     expect(cols).toEqual([
       "meta_app_id",
+      "meta_connection_mode",
+      "meta_onboarded_at",
       "meta_phone_number_id",
       "meta_token_encrypted",
       "meta_waba_id",

@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureConversation } from "@/lib/automation/start-conversation";
 import { CAMPAIGN_SEND_SPACING_MS, checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
 import { lerConteudo } from "@/lib/channels/template-conteudo";
+import { motivoDaFalha } from "@/lib/messaging/motivo-da-falha";
 import { renderBodyWithValues } from "@/lib/messaging/render-body";
 import { resolveValuesForRecipient, type VariableMapping } from "@/lib/messaging/variable-mapping";
 import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
@@ -106,7 +107,7 @@ async function processarOcorrencia(
         contact_id: ocorrencia.contactId,
         occurrence_key: ocorrencia.occurrenceKey,
         status: "failed",
-        error_message: `mensagem ficou em '${message.status}' — canal indisponível no momento do envio`,
+        error_message: motivoDaFalha(message),
       });
       resumo.failed += 1;
     }

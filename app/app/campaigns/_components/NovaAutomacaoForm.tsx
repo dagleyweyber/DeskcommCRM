@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
 import { useCreateAutomation, type CreateAutomationInput } from "@/hooks/campaigns/useAutomations";
+import { useEventTypes } from "@/hooks/agenda/useEventTypes";
 import { useTemplates } from "@/hooks/channels/useTemplates";
+import {
+  fraseDosValoresSemFonte,
+  valoresSemFonte,
+  type Definicao,
+} from "@/lib/channels/valores-sem-fonte";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 /**
@@ -26,16 +32,36 @@ const GATILHOS: Array<{ value: CreateAutomationInput["trigger_kind"]; label: str
 export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
   const templates = useTemplates();
   const criar = useCreateAutomation();
+  const servicos = useEventTypes();
 
   const [nome, setNome] = useState("");
   const [templateEscolhido, setTemplateEscolhido] = useState("");
   const [mapping, setMapping] = useState<VariableMapping>({});
+  // "" = todos os serviços (o comportamento de sempre).
+  const [servicoId, setServicoId] = useState("");
 
   const aprovados = useMemo(
     () => (templates.data?.data.templates ?? []).filter((t) => t.status === "APPROVED"),
     [templates.data],
   );
   const atual = aprovados.find((t) => `${t.name}|${t.language}` === templateEscolhido) ?? null;
+
+  // Toda variável do modelo precisa de uma origem ANTES de criar (a API confere de novo).
+  const semFonte = useMemo(
+    () =>
+      atual
+        ? valoresSemFonte(
+            {
+              name: atual.name,
+              language: atual.language,
+              parameter_format: atual.parameterFormat,
+              components: atual.components as Definicao["components"],
+            },
+            mapping,
+          )
+        : [],
+    [atual, mapping],
+  );
 
   function criarAutomacao() {
     const channelSessionId = templates.data?.data.channelSessionId;
@@ -48,6 +74,7 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
         template_name: atual.name,
         template_language: atual.language,
         variable_mapping: mapping,
+        event_type_id: servicoId || null,
       },
       {
         onSuccess: () => {
@@ -86,6 +113,32 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
         ))}
       </div>
 
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium" htmlFor="automacao-servico">
+          Serviço
+        </label>
+        <select
+          id="automacao-servico"
+          value={servicoId}
+          onChange={(e) => setServicoId(e.target.value)}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">Todos os serviços</option>
+          {(servicos.data ?? [])
+            .filter((t) => t.is_active)
+            .map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          {servicoId
+            ? "Esta automação só envia para agendamentos deste serviço. Crie uma automação para cada serviço, cada uma com o seu modelo."
+            : "Envia para agendamentos de qualquer serviço — menos os que tiverem uma automação própria ativa (a específica vence). Para mandar um modelo diferente por serviço, escolha o serviço aqui."}
+        </p>
+      </div>
+
       <TemplateEVariaveisPicker
         aprovados={aprovados}
         templateEscolhido={templateEscolhido}
@@ -98,11 +151,23 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
         ]}
       />
 
+      {semFonte.length > 0 && (
+        <p className="text-sm text-amber-700 dark:text-amber-500" data-testid="automacao-variaveis-faltando">
+          {fraseDosValoresSemFonte(semFonte)}
+        </p>
+      )}
+
       <div className="flex justify-end">
         <Button
           type="button"
           onClick={criarAutomacao}
-          disabled={!nome.trim() || !atual || criar.isPending || !templates.data?.data.channelSessionId}
+          disabled={
+            !nome.trim() ||
+            !atual ||
+            semFonte.length > 0 ||
+            criar.isPending ||
+            !templates.data?.data.channelSessionId
+          }
         >
           {criar.isPending ? "Criando…" : "Criar automação"}
         </Button>

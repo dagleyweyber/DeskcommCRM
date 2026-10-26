@@ -25,6 +25,7 @@ import type { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { publicBase } from "@/lib/api/public-base";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
@@ -33,7 +34,6 @@ import { logger } from "@/lib/logger";
 import { registerMetaPhoneNumber } from "@/lib/channels/meta/register-number";
 import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
 import { reactivateChannelSession } from "@/lib/channels/reactivate";
-import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
 
@@ -61,23 +61,6 @@ async function adminGate(requestId: string): Promise<Gate> {
   return { ok: true, orgId: org.orgId, userId: user.id };
 }
 
-/**
- * Base pública desta instalação — é o que o operador cola no dashboard da Meta.
- *
- * `env.*` e NÃO `process.env.NEXT_PUBLIC_APP_URL` direto: variáveis
- * `NEXT_PUBLIC_` são substituídas no BUILD, e a imagem genérica do self-host é
- * construída com `https://placeholder.invalid` (Dockerfile). Lendo direto do
- * `process.env`, a tela mostrava essa URL — e quem a colasse no dashboard
- * apontaria o webhook para o nada, sem erro em lugar nenhum.
- */
-function publicBase(req: NextRequest): string {
-  const configurada = env.NEXT_PUBLIC_APP_URL;
-  const usavel = configurada && !configurada.includes("placeholder.invalid") ? configurada : null;
-  return (
-    usavel ?? req.headers.get("origin") ?? `${req.nextUrl.protocol}//${req.nextUrl.host}`
-  );
-}
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
   const g = await adminGate(requestId);
@@ -93,7 +76,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const consultar = () =>
     admin
       .from("channel_sessions")
-      .select("id, meta_phone_number_id, meta_waba_id, meta_app_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
+      .select("id, meta_phone_number_id, meta_waba_id, meta_app_id, meta_connection_mode, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
       .eq("organization_id", g.orgId)
       .eq("provider", CHANNEL_PROVIDER_META);
   const { data } = await queryTolerantToMissingArchived(
@@ -110,11 +93,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     phoneNumberId: data?.meta_phone_number_id ?? null,
     wabaId: data?.meta_waba_id ?? null,
     appId: data?.meta_app_id ?? null,
+    /** `byo` (token colado) ou `embedded_coexistence` (popup da Meta, app do celular mantido). */
+    connectionMode: data?.meta_connection_mode ?? null,
     displayName: data?.display_name ?? null,
     phoneNumber: data?.phone_number ?? null,
     status: data?.status ?? null,
     /** O que o operador precisa colar do NOSSO lado no dashboard da Meta. */
-    webhook: data
+    // Coexistência assina a WABA com `override_callback_uri` no servidor: não há o que
+    // o operador colar no painel da Meta.
+    webhook: data && data.meta_connection_mode !== "embedded_coexistence"
       ? {
           callbackUrl: `${base}/api/v1/webhooks/meta/${data.webhook_path_token}`,
           verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? null,
@@ -136,6 +123,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
   const { phone_number_id, waba_id, token, app_id } = parsed.data;
+
+  // Canal conectado por COEXISTÊNCIA não pode ser sobrescrito por credencial
+  // manual: o passo de registro logo abaixo (`/register`) tira o número do app
+  // WhatsApp Business do celular — exatamente o que a coexistência existe para
+  // evitar. Trocar de modo é decisão consciente (excluir o canal e reconectar),
+  // não efeito colateral de colar um token.
+  const { data: coexistente } = await createAdminClient()
+    .from("channel_sessions")
+    .select("id")
+    .eq("organization_id", g.orgId)
+    .eq("provider", CHANNEL_PROVIDER_META)
+    .eq("meta_connection_mode", "embedded_coexistence")
+    .is(ARCHIVED_AT, null)
+    .maybeSingle();
+  if (coexistente) {
+    return fail(
+      "state_conflict",
+      "Este canal foi conectado pelo modo Coexistência. Exclua o canal antes de conectar com credencial manual — registrar o número tiraria ele do app WhatsApp Business do celular.",
+      409,
+      { requestId },
+    );
+  }
 
   // VALIDA ANTES DE GRAVAR — a rota não sabe com quem fala; ela pergunta se a
   // credencial presta e o canal responde.
@@ -201,6 +210,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     phone_number: validacao.displayPhoneNumber ? `+${validacao.displayPhoneNumber.replace(/\D/g, "")}` : null,
     display_name: validacao.verifiedName ?? "Canal oficial",
     status: "WORKING",
+    meta_connection_mode: "byo",
   };
 
   // `update` quando já existe em vez de upsert: a trava única de (org,

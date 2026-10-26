@@ -27,6 +27,7 @@ import { logger } from "@/lib/logger";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { phoneLookupVariants } from "../phone-variants";
+import { reabrirConversaImportada } from "./conversa-importada";
 import type { InboundMessageEvent } from "./webhook";
 
 type Admin = SupabaseClient;
@@ -45,7 +46,7 @@ export type IngestOutcome =
  * filtro, o desfecho `no_session` (que o chamador loga e devolve no corpo) vira
  * uma mensagem gravada num canal que já não existe para o operador.
  */
-async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
+export async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
   const base = () =>
     admin
       .from("channel_sessions")
@@ -63,7 +64,7 @@ async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
  * deixamos o upsert criar — assim o cadastro nasce uma vez só, e o número gravado
  * continua sendo o que já estava lá (não sobrescrevemos o formato de ninguém).
  */
-async function findContactByVariants(
+export async function findContactByVariants(
   admin: Admin,
   orgId: string,
   waId: string,
@@ -78,6 +79,59 @@ async function findContactByVariants(
     .limit(1)
     .maybeSingle();
   return data ?? null;
+}
+
+/**
+ * Acha ou cria o contato de um evento da Meta — pelo telefone, pelo BSUID, ou pelos dois.
+ *
+ * Existe porque a Meta passou a OMITIR o telefone de quem ativa o nome de usuário: o
+ * BSUID (`user_id`) é o único identificador que sempre vem. Três casos:
+ *   - só telefone: caminho de sempre (`fn_upsert_wa_contact`), igual ao de antes — nada
+ *     muda para quem não tem BSUID;
+ *   - BSUID (com ou sem telefone): `fn_upsert_wa_contact_bsuid` (migration 0198), que
+ *     acha pelo BSUID, vincula ao contato do telefone quando é a mesma pessoa, ou cria;
+ *   - nenhum dos dois: não há quem identificar.
+ *
+ * O telefone passa por `phoneLookupVariants` (nono dígito brasileiro) ANTES de tudo, nos
+ * dois caminhos: sem isso a mesma pessoa viraria dois cadastros.
+ *
+ * `nome` é o nome de perfil da PESSOA. No eco e no histórico quem chama passa `null`: ali
+ * o nome que a Meta traz seria o do dono do número, e o `coalesce` do upsert congelaria
+ * o nome errado no contato do cliente.
+ */
+export async function resolverContatoMeta(
+  admin: Admin,
+  orgId: string,
+  entrada: { phone?: string | null; bsuid?: string | null; nome?: string | null },
+): Promise<{ id: string } | { erro: string }> {
+  const waId = entrada.phone ?? null;
+  const existente = waId ? await findContactByVariants(admin, orgId, waId) : null;
+  // O número JÁ existente vence: é o que impede o contato de ser recriado sob a outra
+  // grafia do nono dígito.
+  const phone = waId ? (existente?.phone_number ?? `+${waId.replace(/\D/g, "")}`) : null;
+
+  if (entrada.bsuid) {
+    const { data, error } = await admin.rpc("fn_upsert_wa_contact_bsuid" as never, {
+      p_org: orgId,
+      p_bsuid: entrada.bsuid,
+      p_phone: phone,
+      p_notify: entrada.nome ?? null,
+    } as never);
+    if (error || !data) return { erro: error?.message ?? "sem id" };
+    return { id: data as unknown as string };
+  }
+
+  if (!phone || !waId) return { erro: "sem telefone nem bsuid" };
+  const { data, error } = await admin.rpc("fn_upsert_wa_contact" as never, {
+    p_org: orgId,
+    p_kind: "phone",
+    p_phone: phone,
+    p_lid: null,
+    p_chat_id: waId,
+    p_notify: entrada.nome ?? null,
+  } as never);
+  if (error || !data) return { erro: error?.message ?? "sem id" };
+  return { id: data as unknown as string };
 }
 
 /**
@@ -131,25 +185,15 @@ export async function ingestMetaInbound(
 
   const orgId = sessao.organization_id;
 
-  const existente = await findContactByVariants(admin, orgId, e.from);
-  // O upsert recebe o número JÁ EXISTENTE quando há um — é o que impede o contato de
-  // ser recriado sob a outra grafia do nono dígito.
-  const phone = existente?.phone_number ?? `+${e.from.replace(/\D/g, "")}`;
-
-  const { data: contactId, error: erroContato } = await admin.rpc(
-    "fn_upsert_wa_contact" as never,
-    {
-      p_org: orgId,
-      p_kind: "phone",
-      p_phone: phone,
-      p_lid: null,
-      p_chat_id: e.from,
-      p_notify: e.profileName,
-    } as never,
-  );
-  if (erroContato || !contactId) {
-    return { status: "failed", reason: `contato: ${erroContato?.message ?? "sem id"}` };
-  }
+  // Telefone, BSUID ou os dois — ver `resolverContatoMeta`. Mensagem sem telefone NÃO é
+  // descartada: o BSUID identifica a pessoa.
+  const contato = await resolverContatoMeta(admin, orgId, {
+    phone: e.from,
+    bsuid: e.userId,
+    nome: e.profileName,
+  });
+  if ("erro" in contato) return { status: "failed", reason: `contato: ${contato.erro}` };
+  const contactId = contato.id;
 
   const { data: conversationId, error: erroConversa } = await admin.rpc(
     "fn_upsert_wa_conversation" as never,
@@ -195,6 +239,10 @@ export async function ingestMetaInbound(
     if (erroInsert.code === "23505") return { status: "duplicate" };
     return { status: "failed", reason: `mensagem: ${erroInsert.message}` };
   }
+
+  // Conversa que veio do histórico da coexistência está FECHADA; o cliente voltou a
+  // falar, então ela reabre (e pede roteamento) ANTES dos efeitos de negócio abaixo.
+  await reabrirConversaImportada(admin, conversationId as string);
 
   // Carimba a conversa — é ISTO que move `last_inbound_at` e abre a janela de 24h.
   // Falha aqui não derruba a ingestão (a mensagem já entrou), mas o preview e a

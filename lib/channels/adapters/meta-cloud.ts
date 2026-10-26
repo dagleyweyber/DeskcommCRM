@@ -24,6 +24,7 @@ import { assertDestinoResolvidoSeguro } from "@/lib/automation/outbound-ip";
 import { assertSafeOutboundUrl } from "@/lib/automation/outbound-url";
 import type { FetchedMedia } from "@/lib/messaging/media/types";
 import { resolveMetaCreds } from "../meta/credentials";
+import { destinoNoCorpo, ehBsuid } from "../meta/endereco";
 import { metaTemplateOps } from "../meta/template-ops";
 import type { ChannelAdapter, ChannelHealth, OutboundEnvelope, RecipientInput } from "../types";
 
@@ -71,9 +72,14 @@ export const metaCloudAdapter: ChannelAdapter = {
     // Devolver null é honesto — o chamador grava `missing_phone_number` em vez de
     // montar um endereço que a Meta recusaria.
     if (input.isGroup) return null;
-    if (!input.phoneNumber) return null;
-    const digits = toE164Digits(input.phoneNumber);
-    return digits.length > 0 ? digits : null;
+    if (input.phoneNumber) {
+      const digits = toE164Digits(input.phoneNumber);
+      if (digits.length > 0) return digits;
+    }
+    // Sem telefone (a Meta omite o de quem ativa o nome de usuário), o BSUID é o endereço:
+    // o envio vai em `recipient`, não em `to` (ver `destinoNoCorpo`).
+    if (ehBsuid(input.waBsuid)) return input.waBsuid;
+    return null;
   },
 
   /**
@@ -252,7 +258,7 @@ export const metaCloudAdapter: ChannelAdapter = {
         body: JSON.stringify({
           messaging_product: "whatsapp",
           recipient_type: "individual",
-          to: envelope.to,
+          ...destinoNoCorpo(envelope.to),
           ...corpo,
         }),
       },

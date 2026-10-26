@@ -59,6 +59,7 @@ function evento(overrides: Partial<InboundMessageEvent> = {}): InboundMessageEve
     phoneNumberId: PHONE_NUMBER_ID,
     externalId: `wamid.${Math.random().toString(36).slice(2)}`,
     from: "553199988877",
+    userId: null,
     profileName: "Lead do Anúncio",
     sentAt: new Date(),
     type: "text",

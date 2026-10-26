@@ -209,7 +209,7 @@ que sair do app.
 1. **Aditivo.** O BYO continua e é o padrão. O modo novo é um SEGUNDO jeito de criar uma
    sessão `meta_cloud`, nunca um substituto.
 2. **Opt-in por existência.** `embeddedSignupConfig()` (`lib/channels/meta/embedded-config.ts`)
-   devolve `null` sem `META_APP_ID` + `META_APP_SECRET` + `META_EMBEDDED_CONFIG_ID` — e
+   devolve `null` sem `META_EMBEDDED_APP_ID` + `META_EMBEDDED_APP_SECRET` + `META_EMBEDDED_CONFIG_ID` — e
    `null` significa: sem botão na tela, API recusa. Instalação que não configura nada
    segue exatamente como antes, e `.env` antigo continua válido (regra de packaging).
 3. **Sem provider novo.** Coexistência continua `provider = 'meta_cloud'`. O modo de
@@ -218,9 +218,14 @@ que sair do app.
    canal da Meta.
 4. **Quem liga é quem é Tech Provider.** O projeto upstream NÃO vira provider central; o
    self-hoster que não é Tech Provider não configura as três variáveis e segue em BYO.
-5. **Segredos.** App Secret só no backend; token por sessão, cifrado pelas MESMAS RPCs do
+5. **Dois apps Meta, dois segredos.** O Embedded Signup roda no app do Tech Provider; as
+   sessões BYO já existentes usam OUTRO app. A Meta assina cada webhook com o segredo do
+   app dono da WABA, então a assinatura é conferida com o segredo do MODO da sessão
+   (`appSecretDoWebhook`): `META_EMBEDDED_APP_SECRET` para coexistência, `META_APP_SECRET`
+   (inalterado) para o resto. Um segredo global rejeitaria um dos dois grupos.
+6. **Segredos.** App Secret só no backend; token por sessão, cifrado pelas MESMAS RPCs do
    BYO (`lib/webhooks/secrets.ts`) — nenhum terceiro caminho de cifra.
-6. **O canal muda de comportamento.** O eco do celular (`smb_message_echoes`) entra como
+7. **O canal muda de comportamento.** O eco do celular (`smb_message_echoes`) entra como
    SAÍDA com origem `external_device`, sem acionar a IA e sem renovar a janela de 24h; o
    histórico importado não dispara automação nem criação de lead.
 
