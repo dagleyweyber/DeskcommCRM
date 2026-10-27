@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { logger } from "@/lib/logger";
 import {
   roteiaProximasAcoes,
   type EstadoDoContato,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/leads/next-action";
 import type { LeadCandidate } from "@/lib/leads/active-lead";
 import { proximasReunioesPorLead, type AtividadeDeReuniao } from "@/lib/leads/next-meeting";
+import { consultaEmLotes } from "@/lib/supabase/in-em-lotes";
 import { createClient } from "@/lib/supabase/server";
 import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
 import type { Lead } from "@/lib/types/leads";
@@ -186,16 +188,19 @@ async function withScores(
 ): Promise<{ leads: Lead[]; error: string | null }> {
   if (leads.length === 0) return { leads, error: null };
 
-  const { data, error } = await supabase
-    .from("crm_lead_scores")
-    .select(
-      "lead_id, ai_probability, ai_probability_reason, ai_probability_band, ai_probability_evidence, ai_probability_at",
-    )
-    .eq("organization_id", organizationId)
-    .in(
-      "lead_id",
-      leads.map((l) => l.id),
-    );
+  // Em lotes: a lista de ids cresce com o funil e, inteira na URL, passa de ~15 KB com
+  // ~400 leads (ver lib/supabase/in-em-lotes.ts).
+  const { data, error } = await consultaEmLotes(
+    leads.map((l) => l.id),
+    (lote) =>
+      supabase
+        .from("crm_lead_scores")
+        .select(
+          "lead_id, ai_probability, ai_probability_reason, ai_probability_band, ai_probability_evidence, ai_probability_at",
+        )
+        .eq("organization_id", organizationId)
+        .in("lead_id", lote),
+  );
   if (error) return { leads, error: error.message };
 
   const porLead = new Map<string, NonNullable<Lead["score"]>>();
@@ -252,12 +257,14 @@ async function withConversas(
   const contactIds = [...new Set(leads.map((l) => l.contact_id).filter((c): c is string => !!c))];
   if (contactIds.length === 0) return { leads, error: null };
 
-  const { data, error } = await supabase
-    .from("conversations")
-    .select("id, contact_id, last_message_preview, last_message_at, unread_count_for_assignee")
-    .eq("organization_id", organizationId)
-    .in("contact_id", contactIds)
-    .order("last_message_at", { ascending: false, nullsFirst: false });
+  const { data, error } = await consultaEmLotes(contactIds, (lote) =>
+    supabase
+      .from("conversations")
+      .select("id, contact_id, last_message_preview, last_message_at, unread_count_for_assignee")
+      .eq("organization_id", organizationId)
+      .in("contact_id", lote)
+      .order("last_message_at", { ascending: false, nullsFirst: false }),
+  );
   if (error) return { leads, error: error.message };
 
   const porContato = new Map<string, NonNullable<Lead["conversa"]>>();
@@ -305,16 +312,17 @@ async function withNextMeetings(
 ): Promise<{ leads: Lead[]; error: string | null }> {
   if (leads.length === 0) return { leads, error: null };
 
-  const { data, error } = await supabase
-    .from("crm_lead_activities")
-    .select("lead_id, type, payload")
-    .eq("organization_id", organizationId)
-    .in("type", ["meeting_scheduled", "meeting_outcome"])
-    .in(
-      "lead_id",
-      leads.map((l) => l.id),
-    )
-    .order("performed_at", { ascending: false });
+  const { data, error } = await consultaEmLotes(
+    leads.map((l) => l.id),
+    (lote) =>
+      supabase
+        .from("crm_lead_activities")
+        .select("lead_id, type, payload")
+        .eq("organization_id", organizationId)
+        .in("type", ["meeting_scheduled", "meeting_outcome"])
+        .in("lead_id", lote)
+        .order("performed_at", { ascending: false }),
+  );
   if (error) return { leads, error: error.message };
 
   const porLead = proximasReunioesPorLead((data ?? []) as AtividadeDeReuniao[]);
@@ -341,20 +349,24 @@ async function withNextActions(
 
   const [{ data: estados, error: estadosErr }, { data: candidatos, error: candErr }] =
     await Promise.all([
-      supabase
-        .from("lead_state")
-        .select("contact_id, next_action, next_action_seq, updated_at")
-        .eq("organization_id", organizationId)
-        .in("contact_id", contactIds)
-        .not("next_action", "is", null),
-      supabase
-        .from("crm_leads")
-        .select(
-          "id, organization_id, pipeline_id, status, last_activity_at, created_at, contact_id",
-        )
-        .eq("organization_id", organizationId)
-        .eq("status", "open")
-        .in("contact_id", contactIds),
+      consultaEmLotes(contactIds, (lote) =>
+        supabase
+          .from("lead_state")
+          .select("contact_id, next_action, next_action_seq, updated_at")
+          .eq("organization_id", organizationId)
+          .in("contact_id", lote)
+          .not("next_action", "is", null),
+      ),
+      consultaEmLotes(contactIds, (lote) =>
+        supabase
+          .from("crm_leads")
+          .select(
+            "id, organization_id, pipeline_id, status, last_activity_at, created_at, contact_id",
+          )
+          .eq("organization_id", organizationId)
+          .eq("status", "open")
+          .in("contact_id", lote),
+      ),
     ]);
   if (estadosErr) return { leads, error: estadosErr.message };
   if (candErr) return { leads, error: candErr.message };
@@ -497,10 +509,16 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     withConversas(supabase, orgId, baseLeads),
     withNextMeetings(supabase, orgId, baseLeads),
   ]);
-  if (leadsWithOwner.error) return fail("internal_error", leadsWithOwner.error, 500, { requestId });
-  if (leadsComScore.error) return fail("internal_error", leadsComScore.error, 500, { requestId });
-  if (leadsComConversa.error) return fail("internal_error", leadsComConversa.error, 500, { requestId });
-  if (leadsComReuniao.error) return fail("internal_error", leadsComReuniao.error, 500, { requestId });
+  // O erro vai ao log com a ETAPA: a resposta só carrega a mensagem da biblioteca
+  // ("TypeError: fetch failed"), que não diz qual consulta nem por quê.
+  const falhou = (etapa: string, mensagem: string): Response => {
+    logger.error("board: consulta falhou", { requestId, pipelineId, organization_id: orgId, etapa, mensagem });
+    return fail("internal_error", mensagem, 500, { requestId });
+  };
+  if (leadsWithOwner.error) return falhou("owner_agents", leadsWithOwner.error);
+  if (leadsComScore.error) return falhou("scores", leadsComScore.error);
+  if (leadsComConversa.error) return falhou("conversas", leadsComConversa.error);
+  if (leadsComReuniao.error) return falhou("reunioes", leadsComReuniao.error);
 
   const leadsComAcao = await withNextActions(
     supabase,
@@ -508,9 +526,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
     baseLeads,
     (pipelinePadrao as { id: string } | null)?.id ?? null,
   );
-  if (leadsComAcao.error) {
-    return fail("internal_error", leadsComAcao.error, 500, { requestId });
-  }
+  if (leadsComAcao.error) return falhou("proximas_acoes", leadsComAcao.error);
 
   const leadsEnriquecidos = mesclaEnriquecimentos(baseLeads, {
     owner: leadsWithOwner.leads,
