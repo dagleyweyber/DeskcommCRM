@@ -15,8 +15,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "@/lib/api/types";
 import type { HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
-import { horarioEstaLivre } from "@/lib/agenda/consulta";
-import type { Compromisso } from "@/lib/agenda/tipos";
+import { SalaInvalida, TipoDeCompromissoInvalido, horarioEstaLivre, type OrigemDaConsulta } from "@/lib/agenda/consulta";
+import type { Compromisso, HorarioLivre } from "@/lib/agenda/tipos";
 import { logger } from "@/lib/logger";
 import { resolveActiveLeadForContact, type LeadCandidate } from "@/lib/leads/active-lead";
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
@@ -27,7 +27,7 @@ import type {
   MarcarAgendamentoInput,
 } from "@/lib/schemas/agenda";
 
-const COLUNAS = "id, organization_id, event_type_id, title, description, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, cancelled_at, cancellation_reason, rescheduled_from_id, revision";
+const COLUNAS = "id, organization_id, event_type_id, room_id, title, description, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, cancelled_at, cancellation_reason, rescheduled_from_id, revision";
 
 /**
  * Resolve o negócio ABERTO deste contato (mesma função que o resto do CRM
@@ -102,6 +102,58 @@ async function fecharOLaco(
   }
 }
 
+/** Origem da régua de disponibilidade: a IA respeita a janela do serviço; a equipe, não (ver consulta.ts). */
+function origemDo(ctx: HandlerCtx): OrigemDaConsulta {
+  return ctx.actor.type === "ai_agent" ? "ia" : "equipe";
+}
+
+/**
+ * INSERT/UPDATE protegido: entre a checagem de horário livre e a escrita,
+ * outra marcação pode ter ocupado a sala — a constraint de exclusão
+ * `calendar_appointments_sala_sem_sobreposicao` (migration 0200) recusa com
+ * 23P01, e isso é conflito de horário (409), não erro interno.
+ */
+function erroDeEscrita(ctx: HandlerCtx, err: { code?: string; message?: string } | null): ApiError {
+  if (err?.code === "23P01") {
+    return new ApiError(409, "conflict", undefined, ctx.requestId, "Este horário acabou de ser ocupado nesta sala. Escolha outro.");
+  }
+  return new ApiError(500, "internal_error", undefined, ctx.requestId, err?.message ?? "write_failed");
+}
+
+async function confereHorario(
+  admin: SupabaseClient,
+  ctx: HandlerCtx,
+  params: { eventTypeId: string; roomId: string | null; startsAt: string; ignorarCompromissoId?: string },
+): Promise<HorarioLivre> {
+  let livre: HorarioLivre | null;
+  try {
+    livre = await horarioEstaLivre(
+      admin,
+      {
+        organizationId: ctx.organization_id,
+        eventTypeId: params.eventTypeId,
+        roomId: params.roomId,
+        agora: new Date(),
+        origem: origemDo(ctx),
+        ignorarCompromissoId: params.ignorarCompromissoId ?? null,
+      },
+      params.startsAt,
+    );
+  } catch (err) {
+    if (err instanceof TipoDeCompromissoInvalido) {
+      throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Tipo de compromisso inválido ou inativo.");
+    }
+    if (err instanceof SalaInvalida) {
+      throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Sala inválida, inativa ou não permitida para este serviço.");
+    }
+    throw err;
+  }
+  if (!livre) {
+    throw new ApiError(409, "conflict", undefined, ctx.requestId, "Este horário não está mais disponível.");
+  }
+  return livre;
+}
+
 export async function marcarAgendamentoHandler(
   admin: SupabaseClient,
   ctx: HandlerCtx,
@@ -118,23 +170,20 @@ export async function marcarAgendamentoHandler(
     throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Tipo de compromisso inválido ou inativo.");
   }
 
-  const ownerUserId = input.owner_user_id || (tipo.default_owner_user_id as string | null);
-  if (!ownerUserId) {
-    throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Informe o dono do compromisso — este tipo não tem um padrão.");
-  }
-
   // Confere contra o MESMO motor que publicou o horário — nunca confia cegamente
   // no que o cliente mandou de volta (a grade pode estar desatualizada numa aba parada).
-  const livre = await horarioEstaLivre(
-    admin,
-    { organizationId: ctx.organization_id, eventTypeId: input.event_type_id, ownerUserId, agora: new Date() },
-    input.starts_at,
-  );
-  if (!livre) {
-    throw new ApiError(409, "conflict", undefined, ctx.requestId, "Este horário não está mais disponível.");
-  }
+  // Sem sala informada, o motor escolhe a primeira sala livre permitida para o serviço.
+  const livre = await confereHorario(admin, ctx, {
+    eventTypeId: input.event_type_id,
+    roomId: input.room_id ?? null,
+    startsAt: input.starts_at,
+  });
 
-  const startsAt = new Date(input.starts_at);
+  // Profissional é OPCIONAL desde a 0200 (a sala trava o horário): o informado,
+  // senão o padrão do serviço, senão nenhum.
+  const ownerUserId = input.owner_user_id ?? ((tipo.default_owner_user_id as string | null) || null);
+
+  const startsAt = new Date(livre.starts_at);
   const endsAt = new Date(startsAt.getTime() + (tipo.duration_minutes as number) * 60_000);
 
   const { data: contato, error: contatoErr } = await admin
@@ -151,11 +200,13 @@ export async function marcarAgendamentoHandler(
     .insert({
       organization_id: ctx.organization_id,
       event_type_id: input.event_type_id,
+      room_id: livre.room_id,
       title: input.title ?? `Compromisso com ${(contato as { display_name: string | null }).display_name ?? "contato"}`,
       description: input.description ?? null,
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
-      status: "confirmed",
+      // "Agendado" — `confirmed` é reservado para quando o CLIENTE confirma.
+      status: "pending",
       owner_user_id: ownerUserId,
       contact_id: input.contact_id,
       conversation_id: input.conversation_id ?? null,
@@ -169,12 +220,7 @@ export async function marcarAgendamentoHandler(
     })
     .select(COLUNAS)
     .single();
-  if (insErr || !criado) {
-    // 23P01 = exclusion violation; não temos constraint de exclusão nesta fase,
-    // mas 409 por segurança caso duas marcações concorrentes colidam na janela
-    // entre a checagem acima e o INSERT.
-    throw new ApiError(500, "internal_error", undefined, ctx.requestId, insErr?.message ?? "insert_failed");
-  }
+  if (insErr || !criado) throw erroDeEscrita(ctx, insErr);
   const compromisso = criado as unknown as Compromisso;
 
   await audit({
@@ -191,6 +237,17 @@ export async function marcarAgendamentoHandler(
   return compromisso;
 }
 
+/**
+ * Edita um compromisso.
+ *
+ * - Mudou o DIA/HORA ou o SERVIÇO → REMARCA: cancela o antigo (motivo
+ *   "Remarcado") e cria um novo com `rescheduled_from_id` — histórico de
+ *   reagendamentos sem sobrescrever (mesmo raciocínio de `meeting_scheduled`
+ *   na 0158: cada remarcação é um evento novo). O novo nasce "Agendado": a
+ *   confirmação do horário antigo não vale para o novo.
+ * - Mudou só sala/profissional/status/observação → edita no lugar. Trocar de
+ *   sala confere se a sala nova está livre no mesmo horário.
+ */
 export async function alterarAgendamentoHandler(
   admin: SupabaseClient,
   ctx: HandlerCtx,
@@ -210,37 +267,38 @@ export async function alterarAgendamentoHandler(
   if (compromissoAtual.status === "cancelled") {
     throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Compromisso já cancelado.");
   }
+  if (compromissoAtual.revision !== input.revision) {
+    throw new ApiError(409, "conflict", undefined, ctx.requestId, "Compromisso foi alterado por outra pessoa — recarregue.");
+  }
 
-  const patch: Record<string, unknown> = { revision: compromissoAtual.revision + 1 };
-  if (input.notes !== undefined) patch.notes = input.notes;
+  const mudouHorario =
+    input.starts_at !== undefined && new Date(input.starts_at).getTime() !== new Date(compromissoAtual.starts_at).getTime();
+  const mudouServico = input.event_type_id !== undefined && input.event_type_id !== compromissoAtual.event_type_id;
+  const salaPedida = input.room_id !== undefined ? input.room_id : compromissoAtual.room_id;
+  const profissional = input.owner_user_id !== undefined ? input.owner_user_id : compromissoAtual.owner_user_id;
 
-  let remarcadoDe: Compromisso | null = null;
-  if (input.starts_at) {
-    // Remarcar = CANCELA o antigo (motivo "remarcado") e CRIA um novo com
-    // `rescheduled_from_id` apontando pra ele — histórico de reagendamentos
-    // sem sobrescrever (mesmo raciocínio de `meeting_scheduled` na 0158:
-    // cada remarcação é um evento novo, o passado fica).
+  if (mudouHorario || mudouServico) {
+    const eventTypeId = input.event_type_id ?? compromissoAtual.event_type_id;
+    if (!eventTypeId) {
+      throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Escolha o serviço para remarcar.");
+    }
     const { data: tipo } = await admin
       .from("calendar_event_types")
       .select("duration_minutes")
-      .eq("id", compromissoAtual.event_type_id ?? "")
+      .eq("organization_id", ctx.organization_id)
+      .eq("id", eventTypeId)
       .maybeSingle();
     const duracaoMs =
       ((tipo?.duration_minutes as number | undefined) ??
         (new Date(compromissoAtual.ends_at).getTime() - new Date(compromissoAtual.starts_at).getTime()) / 60_000) *
       60_000;
 
-    const livre = await horarioEstaLivre(
-      admin,
-      {
-        organizationId: ctx.organization_id,
-        eventTypeId: compromissoAtual.event_type_id ?? "",
-        ownerUserId: compromissoAtual.owner_user_id ?? "",
-        agora: new Date(),
-      },
-      input.starts_at,
-    );
-    if (!livre) throw new ApiError(409, "conflict", undefined, ctx.requestId, "Este horário não está mais disponível.");
+    const livre = await confereHorario(admin, ctx, {
+      eventTypeId,
+      roomId: salaPedida,
+      startsAt: input.starts_at ?? compromissoAtual.starts_at,
+      ignorarCompromissoId: id,
+    });
 
     const { data: cancelado, error: cancelErr } = await admin
       .from("calendar_appointments")
@@ -252,20 +310,21 @@ export async function alterarAgendamentoHandler(
       .maybeSingle();
     if (cancelErr) throw new ApiError(500, "internal_error", undefined, ctx.requestId, cancelErr.message);
     if (!cancelado) throw new ApiError(409, "conflict", undefined, ctx.requestId, "Compromisso foi alterado por outra pessoa — recarregue.");
-    remarcadoDe = cancelado as unknown as Compromisso;
+    const remarcadoDe = cancelado as unknown as Compromisso;
 
-    const novoInicio = new Date(input.starts_at);
+    const novoInicio = new Date(livre.starts_at);
     const { data: criado, error: insErr } = await admin
       .from("calendar_appointments")
       .insert({
         organization_id: ctx.organization_id,
-        event_type_id: compromissoAtual.event_type_id,
+        event_type_id: eventTypeId,
+        room_id: livre.room_id,
         title: compromissoAtual.title,
         description: compromissoAtual.description,
         starts_at: novoInicio.toISOString(),
         ends_at: new Date(novoInicio.getTime() + duracaoMs).toISOString(),
-        status: "confirmed",
-        owner_user_id: compromissoAtual.owner_user_id,
+        status: "pending",
+        owner_user_id: profissional,
         contact_id: compromissoAtual.contact_id,
         conversation_id: compromissoAtual.conversation_id,
         location_kind: compromissoAtual.location_kind,
@@ -279,7 +338,16 @@ export async function alterarAgendamentoHandler(
       })
       .select(COLUNAS)
       .single();
-    if (insErr || !criado) throw new ApiError(500, "internal_error", undefined, ctx.requestId, insErr?.message ?? "insert_failed");
+    if (insErr || !criado) {
+      // O antigo já foi cancelado: devolve-o ao estado anterior para a falha
+      // não sumir com o compromisso da grade (melhor esforço — o erro segue).
+      await admin
+        .from("calendar_appointments")
+        .update({ status: compromissoAtual.status, cancelled_at: null, cancellation_reason: null, revision: compromissoAtual.revision + 2 })
+        .eq("id", id)
+        .eq("organization_id", ctx.organization_id);
+      throw erroDeEscrita(ctx, insErr);
+    }
 
     await audit({
       action: "calendar_appointment.rescheduled",
@@ -296,7 +364,26 @@ export async function alterarAgendamentoHandler(
     return novoCompromisso;
   }
 
+  const patch: Record<string, unknown> = { revision: compromissoAtual.revision + 1 };
+  if (input.notes !== undefined) patch.notes = input.notes;
+  if (input.owner_user_id !== undefined) patch.owner_user_id = input.owner_user_id;
   if (input.status) patch.status = input.status;
+
+  if (input.room_id !== undefined && input.room_id !== compromissoAtual.room_id) {
+    if (!input.room_id) {
+      throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Escolha uma sala.");
+    }
+    if (!compromissoAtual.event_type_id) {
+      throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Compromisso sem serviço — remarque escolhendo o serviço.");
+    }
+    const livre = await confereHorario(admin, ctx, {
+      eventTypeId: compromissoAtual.event_type_id,
+      roomId: input.room_id,
+      startsAt: compromissoAtual.starts_at,
+      ignorarCompromissoId: id,
+    });
+    patch.room_id = livre.room_id;
+  }
 
   const { data: atualizado, error: updErr } = await admin
     .from("calendar_appointments")
@@ -306,11 +393,21 @@ export async function alterarAgendamentoHandler(
     .eq("revision", input.revision)
     .select(COLUNAS)
     .maybeSingle();
-  if (updErr) throw new ApiError(500, "internal_error", undefined, ctx.requestId, updErr.message);
+  if (updErr) throw erroDeEscrita(ctx, updErr);
   if (!atualizado) throw new ApiError(409, "conflict", undefined, ctx.requestId, "Compromisso foi alterado por outra pessoa — recarregue.");
   const compromisso = atualizado as unknown as Compromisso;
 
-  if (input.status === "completed" || input.status === "no_show") {
+  await audit({
+    action: "calendar_appointment.updated",
+    organizationId: ctx.organization_id,
+    actorUserId: ctx.actor.type === "user" ? ctx.actor.id : null,
+    resourceType: "calendar_appointment",
+    resourceId: compromisso.id,
+    metadata: { campos: Object.keys(patch).filter((k) => k !== "revision") },
+    requestId: ctx.requestId,
+  });
+
+  if (input.status && input.status !== compromissoAtual.status && (input.status === "completed" || input.status === "no_show")) {
     await fecharOLaco(admin, ctx, compromisso, { tipo: "meeting_outcome", outcome: input.status === "completed" ? "attended" : "no_show" });
   }
 

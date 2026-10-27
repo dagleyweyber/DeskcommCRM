@@ -30,7 +30,7 @@
 import type { AvailabilitySchedule, ScheduleWindow } from "@/lib/schemas/routing";
 import { instanteDoMomentoLocal, momentoLocal, dataLocalDe, somaDias } from "./fuso";
 import { candidatoOcupado } from "./ocupados";
-import type { HorarioLivre, IntervaloOcupado } from "./tipos";
+import type { IntervaloOcupado } from "./tipos";
 
 export interface ExcecaoDeDisponibilidade {
   date: string;
@@ -52,6 +52,13 @@ export interface ParametrosDeHorariosLivres {
   bookingWindowDays: number;
   /** Teto de candidatos devolvidos — defesa contra janela enorme + slot minúsculo. */
   limite?: number;
+  /**
+   * "YYYY-MM-DD" no fuso do schedule: calcula SÓ este dia (a tela da Agenda
+   * escolhe o dia no calendário e pede os horários dele). Continua limitado
+   * por `minimumNoticeMinutes` e `bookingWindowDays` — um dia fora da janela
+   * devolve vazio, nunca um horário que a regra proíbe.
+   */
+  apenasData?: string;
 }
 
 interface JanelaDoDia {
@@ -130,7 +137,7 @@ function janelasDoDia(dow: number, windows: ScheduleWindow[], excecoesDoDia: Exc
   return janelas;
 }
 
-export function horariosLivres(p: ParametrosDeHorariosLivres): HorarioLivre[] {
+export function horariosLivres(p: ParametrosDeHorariosLivres): IntervaloOcupado[] {
   const timezone = p.schedule.timezone || "America/Sao_Paulo";
   const windows = p.schedule.windows ?? [];
   const passoMinutos = p.slotIntervalMinutes ?? p.durationMinutes;
@@ -146,11 +153,14 @@ export function horariosLivres(p: ParametrosDeHorariosLivres): HorarioLivre[] {
     porData.set(e.date, lista);
   }
 
-  const candidatos: HorarioLivre[] = [];
-  let dataAtual = dataLocalDe(p.agora, timezone);
+  const candidatos: IntervaloOcupado[] = [];
+  const hoje = dataLocalDe(p.agora, timezone);
+  if (p.apenasData && p.apenasData < hoje) return [];
+  let dataAtual = p.apenasData ?? hoje;
+  const ultimoDia = p.apenasData ?? limiteSuperiorData;
 
   for (let dias = 0; dias <= p.bookingWindowDays && candidatos.length < limite; dias++) {
-    if (dataAtual > limiteSuperiorData) break;
+    if (dataAtual > limiteSuperiorData || dataAtual > ultimoDia) break;
 
     // dow a partir da própria data civil (evita um segundo cálculo de fuso).
     const [ano, mes, dia] = dataAtual.split("-").map(Number);

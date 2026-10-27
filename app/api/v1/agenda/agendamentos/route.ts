@@ -67,7 +67,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   let query = supabase
     .from("calendar_appointments")
     .select(
-      "id, event_type_id, title, starts_at, ends_at, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, revision, contacts:contact_id(display_name, phone_number), calendar_event_types:event_type_id(name)",
+      "id, event_type_id, room_id, title, starts_at, ends_at, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, revision, rescheduled_from_id, contacts:contact_id(display_name, phone_number), calendar_event_types:event_type_id(name, duration_minutes)",
     )
     .eq("organization_id", authz.org.orgId)
     .gte("starts_at", de)

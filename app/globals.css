@@ -316,7 +316,7 @@
     border: 2px solid transparent;
   }
 
-  /* Grade da Agenda (components/agenda/GradeDoDia.tsx): a caixa de um
+  /* Grade da Agenda (components/agenda/GradeDaAgenda.tsx): a caixa de um
      compromisso tem altura INLINE (varia por duração, Tailwind JIT não gera
      classe de valor que só existe em runtime) — o hover que expande pra
      mostrar o texto cortado só consegue vencer esse `style` com

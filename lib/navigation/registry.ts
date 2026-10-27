@@ -499,8 +499,8 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   },
   {
     href: "/app/settings/tenant/agenda",
-    label: "Tipos de compromisso",
-    description: "Os tipos de compromisso que aparecem ao marcar na Agenda — duração e antecedência de cada um.",
+    label: "Agenda: salas e serviços",
+    description: "Salas da clínica, horário de funcionamento, serviços (e em quais salas) e bloqueios da Agenda.",
     icon: Calendar,
     group: "organizacao",
     section: "Sua empresa",

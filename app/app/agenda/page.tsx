@@ -6,8 +6,8 @@ import { AgendaClient } from "./_client";
 export const dynamic = "force-dynamic";
 
 /**
- * Agenda (núcleo, Fase 1 — sem Google Calendar). `agent`+: é o mesmo piso
- * das rotas de `calendar_appointments` (RLS + `requireRole`).
+ * Agenda por sala (migrations 0182 + 0200). `agent`+: é o mesmo piso das
+ * rotas de `calendar_appointments` (RLS + `requireRole`).
  */
 export default async function AgendaPage() {
   const user = await requireAuth();
@@ -15,10 +15,9 @@ export default async function AgendaPage() {
   if (!activeOrg) redirect("/app");
 
   return (
-    <div className="flex h-full flex-col gap-6 p-6">
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Agenda</h1>
-        <p className="text-sm text-muted-foreground">Compromissos marcados com contatos.</p>
       </header>
       <AgendaClient />
     </div>

@@ -9,7 +9,7 @@
 import { z } from "zod";
 
 import type { McpToolDefinition } from "../types";
-import { TipoDeCompromissoInvalido, horariosLivresDaOrg } from "@/lib/agenda/consulta";
+import { SalaInvalida, TipoDeCompromissoInvalido, horariosLivresDaOrg } from "@/lib/agenda/consulta";
 import {
   alterarAgendamentoHandler,
   cancelarAgendamentoHandler,
@@ -41,11 +41,16 @@ export const crmListEventTypes: McpToolDefinition<typeof listarTiposShape> = {
 
 const horariosShape = {
   event_type_id: z.string().uuid().describe("Id do tipo de compromisso (ver crm_list_event_types)."),
-  owner_user_id: z
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe("Dia (YYYY-MM-DD, fuso da clínica) — quando o cliente pediu um dia específico. Sem ele, lista os próximos horários livres."),
+  room_id: z
     .string()
     .uuid()
     .optional()
-    .describe("Dono da agenda — opcional se o tipo já tem um padrão."),
+    .describe("Sala específica — normalmente omita: o horário já vem com a primeira sala livre para o serviço."),
 };
 
 export const crmGetAvailableSlots: McpToolDefinition<typeof horariosShape> = {
@@ -61,13 +66,18 @@ export const crmGetAvailableSlots: McpToolDefinition<typeof horariosShape> = {
       const { horarios } = await horariosLivresDaOrg(ctx.supabase, {
         organizationId: ctx.organizationId,
         eventTypeId: input.event_type_id,
-        ownerUserId: input.owner_user_id ?? "",
+        roomId: input.room_id ?? null,
+        data: input.date ?? null,
         agora: new Date(),
+        origem: ctx.actor.type === "ai_agent" ? "ia" : "equipe",
       });
       return { slots: horarios };
     } catch (err) {
       if (err instanceof TipoDeCompromissoInvalido) {
         throw new Error("Tipo de compromisso inválido ou inativo.");
+      }
+      if (err instanceof SalaInvalida) {
+        throw new Error("Sala inválida ou não permitida para este serviço.");
       }
       throw err;
     }
@@ -81,7 +91,12 @@ const marcarShape = {
     .string()
     .datetime({ offset: true })
     .describe("Instante ISO 8601 — DEVE ser um dos valores devolvidos por crm_get_available_slots."),
-  owner_user_id: z.string().uuid().optional(),
+  room_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("room_id do horário escolhido em crm_get_available_slots. Omitido = primeira sala livre."),
+  owner_user_id: z.string().uuid().optional().describe("Profissional — opcional."),
   notes: z.string().max(2000).optional(),
 };
 
@@ -102,11 +117,17 @@ export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
           event_type_id: input.event_type_id,
           contact_id: input.contact_id,
           starts_at: input.starts_at,
+          room_id: input.room_id ?? null,
           owner_user_id: input.owner_user_id ?? null,
           notes: input.notes ?? null,
         },
       );
-      return { appointment_id: compromisso.id, starts_at: compromisso.starts_at, status: compromisso.status };
+      return {
+        appointment_id: compromisso.id,
+        starts_at: compromisso.starts_at,
+        room_id: compromisso.room_id,
+        status: compromisso.status,
+      };
     } catch (err) {
       if (err instanceof ApiError) throw new Error(err.message);
       throw err;

@@ -282,4 +282,12 @@ export type AuditAction =
   | "calendar_event_type.updated"
   | "calendar_appointment.created"
   | "calendar_appointment.rescheduled"
-  | "calendar_appointment.cancelled";
+  | "calendar_appointment.cancelled"
+  // Agenda por sala (migration 0200): edição sem remarcar (sala, profissional,
+  // status, observação) e o cadastro de salas/horário da clínica.
+  | "calendar_appointment.updated"
+  | "calendar_room.created"
+  | "calendar_room.updated"
+  | "calendar_settings.updated"
+  | "calendar_block.created"
+  | "calendar_block.deleted";

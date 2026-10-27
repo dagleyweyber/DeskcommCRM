@@ -2,11 +2,11 @@ import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
-import { EventTypesClient } from "./_client";
+import { AgendaSettingsClient } from "./_client";
 
 export const dynamic = "force-dynamic";
 
-/** manager+: mesmo piso de `calendar_event_types_write` na RLS (migration 0182). */
+/** manager+: mesmo piso de `calendar_rooms_write`/`calendar_event_types_write` na RLS (migrations 0182/0200). */
 export default async function AgendaSettingsPage() {
   const user = await requireAuth();
   const activeOrg = await resolveActiveOrg(user);
@@ -16,14 +16,14 @@ export default async function AgendaSettingsPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-6 p-6">
+    <div className="flex h-full flex-col gap-6 p-4 md:p-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Tipos de compromisso</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Agenda</h1>
         <p className="text-sm text-muted-foreground">
-          Os tipos de compromisso que aparecem ao marcar na Agenda — duração, antecedência mínima e janela de agendamento de cada um.
+          Salas, horário de funcionamento, serviços e bloqueios — é daqui que a Agenda e o agente de IA tiram os horários livres.
         </p>
       </header>
-      <EventTypesClient />
+      <AgendaSettingsClient />
     </div>
   );
 }

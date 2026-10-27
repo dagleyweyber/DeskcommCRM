@@ -167,3 +167,41 @@ describe("horariosLivres — limites", () => {
     expect(out.length).toBeLessThanOrEqual(10);
   });
 });
+
+describe("horariosLivres — apenasData (a tela escolhe o dia no calendário)", () => {
+  it("calcula só o dia pedido, mesmo que haja outros dias livres antes", () => {
+    const out = horariosLivres(
+      base({
+        schedule: {
+          timezone: "America/Sao_Paulo",
+          windows: [
+            { dow: 1, start: "08:00", end: "09:00" },
+            { dow: 2, start: "08:00", end: "09:00" },
+          ],
+        },
+        bookingWindowDays: 14,
+        apenasData: "2026-07-14", // terça
+      }),
+    );
+    expect(out.map((h) => h.starts_at)).toEqual([
+      new Date("2026-07-14T11:00:00Z").toISOString(),
+      new Date("2026-07-14T11:30:00Z").toISOString(),
+    ]);
+  });
+
+  it("dia daqui a 45 dias aparece quando a janela permite (sessão de laser)", () => {
+    const out = horariosLivres(
+      base({
+        schedule: { timezone: "America/Sao_Paulo", windows: [{ dow: 3, start: "08:00", end: "09:00" }] },
+        bookingWindowDays: 366,
+        apenasData: "2026-08-26", // quarta, 45 dias depois de 12/07
+      }),
+    );
+    expect(out).toHaveLength(2);
+  });
+
+  it("dia fora da janela ou no passado devolve vazio", () => {
+    expect(horariosLivres(base({ bookingWindowDays: 6, apenasData: "2026-07-20" }))).toEqual([]);
+    expect(horariosLivres(base({ apenasData: "2026-07-06" }))).toEqual([]);
+  });
+});
