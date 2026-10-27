@@ -65,6 +65,10 @@ export type InboxKind =
   // banco direto. Achado revisando capacidade antes de escalar pra mais
   // clínicas.
   | 'automation_rule_failed'
+  // (migration 0201) O cliente respondeu à confirmação automática que não vem
+  // (botão do modelo). A vaga continua reservada até a recepção agir — sem o
+  // aviso, ficaria presa sem ninguém saber.
+  | 'appointment_declined'
   | 'other';
 
 export interface InboxItemRow {

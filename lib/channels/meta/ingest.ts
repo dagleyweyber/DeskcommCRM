@@ -23,6 +23,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { registrarRespostaDeConfirmacao } from "@/lib/agenda/confirmacao";
 import { logger } from "@/lib/logger";
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
@@ -256,6 +257,18 @@ export async function ingestMetaInbound(
   } as never);
 
   const messageId = (inserida as { id: string } | null)?.id ?? "";
+
+  // Clique no botão do modelo de confirmação → o compromisso muda de status na
+  // Agenda (migration 0201). Depois do INSERT de propósito: re-entrega da Meta
+  // (23505) já saiu acima e não reprocessa. Nunca lança.
+  if (e.type === "button" && e.replyToExternalId) {
+    await registrarRespostaDeConfirmacao(admin, {
+      organizationId: orgId,
+      respondeuA: e.replyToExternalId,
+      texto: e.text,
+      payload: e.buttonPayload,
+    });
+  }
 
   if (messageId && e.media) {
     await pedirPersistenciaDaMidia(admin, orgId, conversationId as string, messageId);

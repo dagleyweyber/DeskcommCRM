@@ -87,6 +87,8 @@ export interface Compromisso {
   cancelled_at: string | null;
   cancellation_reason: string | null;
   rescheduled_from_id: string | null;
+  /** Quando o CLIENTE respondeu à confirmação automática (migration 0201). */
+  client_responded_at?: string | null;
   revision: number;
 }
 

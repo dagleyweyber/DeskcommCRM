@@ -64,6 +64,8 @@ export const KIND_LABEL = {
   // algo programado não aconteceu. O nome da regra e o motivo técnico ficam
   // no corpo, pra quem for até lá consertar.
   automation_rule_failed: "Uma automação configurada não conseguiu terminar o que deveria fazer",
+  // O que a recepção precisa fazer: há uma vaga presa por alguém que já avisou que não vem.
+  appointment_declined: "Um cliente avisou que não vai ao agendamento — remarque ou libere o horário",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

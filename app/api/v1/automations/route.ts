@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { botoesDeRespostaRapida, normalizaTextoDeBotao } from "@/lib/agenda/confirmacao";
 import { requireRole } from "@/lib/auth/require-role";
 import {
   fraseDosValoresSemFonte,
@@ -43,7 +44,20 @@ const createAutomationSchema = z.object({
   // O SERVIÇO da Agenda a que esta automação responde. `null` = todos os serviços (o
   // comportamento de sempre). Uma automação ativa por serviço: ver migration 0199.
   event_type_id: z.string().uuid().nullable().default(null),
-});
+  // QUANDO enviar (migration 0201). Default = o comportamento de sempre.
+  timing_kind: z.enum(["day_of_8am", "days_before", "hours_before"]).default("day_of_8am"),
+  timing_value: z.number().int().min(1).max(72).nullable().default(null),
+  // QUAL botão do modelo confirma/desmarca — preenchido = automação de confirmação.
+  confirm_button_text: z.string().trim().min(1).max(60).nullable().default(null),
+  decline_button_text: z.string().trim().min(1).max(60).nullable().default(null),
+})
+  .refine(
+    (a) =>
+      (a.timing_kind === "day_of_8am" && a.timing_value === null) ||
+      (a.timing_kind === "days_before" && a.timing_value !== null && a.timing_value <= 7) ||
+      (a.timing_kind === "hours_before" && a.timing_value !== null),
+    { message: "Momento de envio inválido: 1 a 7 dias antes, ou 1 a 72 horas antes.", path: ["timing_value"] },
+  );
 
 export async function GET(): Promise<Response> {
   const requestId = randomUUID();
@@ -54,7 +68,7 @@ export async function GET(): Promise<Response> {
   const { data, error } = await admin
     .from("whatsapp_template_automations")
     .select(
-      "id, name, trigger_kind, status, template_name, template_language, event_type_id, event_type:calendar_event_types(name), created_at, updated_at",
+      "id, name, trigger_kind, status, template_name, template_language, event_type_id, event_type:calendar_event_types(name), timing_kind, timing_value, confirm_button_text, decline_button_text, created_at, updated_at",
     )
     .eq("organization_id", authz.org.orgId)
     .order("created_at", { ascending: false });
@@ -125,6 +139,15 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   // Toda variável do modelo precisa de uma origem (mesma regra de Campanhas): sem isso toda
   // ocorrência falharia com `template_missing_values` no primeiro envio.
+  // O botão escolhido precisa existir no modelo — senão a resposta do cliente
+  // nunca casaria e a confirmação ficaria muda sem ninguém saber por quê.
+  const botoes = botoesDeRespostaRapida(template.components).map(normalizaTextoDeBotao);
+  for (const escolhido of [input.confirm_button_text, input.decline_button_text]) {
+    if (escolhido && !botoes.includes(normalizaTextoDeBotao(escolhido))) {
+      return fail("invalid_request", `O modelo não tem o botão "${escolhido}".`, 422, { requestId });
+    }
+  }
+
   const faltando = valoresSemFonte(
     {
       name: input.template_name,
@@ -152,6 +175,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       template_language: input.template_language,
       variable_mapping: input.variable_mapping,
       event_type_id: input.event_type_id,
+      timing_kind: input.timing_kind,
+      timing_value: input.timing_kind === "day_of_8am" ? null : input.timing_value,
+      confirm_button_text: input.confirm_button_text,
+      decline_button_text: input.decline_button_text,
       status: "draft",
       created_by: authz.user.id,
     })

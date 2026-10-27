@@ -234,6 +234,7 @@ export function GradeDaAgenda({
                         </span>
                         <span className={cn("mt-0.5 inline-block rounded px-1.5 py-px text-[10px] font-medium", CLASSE_DO_SELO[c.status])}>
                           {RÓTULO_DO_STATUS[c.status]}
+                          {c.client_responded_at && (c.status === "confirmed" || c.status === "declined") ? " · pelo cliente" : ""}
                         </span>
                         <span className="block truncate opacity-90">
                           {c.calendar_event_types?.name ?? c.title}

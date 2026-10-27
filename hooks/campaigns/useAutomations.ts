@@ -15,9 +15,16 @@ export interface AutomationSummary {
   /** O serviço da Agenda a que responde; `null` = todos os serviços. */
   event_type_id: string | null;
   event_type: { name: string } | null;
+  timing_kind: TimingKind;
+  timing_value: number | null;
+  confirm_button_text: string | null;
+  decline_button_text: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** Quando a automação envia em relação ao compromisso (migration 0201). */
+export type TimingKind = "day_of_8am" | "days_before" | "hours_before";
 
 const QUERY_KEY = ["automations"];
 
@@ -37,6 +44,11 @@ export interface CreateAutomationInput {
   variable_mapping: VariableMapping;
   /** `null`/ausente = todos os serviços. */
   event_type_id?: string | null;
+  timing_kind?: TimingKind;
+  timing_value?: number | null;
+  /** Texto do botão do modelo que confirma presença — preenchido = automação de confirmação. */
+  confirm_button_text?: string | null;
+  decline_button_text?: string | null;
 }
 
 export function useCreateAutomation() {

@@ -19,13 +19,19 @@ export interface OcorrenciaDevida {
    * `whatsapp_template_automation_sends.occurrence_key`
    * (`unique(automation_id, occurrence_key)`). Cada trigger_kind decide o
    * PRÓPRIO formato: pro lembrete de agendamento é o `activity_id` da
-   * linha `meeting_scheduled`; um gatilho futuro sem linha de atividade
+   * compromisso (0201; antes, a linha `meeting_scheduled`); um gatilho futuro sem linha de atividade
    * pra apontar (aniversariantes) usaria outra coisa, ex. `contact_id +
    * ano`.
    */
   occurrenceKey: string;
   /** ISO com offset — só quando o gatilho tem uma data/hora própria (agendamento). Alimenta os slots `appointment_date`/`appointment_time`. */
   appointmentAt?: string;
+  /**
+   * O compromisso da Agenda (0201) — gravado no envio
+   * (`whatsapp_template_automation_sends.appointment_id`) para a RESPOSTA do
+   * cliente ao botão do modelo achar o compromisso que confirma.
+   */
+  appointmentId?: string;
 }
 
 export interface AutomationForResolve {

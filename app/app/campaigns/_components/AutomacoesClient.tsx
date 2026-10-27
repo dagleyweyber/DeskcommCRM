@@ -11,7 +11,7 @@ import {
   usePauseAutomation,
   type AutomationSummary,
 } from "@/hooks/campaigns/useAutomations";
-import { NovaAutomacaoForm } from "./NovaAutomacaoForm";
+import { NovaAutomacaoForm, rotuloDoMomento } from "./NovaAutomacaoForm";
 
 const COR_DO_STATUS: Record<AutomationSummary["status"], "default" | "secondary" | "outline"> = {
   draft: "outline",
@@ -99,6 +99,12 @@ export function AutomacoesClient() {
                 <Badge variant="outline" data-testid="automacao-servico">
                   {a.event_type?.name ?? "Todos os serviços"}
                 </Badge>
+                <Badge variant="outline">{rotuloDoMomento(a.timing_kind, a.timing_value)}</Badge>
+                {(a.confirm_button_text || a.decline_button_text) && (
+                  <Badge variant="outline" title="A resposta do cliente atualiza o status na Agenda">
+                    Confirma pela resposta
+                  </Badge>
+                )}
                 <div className="ml-auto">
                   <AcoesDaAutomacao automacao={a} />
                 </div>

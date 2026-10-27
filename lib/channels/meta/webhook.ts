@@ -116,6 +116,14 @@ export interface InboundMessageEvent {
   } | null;
   /** `null` quando a mensagem não veio de clique em anúncio (a maioria). */
   adReferral: AdReferral | null;
+  /**
+   * `context.id` — o wamid da NOSSA mensagem que o cliente respondeu (clique em
+   * botão de modelo, ou "responder" no app). É o que liga a resposta ao envio
+   * da automação de confirmação (migration 0201). `null` sem contexto.
+   */
+  replyToExternalId: string | null;
+  /** `button.payload` do clique em botão de resposta rápida de modelo. */
+  buttonPayload: string | null;
 }
 
 /** Status de entrega de uma mensagem que ENVIAMOS (sent/delivered/read/failed). */
@@ -286,6 +294,9 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
                   }
                 : null,
             adReferral: parseAdReferral(raw),
+            replyToExternalId: str((raw.context as Record<string, unknown> | undefined)?.id),
+            buttonPayload:
+              tipo === "button" ? str((raw.button as Record<string, unknown> | undefined)?.payload) : null,
           });
         }
         continue;

@@ -26,7 +26,7 @@ export async function POST(
 
   const { data: automacao } = await admin
     .from("whatsapp_template_automations")
-    .select("id, status, trigger_kind, event_type_id")
+    .select("id, status, trigger_kind, event_type_id, timing_kind, timing_value")
     .eq("id", id)
     .eq("organization_id", authz.org.orgId)
     .maybeSingle();
@@ -35,8 +35,9 @@ export async function POST(
     return fail("invalid_request", "Esta automação já está ativa.", 422, { requestId });
   }
 
-  // UMA automação ativa por serviço (migration 0199): duas ativas para o mesmo serviço mandariam
-  // a mensagem em dobro. Confere ANTES, para dizer qual é e o que fazer; o índice único é a
+  // UMA automação ativa por serviço E momento de envio (migrations 0199 → 0201): duas ativas
+  // para o mesmo serviço no mesmo momento mandariam a mensagem em dobro — já "confirmação 1 dia
+  // antes" + "lembrete no dia" do mesmo serviço convivem. Confere ANTES, para dizer qual é e o que fazer; o índice único é a
   // trava final contra a corrida entre dois cliques.
   let consulta = admin
     .from("whatsapp_template_automations")
@@ -44,13 +45,17 @@ export async function POST(
     .eq("organization_id", authz.org.orgId)
     .eq("trigger_kind", automacao.trigger_kind as string)
     .eq("status", "active")
+    .eq("timing_kind", automacao.timing_kind as string)
     .neq("id", id);
+  consulta = automacao.timing_value === null
+    ? consulta.is("timing_value", null)
+    : consulta.eq("timing_value", automacao.timing_value as number);
   consulta = automacao.event_type_id
     ? consulta.eq("event_type_id", automacao.event_type_id as string)
     : consulta.is("event_type_id", null);
   const { data: conflito } = await consulta.limit(1).maybeSingle();
   const frase = (nome: string) =>
-    `Já existe uma automação ativa para ${automacao.event_type_id ? "este serviço" : "todos os serviços"}: "${nome}". Pause-a antes de ativar esta — duas ativas mandariam a mensagem em dobro.`;
+    `Já existe uma automação ativa para ${automacao.event_type_id ? "este serviço" : "todos os serviços"} no mesmo momento de envio: "${nome}". Pause-a antes de ativar esta — duas ativas mandariam a mensagem em dobro.`;
   if (conflito) return fail("state_conflict", frase(conflito.name as string), 409, { requestId });
 
   const { error } = await admin

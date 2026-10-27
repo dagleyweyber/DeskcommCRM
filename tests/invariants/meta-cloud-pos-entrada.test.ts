@@ -66,6 +66,8 @@ function evento(overrides: Partial<InboundMessageEvent> = {}): InboundMessageEve
     text: "oi, vi o anúncio",
     media: null,
     adReferral: null,
+    replyToExternalId: null,
+    buttonPayload: null,
     ...overrides,
   };
 }

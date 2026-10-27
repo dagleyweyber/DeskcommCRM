@@ -367,7 +367,11 @@ export async function alterarAgendamentoHandler(
   const patch: Record<string, unknown> = { revision: compromissoAtual.revision + 1 };
   if (input.notes !== undefined) patch.notes = input.notes;
   if (input.owner_user_id !== undefined) patch.owner_user_id = input.owner_user_id;
-  if (input.status) patch.status = input.status;
+  if (input.status && input.status !== compromissoAtual.status) {
+    patch.status = input.status;
+    // A equipe mudou o status: deixa de ser "respondido pelo cliente" (0201).
+    patch.client_responded_at = null;
+  }
 
   if (input.room_id !== undefined && input.room_id !== compromissoAtual.room_id) {
     if (!input.room_id) {

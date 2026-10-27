@@ -10,6 +10,9 @@ import pg from "pg";
  *
  * As atividades `meeting_scheduled` são gravadas como a Agenda grava
  * (`source_module = 'agenda.agendamentos'`, `source_id` = id do compromisso).
+ *
+ * Desde a 0201 a função lê o COMPROMISSO direto (não a atividade) e devolve o id
+ * dele em `activity_id` — o filtro por serviço desta migration continua o mesmo.
  */
 const container = process.env.TEST_DB_CONTAINER;
 if (!container) {
@@ -32,16 +35,21 @@ const A_ESTETICA = "a90da000-0000-4000-8000-0000000000c3";
 
 /** 15:00Z = 12:00 em São Paulo. */
 const AGORA = "2026-03-10T15:00:00.000Z";
-const HOJE_12H = "2026-03-10T15:00:00.000Z";
+/** O compromisso é às 15h (SP): ainda vai acontecer quando o lembrete é avaliado ao meio-dia. */
+const HOJE_15H = "2026-03-10T18:00:00.000Z";
 
 let pipelineId = "";
 let stageId = "";
 let seq = 0;
 
-/** Contato + lead + compromisso (opcional) + atividade `meeting_scheduled`. Devolve o id da atividade. */
+/**
+ * Contato + lead + compromisso (opcional) + atividade `meeting_scheduled`. Devolve o id
+ * do COMPROMISSO (é o que a função devolve desde a 0201) — ou o da atividade, quando não
+ * há compromisso (caso legado).
+ */
 async function agendamento(opts: {
   servico: string | null;
-  status?: "confirmed" | "cancelled";
+  status?: "pending" | "cancelled";
   daAgenda?: boolean;
 }): Promise<string> {
   seq += 1;
@@ -72,8 +80,8 @@ async function agendamento(opts: {
       [
         ORG,
         opts.servico,
-        HOJE_12H,
-        opts.status ?? "confirmed",
+        HOJE_15H,
+        opts.status ?? "pending",
         contato,
         cancelado ? AGORA : null,
         cancelado ? "teste" : null,
@@ -88,9 +96,9 @@ async function agendamento(opts: {
        (organization_id, lead_id, contact_id, source_module, source_id, type, payload, performed_at)
      values ($1, $2, $3, $4, $5, 'meeting_scheduled', $6::jsonb, $7)
      returning id`,
-    [ORG, lead, contato, sourceModule, sourceId, JSON.stringify({ scheduled_at: HOJE_12H }), "2026-03-10T11:00:00.000Z"],
+    [ORG, lead, contato, sourceModule, sourceId, JSON.stringify({ scheduled_at: HOJE_15H }), "2026-03-10T11:00:00.000Z"],
   );
-  return act[0]!.id;
+  return sourceId ?? act[0]!.id;
 }
 
 async function devidos(automacao: string): Promise<string[]> {
@@ -217,7 +225,7 @@ describe("fn_due_appointment_reminders — filtro por serviço (0199)", () => {
     await ativa(A_TODOS, false);
   });
 
-  it("agendamento sem compromisso na Agenda (diálogo antigo do Kanban) só casa com 'todos'", async () => {
+  it("atividade sem compromisso na Agenda (diálogo antigo do Kanban) não dispara mais (0201: a fonte é a Agenda)", async () => {
     const legado = await agendamento({ servico: null, daAgenda: false });
 
     await ativa(A_LASER, true);
@@ -225,7 +233,7 @@ describe("fn_due_appointment_reminders — filtro por serviço (0199)", () => {
     await ativa(A_LASER, false);
 
     await ativa(A_TODOS, true);
-    expect(await devidos(A_TODOS)).toContain(legado);
+    expect(await devidos(A_TODOS)).not.toContain(legado);
     await ativa(A_TODOS, false);
   });
 
@@ -242,7 +250,7 @@ describe("fn_due_appointment_reminders — filtro por serviço (0199)", () => {
   });
 });
 
-describe("uniq_automacao_ativa_por_servico (0199)", () => {
+describe("uniq_automacao_ativa_por_servico_e_momento (0199 → 0201)", () => {
   it("⭐ duas ativas do MESMO serviço não coexistem (trava contra envio em dobro)", async () => {
     await ativa(A_LASER, true);
     const outra = "a90da000-0000-4000-8000-0000000000c9";
@@ -270,5 +278,25 @@ describe("uniq_automacao_ativa_por_servico (0199)", () => {
     await ativa(A_TODOS, false);
     await ativa(A_LASER, false);
     await ativa(A_ESTETICA, false);
+  });
+
+  it("⭐ (0201) mesmo serviço em MOMENTOS diferentes coexiste: confirmação 1 dia antes + lembrete no dia", async () => {
+    await ativa(A_LASER, true); // no dia, às 8h
+    const confirmacao = "a90da000-0000-4000-8000-0000000000c8";
+    await pool.query(
+      `insert into whatsapp_template_automations
+         (id, organization_id, name, trigger_kind, channel_session_id, template_name, template_language,
+          variable_mapping, status, event_type_id, timing_kind, timing_value, confirm_button_text)
+       values ($1, $2, 'Laser — confirmação', 'appointment_reminder', $3, 'modelo', 'pt_BR', '{}'::jsonb,
+               'active', $4, 'days_before', 1, 'Confirmo')`,
+      [confirmacao, ORG, SESSION, LASER],
+    );
+    const { rows } = await pool.query(
+      "select count(*)::int as n from whatsapp_template_automations where organization_id = $1 and status = 'active' and event_type_id = $2",
+      [ORG, LASER],
+    );
+    expect(rows[0].n).toBe(2);
+    await pool.query("delete from whatsapp_template_automations where id = $1", [confirmacao]);
+    await ativa(A_LASER, false);
   });
 });

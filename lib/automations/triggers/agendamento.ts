@@ -1,25 +1,25 @@
 /**
- * `trigger_kind = 'appointment_reminder'` — lembrete de agendamento.
+ * `trigger_kind = 'appointment_reminder'` — lembrete/confirmação de agendamento.
  *
- * Toda a busca de "quem tem agendamento hoje, ainda sem lembrete desta
- * automação" mora em SQL (`fn_due_appointment_reminders`, migration
- * 0169) — `scheduled_at` vive dentro de `payload` jsonb da linha
- * `meeting_scheduled` mais recente do lead, e achar isso por
- * encadeamento `.from().select()` do Supabase JS exigiria `DISTINCT ON`
- * que o cliente não expressa. Este arquivo só filtra o limiar de horário
- * e traduz a linha do banco pra `OcorrenciaDevida`.
+ * Toda a decisão de "quem está devido AGORA" mora em SQL
+ * (`fn_due_appointment_reminders`, migrations 0169 → 0199 → 0201): desde a
+ * 0201 ela lê `calendar_appointments` direto — cliente sem negócio aberto
+ * também recebe — e calcula o momento de envio de cada automação (no dia às
+ * 8h, N dias antes às 8h, N horas antes, sempre no fuso da clínica). Este
+ * arquivo só traduz a linha do banco pra `OcorrenciaDevida`.
+ *
+ * O limiar das 8h que vivia aqui foi para o SQL na 0201: com "N horas antes"
+ * ele deixou de ser universal, e duas regras de horário em dois lugares
+ * divergiriam.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { wallClock } from "@/lib/automation/throttle";
 import type { AutomationForResolve, OcorrenciaDevida, TriggerResolver } from "./types";
 
-/** Nada dispara antes disso, hora de parede em América/São_Paulo — pedido explícito: "às 8h da manhã". */
-const HORA_DE_ENVIO = 8;
-
 interface LinhaDevida {
-  lead_id: string;
+  lead_id: string | null;
   contact_id: string;
+  /** Desde a 0201: o id do COMPROMISSO (nome mantido para a assinatura da função não mudar). */
   activity_id: string;
   scheduled_at: string;
   display_name: string;
@@ -31,11 +31,6 @@ export const resolvedorDeAgendamento: TriggerResolver = {
     automation: AutomationForResolve,
     now: Date,
   ): Promise<OcorrenciaDevida[]> {
-    // Antes das 8h (parede de SP), nada está devido — não importa o que o
-    // banco devolveria. O cron roda a cada 15min o dia inteiro; é este
-    // limiar que decide quando a ocorrência vira "hora de mandar".
-    if (wallClock(now).h < HORA_DE_ENVIO) return [];
-
     const { data, error } = await admin.rpc("fn_due_appointment_reminders", {
       p_organization_id: automation.organizationId,
       p_automation_id: automation.id,
@@ -49,6 +44,7 @@ export const resolvedorDeAgendamento: TriggerResolver = {
       displayName: row.display_name,
       occurrenceKey: row.activity_id,
       appointmentAt: row.scheduled_at,
+      appointmentId: row.activity_id,
     }));
   },
 };

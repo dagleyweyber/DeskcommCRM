@@ -95,6 +95,7 @@ async function processarOcorrencia(
         lead_id: ocorrencia.leadId,
         contact_id: ocorrencia.contactId,
         occurrence_key: ocorrencia.occurrenceKey,
+        appointment_id: ocorrencia.appointmentId ?? null,
         external_id: message.external_id,
         status: "sent",
       });
@@ -106,6 +107,7 @@ async function processarOcorrencia(
         lead_id: ocorrencia.leadId,
         contact_id: ocorrencia.contactId,
         occurrence_key: ocorrencia.occurrenceKey,
+        appointment_id: ocorrencia.appointmentId ?? null,
         status: "failed",
         error_message: motivoDaFalha(message),
       });
@@ -118,6 +120,7 @@ async function processarOcorrencia(
       lead_id: ocorrencia.leadId,
       contact_id: ocorrencia.contactId,
       occurrence_key: ocorrencia.occurrenceKey,
+      appointment_id: ocorrencia.appointmentId ?? null,
       status: "failed",
       error_message: err instanceof Error ? err.message.slice(0, 500) : "erro desconhecido",
     });

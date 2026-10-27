@@ -290,4 +290,7 @@ export type AuditAction =
   | "calendar_room.updated"
   | "calendar_settings.updated"
   | "calendar_block.created"
-  | "calendar_block.deleted";
+  | "calendar_block.deleted"
+  // Confirmação automática (migration 0201): o CLIENTE respondeu ao botão do
+  // modelo e o status do compromisso mudou sozinho — sem ator humano.
+  | "calendar_appointment.client_responded";

@@ -109,6 +109,12 @@ export function DetalheDoCompromisso({
           <dt className="text-muted-foreground">Status</dt>
           <dd>
             <span className={cn("rounded px-2 py-0.5 text-xs font-medium", CLASSE_DO_SELO[c.status])}>{RÓTULO_DO_STATUS[c.status]}</span>
+            {c.client_responded_at && (c.status === "confirmed" || c.status === "declined") && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                respondido pelo cliente no WhatsApp em{" "}
+                {new Date(c.client_responded_at).toLocaleString("pt-BR", { timeZone: timezone, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
           </dd>
           <dt className="text-muted-foreground">Serviço</dt>
           <dd>{c.calendar_event_types?.name ?? c.title}</dd>

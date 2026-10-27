@@ -9175,6 +9175,11 @@ alter table public.agent_inbox_items
     -- não tem tela nenhuma que leia. Entra NESTA lista pela mesma razão das
     -- de cima (bloco único por constraint, #159).
     'automation_rule_failed',
+    -- (migration 0201) O cliente respondeu à confirmação automática que NÃO vem
+    -- (botão do modelo). O horário continua reservado até a recepção remarcar ou
+    -- cancelar — sem este aviso, a vaga ficaria presa sem ninguém saber. Entra
+    -- NESTA lista pela mesma razão das de cima (bloco único por constraint, #159).
+    'appointment_declined',
     'other'
   ));
 
@@ -15969,27 +15974,41 @@ alter table public.whatsapp_template_automations
 -- Auto-curativo ANTES da trava (doutrina de migrations): um clone com duas automações
 -- ativas do mesmo gatilho e serviço manteria a mais antiga e pausaria as outras — que já
 -- mandavam mensagem em dobro. Produção medida antes de escrever: nenhuma duplicata.
-with classificadas as (
-  select id,
-         row_number() over (
-           partition by organization_id, trigger_kind,
-                        coalesce(event_type_id, '00000000-0000-0000-0000-000000000000'::uuid)
-           order by created_at asc, id asc
-         ) as posicao
-    from public.whatsapp_template_automations
-   where status = 'active'
-)
-update public.whatsapp_template_automations a
-   set status = 'paused'
-  from classificadas c
- where a.id = c.id and c.posicao > 1;
+--
+-- Guardado pela 0201: depois dela a trava é por serviço E momento (confirmação 1 dia
+-- antes + lembrete no dia do mesmo serviço é legítimo). Re-aplicar este bloco num banco
+-- que já passou pela 0201 PAUSARIA a segunda automação e recriaria a trava antiga — por
+-- isso ele só roda enquanto `timing_kind` ainda não existe.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'whatsapp_template_automations'
+       and column_name = 'timing_kind'
+  ) then
+    with classificadas as (
+      select id,
+             row_number() over (
+               partition by organization_id, trigger_kind,
+                            coalesce(event_type_id, '00000000-0000-0000-0000-000000000000'::uuid)
+               order by created_at asc, id asc
+             ) as posicao
+        from public.whatsapp_template_automations
+       where status = 'active'
+    )
+    update public.whatsapp_template_automations a
+       set status = 'paused'
+      from classificadas c
+     where a.id = c.id and c.posicao > 1;
 
-create unique index if not exists uniq_automacao_ativa_por_servico
-  on public.whatsapp_template_automations (
-    organization_id, trigger_kind,
-    coalesce(event_type_id, '00000000-0000-0000-0000-000000000000'::uuid)
-  )
-  where status = 'active';
+    create unique index if not exists uniq_automacao_ativa_por_servico
+      on public.whatsapp_template_automations (
+        organization_id, trigger_kind,
+        coalesce(event_type_id, '00000000-0000-0000-0000-000000000000'::uuid)
+      )
+      where status = 'active';
+  end if;
+end $$;
 
 create or replace function public.fn_due_appointment_reminders(
   p_organization_id uuid,
@@ -16737,5 +16756,183 @@ comment on column public.calendar_appointments.room_id is
   'Sala ocupada (migration 0200). Nulável só por compatibilidade com a imagem antiga do app durante o deploy; o app sempre grava.';
 comment on column public.calendar_appointments.owner_user_id is
   'Profissional que atende — OPCIONAL e informativo desde a 0200 (a sala é quem trava o horário).';
+
+notify pgrst, 'reload schema';
+
+-- ---- confirmação automática de agendamento (migration 0201) ----
+-- Espelho idempotente da migration 0201; racional completo no arquivo da migration.
+-- O kind `appointment_declined` entrou no bloco ÚNICO de agent_inbox_items_kind_check acima (#159), não aqui.
+alter table public.whatsapp_template_automations
+  add column if not exists timing_kind text not null default 'day_of_8am',
+  add column if not exists timing_value integer,
+  add column if not exists confirm_button_text text,
+  add column if not exists decline_button_text text;
+
+alter table public.whatsapp_template_automations
+  drop constraint if exists whatsapp_template_automations_timing_check;
+alter table public.whatsapp_template_automations
+  add constraint whatsapp_template_automations_timing_check check (
+    (timing_kind = 'day_of_8am' and timing_value is null)
+    or (timing_kind = 'days_before' and timing_value between 1 and 7)
+    or (timing_kind = 'hours_before' and timing_value between 1 and 72)
+  );
+
+comment on column public.whatsapp_template_automations.timing_kind is
+  'Quando enviar em relação ao compromisso: day_of_8am (no dia, 8h), days_before (N dias antes, 8h), hours_before (N horas antes). Migration 0201.';
+comment on column public.whatsapp_template_automations.confirm_button_text is
+  'Texto do botão de resposta rápida do modelo que CONFIRMA presença. Preenchido (ou decline) = automação de confirmação.';
+
+-- ---------------------------------------------------------------------------
+-- 3. Uma automação ativa por (gatilho, serviço, momento)
+-- ---------------------------------------------------------------------------
+-- Afrouxa a trava da 0199 (acrescenta colunas à chave): nenhum dado existente
+-- a viola, então não há auto-cura a fazer antes.
+drop index if exists public.uniq_automacao_ativa_por_servico;
+create unique index if not exists uniq_automacao_ativa_por_servico_e_momento
+  on public.whatsapp_template_automations (
+    organization_id, trigger_kind,
+    coalesce(event_type_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    timing_kind, coalesce(timing_value, 0)
+  )
+  where status = 'active';
+
+-- ---------------------------------------------------------------------------
+-- 4. O envio sabe qual compromisso e é achado pela mensagem respondida
+-- ---------------------------------------------------------------------------
+alter table public.whatsapp_template_automation_sends
+  add column if not exists appointment_id uuid references public.calendar_appointments(id) on delete set null;
+
+create index if not exists whatsapp_template_automation_sends_external_idx
+  on public.whatsapp_template_automation_sends (organization_id, external_id)
+  where external_id is not null;
+
+-- ---------------------------------------------------------------------------
+-- 6. Quando o cliente respondeu
+-- ---------------------------------------------------------------------------
+alter table public.calendar_appointments
+  add column if not exists client_responded_at timestamptz;
+
+comment on column public.calendar_appointments.client_responded_at is
+  'Quando o CLIENTE respondeu à confirmação automática (botão do modelo). Nulo = status mudado pela equipe ou ainda sem resposta. Migration 0201.';
+
+-- ---------------------------------------------------------------------------
+-- 5. fn_due_appointment_reminders lê a Agenda (mesma assinatura/saída)
+-- ---------------------------------------------------------------------------
+create or replace function public.fn_due_appointment_reminders(
+  p_organization_id uuid,
+  p_automation_id uuid,
+  p_now timestamptz default now()
+)
+returns table (
+  lead_id uuid,
+  contact_id uuid,
+  activity_id uuid,
+  scheduled_at timestamptz,
+  display_name text
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  with minha as (
+    select a.event_type_id,
+           a.timing_kind,
+           coalesce(a.timing_value, 0) as timing_value,
+           (a.confirm_button_text is not null or a.decline_button_text is not null) as pede_confirmacao
+      from public.whatsapp_template_automations a
+     where a.id = p_automation_id and a.organization_id = p_organization_id
+  ),
+  fuso as (
+    select coalesce(
+      (select s.default_schedule->>'timezone' from public.calendar_settings s where s.organization_id = p_organization_id),
+      'America/Sao_Paulo'
+    ) as tz
+  ),
+  candidatos as (
+    -- Só o que ainda vai acontecer, numa janela que cobre o maior "antes" (7 dias).
+    select c.id, c.contact_id, c.starts_at, c.event_type_id
+      from public.calendar_appointments c
+      cross join minha m
+     where c.organization_id = p_organization_id
+       and c.starts_at > p_now
+       and c.starts_at <= p_now + interval '8 days'
+       and c.status in ('pending', 'confirmed')
+       -- confirmação só faz sentido para quem ainda não confirmou
+       and (not m.pede_confirmacao or c.status = 'pending')
+  ),
+  devidos as (
+    select k.*,
+           case m.timing_kind
+             when 'hours_before' then k.starts_at - make_interval(hours => m.timing_value)
+             when 'days_before' then
+               (((k.starts_at at time zone f.tz)::date - m.timing_value) + time '08:00') at time zone f.tz
+             else
+               ((k.starts_at at time zone f.tz)::date + time '08:00') at time zone f.tz
+           end as enviar_em
+      from candidatos k
+      cross join minha m
+      cross join fuso f
+  )
+  select
+    (select l.id
+       from public.crm_leads l
+      where l.organization_id = p_organization_id
+        and l.contact_id = d.contact_id
+        and l.status = 'open'
+      order by l.last_activity_at desc nulls last, l.created_at desc
+      limit 1) as lead_id,
+    d.contact_id,
+    d.id as activity_id,
+    d.starts_at as scheduled_at,
+    coalesce(ct.display_name, ct.name, ct.phone_number, 'Sem nome') as display_name
+  from devidos d
+  join public.contacts ct on ct.id = d.contact_id
+  where p_now >= d.enviar_em
+    and (
+      -- automação de UM serviço: só compromissos desse serviço
+      (
+        (select m.event_type_id from minha m) is not null
+        and d.event_type_id = (select m.event_type_id from minha m)
+      )
+      or
+      -- automação de TODOS os serviços: tudo, menos o serviço que tem automação
+      -- própria ativa NO MESMO MOMENTO (o específico vence — senão o cliente
+      -- receberia as duas mensagens)
+      (
+        (select m.event_type_id from minha m) is null
+        and not exists (
+          select 1 from public.whatsapp_template_automations o, minha m
+           where o.organization_id = p_organization_id
+             and o.trigger_kind = 'appointment_reminder'
+             and o.status = 'active'
+             and o.event_type_id is not null
+             and o.event_type_id = d.event_type_id
+             and o.timing_kind = m.timing_kind
+             and coalesce(o.timing_value, 0) = m.timing_value
+        )
+      )
+    )
+    and not exists (
+      select 1 from public.whatsapp_template_automation_sends s
+       where s.automation_id = p_automation_id
+         and (
+           s.occurrence_key = d.id::text
+           -- chave antiga (0169/0199): id da atividade `meeting_scheduled` deste compromisso
+           or s.occurrence_key in (
+             select act.id::text
+               from public.crm_lead_activities act
+              where act.organization_id = p_organization_id
+                and act.source_module = 'agenda.agendamentos'
+                and act.source_id::text = d.id::text
+           )
+         )
+    );
+$$;
+
+revoke all on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from public;
+revoke execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) from anon, authenticated;
+grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timestamptz) to service_role;
+
 
 notify pgrst, 'reload schema';
