@@ -1,3 +1,4 @@
+import type { StatusDoCompromisso } from "@/lib/agenda/tipos";
 import type { ScoreBand } from "@/lib/kanban/score-band";
 
 /**
@@ -95,6 +96,8 @@ export interface Lead {
    * maioria dos leads nunca agendou nada, ou já registrou presença/ausência.
    */
   next_meeting_at?: string | null;
+  /** Status do compromisso de `next_meeting_at` na Agenda (Agendado/Confirmado/Não confirmado). */
+  next_meeting_status?: StatusDoCompromisso | null;
   assigned_at: string | null;
   last_activity_at: string | null;
   expected_close_date: string | null;

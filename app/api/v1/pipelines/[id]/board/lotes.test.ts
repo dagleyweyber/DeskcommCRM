@@ -47,7 +47,7 @@ function consulta(tabela: string) {
     chamadasIn.push({ tabela, coluna, valores });
     return b;
   };
-  for (const metodo of ["eq", "neq", "not", "order"]) b[metodo] = encadeia;
+  for (const metodo of ["eq", "neq", "not", "order", "gte"]) b[metodo] = encadeia;
   b.maybeSingle = async () => ({
     data: tabela === "crm_pipelines" ? { id: PIPELINE, organization_id: ORG } : null,
     error: null,
@@ -84,7 +84,8 @@ describe("GET /api/v1/pipelines/[id]/board — listas de ids em lotes", () => {
     // As colunas que crescem com o funil foram consultadas, e TODOS os ids passaram por elas.
     for (const [tabela, coluna] of [
       ["crm_lead_scores", "lead_id"],
-      ["crm_lead_activities", "lead_id"],
+      // o card mostra o compromisso da Agenda (0200/0201), achado pelo contato do negócio
+      ["calendar_appointments", "contact_id"],
       ["conversations", "contact_id"],
       ["lead_state", "contact_id"],
     ] as const) {

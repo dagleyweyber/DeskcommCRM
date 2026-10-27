@@ -12,6 +12,8 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
 
+import { alterarAgendamentoHandler } from "@/app/api/v1/agenda/agendamentos/_handler";
+import { ApiError } from "@/lib/api/types";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
@@ -54,6 +56,43 @@ export async function POST(
   if (leadErr) return fail("internal_error", leadErr.message, 500, { requestId });
   if (!lead) return fail("not_found", "Negócio não encontrado.", 404, { requestId });
 
+  // Agenda e Kanban são UM compromisso só (pedido do dono do produto): se o
+  // contato tem compromisso em aberto na Agenda, o desfecho vai PARA ELE — o
+  // handler da Agenda muda o status (Compareceu/Faltou) e ele mesmo emite o
+  // `meeting_outcome` na timeline (`fecharOLaco`). Sem isto, marcar presença
+  // pelo Kanban deixava a Agenda mostrando "Agendado" para sempre.
+  if (lead.contact_id) {
+    const agora = Date.now();
+    const { data: abertos, error: abErr } = await supabase
+      .from("calendar_appointments")
+      .select("id, starts_at, revision")
+      .eq("organization_id", authz.org.orgId)
+      .eq("contact_id", lead.contact_id)
+      .in("status", ["pending", "confirmed", "declined"])
+      .gte("starts_at", new Date(agora - 7 * 24 * 60 * 60_000).toISOString())
+      .lte("starts_at", new Date(agora + 24 * 60 * 60_000).toISOString());
+    if (abErr) return fail("internal_error", abErr.message, 500, { requestId });
+    // O mais perto de agora: a visita de hoje, não a da semana passada esquecida.
+    const alvo = ((abertos ?? []) as { id: string; starts_at: string; revision: number }[]).sort(
+      (a, b) => Math.abs(new Date(a.starts_at).getTime() - agora) - Math.abs(new Date(b.starts_at).getTime() - agora),
+    )[0];
+    if (alvo) {
+      try {
+        await alterarAgendamentoHandler(
+          supabase,
+          { organization_id: authz.org.orgId, actor: { type: "user", id: authz.user.id }, requestId },
+          alvo.id,
+          { revision: alvo.revision, status: parsed.data.outcome === "attended" ? "completed" : "no_show" },
+        );
+        return ok({ registered: true, appointment_id: alvo.id }, { requestId });
+      } catch (err) {
+        if (err instanceof ApiError) return fail(err.code, err.message, err.status, { requestId });
+        throw err;
+      }
+    }
+  }
+
+  // Sem compromisso na Agenda (registro antigo, anterior à Agenda): só a timeline.
   const { data: agendamento, error: agErr } = await supabase
     .from("crm_lead_activities")
     .select("payload")

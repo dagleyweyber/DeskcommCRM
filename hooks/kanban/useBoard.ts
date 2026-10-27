@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ehEcoLocal } from "@/lib/kanban/local-echo";
+import { useActiveOrg } from "@/hooks/auth/AuthProvider";
 import { useRealtimeChannel } from "@/hooks/realtime/useRealtimeChannel";
 import { useRefetchDeSeguranca } from "@/hooks/realtime/useRefetchDeSeguranca";
 import { apiClient } from "@/lib/api/client";
@@ -132,6 +133,21 @@ export function useBoard(pipelineId: string | null) {
       : undefined,
     onChange,
     enabled: !!pipelineId,
+  });
+
+  // O card mostra o compromisso da AGENDA (`next_meeting_at`/`next_meeting_status`,
+  // ver `withNextMeetings`). Mudança só em `calendar_appointments` — cancelar na
+  // Agenda, o cliente confirmar pelo WhatsApp — não toca `crm_leads`, então o
+  // canal acima não a vê. Este recarrega o board quando a Agenda da organização muda.
+  const orgId = useActiveOrg()?.orgId ?? null;
+  useRealtimeChannel({
+    name: pipelineId && orgId ? `kanban-agenda-${pipelineId}` : "kanban-agenda-disabled",
+    postgresChanges:
+      pipelineId && orgId
+        ? { event: "*", schema: "public", table: "calendar_appointments", filter: `organization_id=eq.${orgId}` }
+        : undefined,
+    onChange: () => void qc.invalidateQueries({ queryKey }),
+    enabled: Boolean(pipelineId && orgId),
   });
 
   // Timers pendentes morrem com o componente — senão um setState chega depois

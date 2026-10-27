@@ -1,53 +1,65 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { proximasReunioesPorLead } from "./next-meeting";
+import { proximoCompromissoPorContato, type CompromissoDoContato } from "./next-meeting";
 
-describe("proximasReunioesPorLead", () => {
-  it("⭐ meeting_scheduled sem desfecho depois → vira a próxima reunião do lead", () => {
-    const mapa = proximasReunioesPorLead([
-      { lead_id: "L1", type: "meeting_scheduled", payload: { scheduled_at: "2026-08-25T14:30:00-03:00" } },
-    ]);
-    expect(mapa.get("L1")).toBe("2026-08-25T14:30:00-03:00");
+const AGORA = new Date("2026-10-27T15:00:00Z"); // 12:00 em São Paulo
+
+function c(contato: string, inicio: string, status: CompromissoDoContato["status"] = "pending", minutos = 60): CompromissoDoContato {
+  return {
+    contact_id: contato,
+    starts_at: inicio,
+    ends_at: new Date(new Date(inicio).getTime() + minutos * 60_000).toISOString(),
+    status,
+  };
+}
+
+describe("proximoCompromissoPorContato — o card do Kanban lê a Agenda", () => {
+  it("⭐ o próximo compromisso em aberto do contato aparece, com o status", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-11-05T13:00:00Z", "confirmed")], AGORA);
+    expect(m.get("A")).toEqual({ starts_at: "2026-11-05T13:00:00Z", status: "confirmed" });
   });
 
-  it("⭐ meeting_outcome MAIS RECENTE que o agendamento → lead some do mapa (nada pendente)", () => {
-    // Ordem DESC (mais recente primeiro) — outcome veio depois do agendamento.
-    const mapa = proximasReunioesPorLead([
-      { lead_id: "L1", type: "meeting_outcome", payload: { scheduled_at: "2026-08-20T10:00:00-03:00" } },
-      { lead_id: "L1", type: "meeting_scheduled", payload: { scheduled_at: "2026-08-20T10:00:00-03:00" } },
-    ]);
-    expect(mapa.has("L1")).toBe(false);
+  it("⭐ cancelado na Agenda some do card (antes ficava mostrando)", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-11-05T13:00:00Z", "cancelled")], AGORA);
+    expect(m.has("A")).toBe(false);
   });
 
-  it("⭐ reagendamento (2 meeting_scheduled): o mais recente vence, não o primeiro agendado", () => {
-    const mapa = proximasReunioesPorLead([
-      { lead_id: "L1", type: "meeting_scheduled", payload: { scheduled_at: "2026-09-01T09:00:00-03:00" } }, // remarcado
-      { lead_id: "L1", type: "meeting_scheduled", payload: { scheduled_at: "2026-08-20T09:00:00-03:00" } }, // original
-    ]);
-    expect(mapa.get("L1")).toBe("2026-09-01T09:00:00-03:00");
+  it("⭐ remarcado: vale o compromisso novo (o antigo foi cancelado)", () => {
+    const m = proximoCompromissoPorContato(
+      [c("A", "2026-11-01T13:00:00Z", "cancelled"), c("A", "2026-11-08T13:00:00Z")],
+      AGORA,
+    );
+    expect(m.get("A")?.starts_at).toBe("2026-11-08T13:00:00Z");
   });
 
-  it("lead sem nenhuma atividade de reunião não aparece no mapa", () => {
-    const mapa = proximasReunioesPorLead([]);
-    expect(mapa.size).toBe(0);
+  it("com dois futuros, mostra o mais próximo", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-12-10T13:00:00Z"), c("A", "2026-11-05T13:00:00Z")], AGORA);
+    expect(m.get("A")?.starts_at).toBe("2026-11-05T13:00:00Z");
   });
 
-  it("vários leads, cada um com seu próprio estado (independentes)", () => {
-    const mapa = proximasReunioesPorLead([
-      { lead_id: "L1", type: "meeting_scheduled", payload: { scheduled_at: "2026-08-25T14:00:00-03:00" } },
-      { lead_id: "L2", type: "meeting_outcome", payload: { scheduled_at: "2026-08-24T14:00:00-03:00" } },
-    ]);
-    expect(mapa.get("L1")).toBe("2026-08-25T14:00:00-03:00");
-    expect(mapa.has("L2")).toBe(false);
+  it("'Não confirmado' continua no card — a vaga ainda está reservada", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-11-05T13:00:00Z", "declined")], AGORA);
+    expect(m.get("A")?.status).toBe("declined");
   });
 
-  it("payload sem scheduled_at (formato inesperado) não quebra — lead fica ausente do mapa", () => {
-    const mapa = proximasReunioesPorLead([{ lead_id: "L1", type: "meeting_scheduled", payload: {} }]);
-    expect(mapa.has("L1")).toBe(false);
+  it("visita de hoje cedo sem desfecho continua no card até alguém registrar presença", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-10-27T12:00:00Z")], AGORA);
+    expect(m.get("A")?.starts_at).toBe("2026-10-27T12:00:00Z");
+    expect(proximoCompromissoPorContato([c("A", "2026-10-27T12:00:00Z", "completed")], AGORA).has("A")).toBe(false);
   });
 
-  it("payload null não quebra", () => {
-    const mapa = proximasReunioesPorLead([{ lead_id: "L1", type: "meeting_scheduled", payload: null }]);
-    expect(mapa.has("L1")).toBe(false);
+  it("visita antiga (mais de 24h) sem desfecho não fica eternamente no card", () => {
+    expect(proximoCompromissoPorContato([c("A", "2026-10-20T13:00:00Z")], AGORA).has("A")).toBe(false);
+  });
+
+  it("um futuro vence um passado sem desfecho", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-10-27T12:00:00Z"), c("A", "2026-11-05T13:00:00Z")], AGORA);
+    expect(m.get("A")?.starts_at).toBe("2026-11-05T13:00:00Z");
+  });
+
+  it("contatos independentes", () => {
+    const m = proximoCompromissoPorContato([c("A", "2026-11-05T13:00:00Z"), c("B", "2026-11-06T13:00:00Z", "no_show")], AGORA);
+    expect(m.has("A")).toBe(true);
+    expect(m.has("B")).toBe(false);
   });
 });

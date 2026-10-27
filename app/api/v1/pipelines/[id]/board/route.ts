@@ -23,7 +23,7 @@ import {
   type PropostaAmbigua,
 } from "@/lib/leads/next-action";
 import type { LeadCandidate } from "@/lib/leads/active-lead";
-import { proximasReunioesPorLead, type AtividadeDeReuniao } from "@/lib/leads/next-meeting";
+import { proximoCompromissoPorContato, type CompromissoDoContato } from "@/lib/leads/next-meeting";
 import { consultaEmLotes } from "@/lib/supabase/in-em-lotes";
 import { createClient } from "@/lib/supabase/server";
 import type { BoardData, Pipeline, Stage } from "@/lib/kanban/types";
@@ -295,42 +295,39 @@ async function withConversas(
 }
 
 /**
- * Anexa a data/hora da PRÓXIMA visita/reunião agendada — só enquanto pendente.
- *
- * Mesmo padrão de `withConversas` (LEFT, "primeira vista vence" na ordenação
- * por mais recente): `crm_lead_activities` não tem `status`, então "ainda
- * pendente" é inferido pela ORDEM — `meeting_scheduled`/`meeting_outcome`
- * são dois tipos no MESMO fluxo (reagendar é emitir de novo, registrar
- * presença é emitir depois), e o evento mais recente de qualquer um dos dois
- * dá a resposta: se for `meeting_outcome`, o agendamento mais novo já foi
- * resolvido — não há visita pendente pra mostrar no card.
+ * Anexa o PRÓXIMO compromisso da Agenda do contato do negócio (data/hora +
+ * status). A fonte é `calendar_appointments`, a mesma tabela da grade da
+ * Agenda — marcar, remarcar, cancelar ou confirmar em qualquer lugar aparece
+ * aqui sem sincronização nenhuma (ver `lib/leads/next-meeting.ts`).
  */
 async function withNextMeetings(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
   leads: Lead[],
 ): Promise<{ leads: Lead[]; error: string | null }> {
-  if (leads.length === 0) return { leads, error: null };
+  const contatos = [...new Set(leads.map((l) => l.contact_id).filter((id): id is string => Boolean(id)))];
+  if (contatos.length === 0) return { leads, error: null };
 
-  const { data, error } = await consultaEmLotes(
-    leads.map((l) => l.id),
-    (lote) =>
-      supabase
-        .from("crm_lead_activities")
-        .select("lead_id, type, payload")
-        .eq("organization_id", organizationId)
-        .in("type", ["meeting_scheduled", "meeting_outcome"])
-        .in("lead_id", lote)
-        .order("performed_at", { ascending: false }),
+  const agora = new Date();
+  const desde = new Date(agora.getTime() - 24 * 60 * 60_000).toISOString();
+  const { data, error } = await consultaEmLotes(contatos, (lote) =>
+    supabase
+      .from("calendar_appointments")
+      .select("contact_id, starts_at, ends_at, status")
+      .eq("organization_id", organizationId)
+      .in("status", ["pending", "confirmed", "declined"])
+      .in("contact_id", lote)
+      .gte("starts_at", desde)
+      .order("starts_at", { ascending: true }),
   );
   if (error) return { leads, error: error.message };
 
-  const porLead = proximasReunioesPorLead((data ?? []) as AtividadeDeReuniao[]);
+  const porContato = proximoCompromissoPorContato((data ?? []) as CompromissoDoContato[], agora);
 
   return {
     leads: leads.map((lead) => {
-      const nextMeetingAt = porLead.get(lead.id);
-      return nextMeetingAt ? { ...lead, next_meeting_at: nextMeetingAt } : lead;
+      const proxima = lead.contact_id ? porContato.get(lead.contact_id) : undefined;
+      return proxima ? { ...lead, next_meeting_at: proxima.starts_at, next_meeting_status: proxima.status } : lead;
     }),
     error: null,
   };
@@ -423,6 +420,7 @@ export function mesclaEnriquecimentos(
   const scoreById = new Map(enriquecidos.score.map((l) => [l.id, l.score]));
   const conversaById = new Map(enriquecidos.conversa.map((l) => [l.id, l.conversa]));
   const reuniaoById = new Map(enriquecidos.reuniao.map((l) => [l.id, l.next_meeting_at]));
+  const statusDaReuniaoById = new Map(enriquecidos.reuniao.map((l) => [l.id, l.next_meeting_status]));
   const acaoById = new Map(enriquecidos.acao.map((l) => [l.id, l.next_action]));
 
   return base.map((lead) => ({
@@ -431,6 +429,7 @@ export function mesclaEnriquecimentos(
     ...(scoreById.get(lead.id) !== undefined ? { score: scoreById.get(lead.id) } : {}),
     ...(conversaById.get(lead.id) !== undefined ? { conversa: conversaById.get(lead.id) } : {}),
     ...(reuniaoById.get(lead.id) !== undefined ? { next_meeting_at: reuniaoById.get(lead.id) } : {}),
+    ...(statusDaReuniaoById.get(lead.id) !== undefined ? { next_meeting_status: statusDaReuniaoById.get(lead.id) } : {}),
     ...(acaoById.get(lead.id) !== undefined ? { next_action: acaoById.get(lead.id) } : {}),
   }));
 }
