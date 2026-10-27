@@ -19,7 +19,7 @@ import { SalaInvalida, TipoDeCompromissoInvalido, horarioEstaLivre, type OrigemD
 import type { Compromisso, HorarioLivre } from "@/lib/agenda/tipos";
 import { logger } from "@/lib/logger";
 import { resolveActiveLeadForContact, type LeadCandidate } from "@/lib/leads/active-lead";
-import { emitLeadActivity } from "@/lib/leads/activity-emitter";
+import { emitLeadActivity, stageChangeReason } from "@/lib/leads/activity-emitter";
 import { registraFalhaDeAtividade } from "@/lib/leads/activity-write-failure";
 import type {
   AlterarAgendamentoInput,
@@ -74,7 +74,8 @@ async function fecharOLaco(
       : { outcome: evento.outcome, scheduled_at: compromisso.starts_at };
   const reason =
     evento.tipo === "meeting_scheduled"
-      ? `Compromisso agendado pela Agenda para ${new Date(compromisso.starts_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`
+      ? // Fuso explícito: o servidor roda em UTC, e sem isto a timeline dizia 13:00 para uma visita às 10:00.
+        `Compromisso agendado pela Agenda para ${new Date(compromisso.starts_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: compromisso.time_zone || "America/Sao_Paulo" })}`
       : evento.outcome === "attended"
         ? "Compareceu (registrado pela Agenda)"
         : "Não compareceu (registrado pela Agenda)";
@@ -98,6 +99,112 @@ async function fecharOLaco(
       origem: "agenda._handler.fecharOLaco",
       erro: emitido.error,
       requestId: ctx.requestId,
+    });
+  }
+
+  if (evento.tipo === "meeting_scheduled") {
+    await moverParaEtapaDeAgendamento(admin, ctx, resolucao.leadId);
+  }
+}
+
+/** "Avaliação Agendada", "Visita agendada", "Agendado"… — sem acento e sem caixa. */
+function ehEtapaDeAgendamento(nome: string): boolean {
+  return /agendad/.test(
+    nome
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase(),
+  );
+}
+
+/**
+ * Agendou → o card anda para a etapa de agendamento do funil (pedido do dono
+ * do produto: Agenda e Kanban contam a mesma história). A etapa é achada pelo
+ * NOME ("agendad"), no MESMO funil do negócio — o funil padrão novo já tem
+ * "Avaliação Agendada" (migration 0190), e cada clínica renomeia como quiser.
+ *
+ * Só para FRENTE: negócio já em "Negociação", ganho ou perdido não volta. Sem
+ * etapa com esse nome, nada acontece. Fire-and-forget como o resto de
+ * `fecharOLaco` — a marcação já está segura; isto é o reflexo no funil.
+ */
+async function moverParaEtapaDeAgendamento(admin: SupabaseClient, ctx: HandlerCtx, leadId: string): Promise<void> {
+  try {
+    const { data: lead } = await admin
+      .from("crm_leads")
+      .select("id, organization_id, pipeline_id, stage_id, contact_id, status")
+      .eq("organization_id", ctx.organization_id)
+      .eq("id", leadId)
+      .maybeSingle();
+    const l = lead as { pipeline_id: string; stage_id: string; contact_id: string | null; status: string } | null;
+    if (!l || l.status !== "open") return;
+
+    const { data: etapas } = await admin
+      .from("crm_stages")
+      .select("id, name, position, is_won, is_lost, is_archived")
+      .eq("organization_id", ctx.organization_id)
+      .eq("pipeline_id", l.pipeline_id);
+    const lista = (etapas ?? []) as {
+      id: string;
+      name: string;
+      position: number;
+      is_won: boolean;
+      is_lost: boolean;
+      is_archived: boolean;
+    }[];
+    const atual = lista.find((e) => e.id === l.stage_id);
+    const alvo = lista
+      .filter((e) => !e.is_archived && !e.is_won && !e.is_lost && ehEtapaDeAgendamento(e.name))
+      .sort((a, b) => Number(a.position) - Number(b.position))[0];
+    if (!atual || !alvo || alvo.id === atual.id) return;
+    if (Number(atual.position) >= Number(alvo.position)) return; // só para frente
+
+    // Entra no FIM da coluna (fractional indexing: maior posição + 1000).
+    const { data: ultimo } = await admin
+      .from("crm_leads")
+      .select("position_in_stage")
+      .eq("organization_id", ctx.organization_id)
+      .eq("stage_id", alvo.id)
+      .order("position_in_stage", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const posicao = Number((ultimo as { position_in_stage?: number } | null)?.position_in_stage ?? 0) + 1000;
+
+    const { data: movido, error } = await admin
+      .from("crm_leads")
+      .update({ stage_id: alvo.id, position_in_stage: posicao, updated_at: new Date().toISOString() })
+      .eq("organization_id", ctx.organization_id)
+      .eq("id", leadId)
+      .eq("stage_id", atual.id) // trava otimista: alguém moveu no meio → não sobrescreve
+      .select("id")
+      .maybeSingle();
+    if (error || !movido) return;
+
+    const atividade = await emitLeadActivity(admin, {
+      organizationId: ctx.organization_id,
+      leadId,
+      contactId: l.contact_id,
+      type: "stage_changed",
+      sourceModule: "agenda.agendamentos",
+      sourceId: leadId,
+      actor: ctx.actor,
+      reason: stageChangeReason(atual.name, alvo.name),
+      payload: { from_stage_id: atual.id, to_stage_id: alvo.id, pipeline_id: l.pipeline_id },
+    });
+    if (!atividade.ok) {
+      await registraFalhaDeAtividade(admin, {
+        organizationId: ctx.organization_id,
+        leadId,
+        tipo: "stage_changed",
+        origem: "agenda._handler.moverParaEtapaDeAgendamento",
+        erro: atividade.error,
+        requestId: ctx.requestId,
+      });
+    }
+  } catch (err) {
+    logger.error("[agenda.moverParaEtapaDeAgendamento] falhou", {
+      organization_id: ctx.organization_id,
+      lead_id: leadId,
+      erro: err instanceof Error ? err.message : String(err),
     });
   }
 }
