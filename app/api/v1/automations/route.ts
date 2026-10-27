@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { botoesDeRespostaRapida, normalizaTextoDeBotao } from "@/lib/agenda/confirmacao";
+import { botoesDeRespostaRapida, normalizaTextoDeBotao } from "@/lib/agenda/botoes";
 import { requireRole } from "@/lib/auth/require-role";
 import {
   fraseDosValoresSemFonte,

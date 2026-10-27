@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botoesDeRespostaRapida, classificaResposta, normalizaTextoDeBotao } from "./confirmacao";
+import { botoesDeRespostaRapida, classificaResposta, normalizaTextoDeBotao } from "./botoes";
 
 const AUTOMACAO = { confirm_button_text: "Confirmo presença", decline_button_text: "Preciso remarcar" };
 

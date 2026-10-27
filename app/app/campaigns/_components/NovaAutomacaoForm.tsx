@@ -13,7 +13,7 @@ import {
   type Definicao,
 } from "@/lib/channels/valores-sem-fonte";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
-import { botoesDeRespostaRapida } from "@/lib/agenda/confirmacao";
+import { botoesDeRespostaRapida } from "@/lib/agenda/botoes";
 
 /**
  * Quando enviar em relação ao compromisso (migration 0201). Lista fechada de
