@@ -16105,342 +16105,6 @@ grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timest
 -- A listagem de automações embute o serviço (relacionamento novo): recarrega o esquema.
 notify pgrst, 'reload schema';
 
--- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
---
--- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
--- dele — quem o empurrar para o meio desarma a cura para tudo que vier depois.
--- Vigiado por `tests/unit/varredura-anon-e-o-ultimo-bloco.test.ts`.
---
--- A 0108 revogou anon numa LISTA de 8 funções, medida num banco instalado do
--- ZERO. Quem ATUALIZA tem outro estado: o `ALTER DEFAULT PRIVILEGES ... GRANT
--- ALL ON FUNCTIONS TO anon` do corpo deste arquivo grava uma entrada em
--- `pg_default_acl` que fica no catálogo PARA SEMPRE, e a partir daí toda função
--- criada em `public` nasce com EXECUTE para anon — inclusive as deste apêndice.
---
--- Medido numa VPS real (2026-08-07), comparando com o que um install fresco
--- produz: 6 definer expostas a anon e 5 a authenticated, entre elas
--- `fn_decrypt_oauth` — alcançável pela anon key, que vai para o browser.
---
--- Lista conserta o estoque e reabre no próximo `create function`. Esta varredura
--- é auto-curativa e roda DEPOIS de tudo que cria função, então cura no mesmo run
--- em que o defeito nasceria. Desfazer o ALTER DEFAULT PRIVILEGES não serve: ele
--- vem do `pg_dump` do Supabase e é reescrito a cada re-aplicação.
---
--- As duas origens de EXECUTE (a mesma lição da 0108): grant DIRETO a anon, que
--- `revoke from public` não remove; e grant a PUBLIC, do qual anon HERDA, que
--- `revoke from anon` não remove. O privilégio EFETIVO de authenticated e
--- service_role é medido ANTES e devolvido depois — tira anon sem tirar leitura.
-do $$
-declare
-  f record;
-  tinha_auth boolean;
-  tinha_service boolean;
-begin
-  if to_regrole('anon') is null then
-    return;
-  end if;
-
-  for f in
-    select p.oid, p.oid::regprocedure as assinatura
-      from pg_proc p
-      join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'public'
-       and p.prosecdef
-  loop
-    tinha_auth := to_regrole('authenticated') is not null
-                  and has_function_privilege('authenticated', f.oid, 'EXECUTE');
-    tinha_service := to_regrole('service_role') is not null
-                     and has_function_privilege('service_role', f.oid, 'EXECUTE');
-
-    execute format('revoke execute on function %s from public, anon', f.assinatura);
-
-    if tinha_auth then
-      execute format('grant execute on function %s to authenticated', f.assinatura);
-    end if;
-    if tinha_service then
-      execute format('grant execute on function %s to service_role', f.assinatura);
-    end if;
-  end loop;
-end $$;
-
--- regra 2 (authenticated): as 5 que o update abriu e o install não abre. Aqui não
--- cabe varredura — `authenticated` PRECISA de EXECUTE nos helpers de RLS e em
--- `retrieve_top_k_chunks` (num install fresco ele tem). É julgamento por função,
--- e o alvo de cada linha é o valor que um install fresco produz, medido.
-revoke execute on function public.fn_audit_log_row() from authenticated;
-revoke execute on function public.fn_decrypt_oauth(bytea) from authenticated;
-revoke execute on function public.fn_encrypt_oauth(text) from authenticated;
-revoke execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) from authenticated;
-revoke execute on function public.fn_update_budget_consumption() from authenticated;
-
-grant execute on function public.fn_audit_log_row() to service_role;
-grant execute on function public.fn_decrypt_oauth(bytea) to service_role;
-grant execute on function public.fn_encrypt_oauth(text) to service_role;
-grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
-grant execute on function public.fn_update_budget_consumption() to service_role;
-
--- ---- mensagem editada e mensagem apagada (migration 0153) ----
--- O cliente edita ou apaga no aplicativo e o CRM seguia mostrando a versão
--- velha — sem erro em lugar nenhum. Combinar preço ou endereço a partir de um
--- texto que o cliente já corrigiu gera um erro que ninguém rastreia depois.
--- Duas colunas e não um estado: editada continua valendo (o texto novo conta),
--- apagada deixou de valer (o texto não pode mais aparecer). Timestamp e não
--- booleano porque a pergunta seguinte é "quando?". A linha apagada NÃO some: a
--- remoção levaria junto o contexto das vizinhas e o histórico de quem atendeu.
-alter table public.messages add column if not exists edited_at timestamptz;
-alter table public.messages add column if not exists revoked_at timestamptz;
-
--- ---- definição sabe de qual conexão é (migration 0154) ----
--- `meta_templates` nasceu para um canal só: a única marca de origem é
--- `waba_id`, o id da conta na plataforma da Meta. Um segundo canal não tem onde
--- entrar sem mentir sobre o que aquele campo significa — e o endpoint, que
--- resolve a sessão por `metaSessionForOrg`, devolvia lista VAZIA numa
--- instalação que só tem o canal intermediado. A conexão, e não um `provider`:
--- dois números do mesmo provider têm definições diferentes. `set null` no
--- delete porque apagar a conexão não pode apagar o registro do que a
--- plataforma aprovou — ela continua existindo lá.
-alter table public.meta_templates
-  add column if not exists channel_session_id uuid
-    references public.channel_sessions(id) on delete set null;
-create index if not exists meta_templates_sessao_idx
-  on public.meta_templates (channel_session_id, status)
-  where channel_session_id is not null;
-
--- ---- o arquivo do webhook aceita os canais novos (migration 0151) ----
--- `webhook_events_log` guarda o corpo CRU do que o provedor mandou — é o único
--- lugar onde ele fica. O CHECK do dump conhecia três provedores e nenhum dos
--- canais do seam, então a rota genérica de canal não tinha como gravar sem
--- mentir sobre a origem ('generic' para um canal que se sabe qual é).
---
--- Este é o BLOCO ÚNICO desta constraint (regra da issue #159): canal novo edita
--- ESTA lista, e não acrescenta um segundo bloco — dois blocos fazem o
--- `update.sh` de um clone com dados falhar no primeiro e deixar a tabela sem
--- constraint entre o `drop` e o `add` que funciona.
---
--- Alargamento puro: um CHECK que aceita MAIS valores não pode ser violado por
--- linha que já passava pelo antigo, então não precisa de backfill antes.
-alter table public.webhook_events_log
-  drop constraint if exists webhook_events_log_provider_check;
-alter table public.webhook_events_log
-  add constraint webhook_events_log_provider_check check (provider in (
-    'waha', 'nuvemshop', 'generic', 'meta_cloud', 'zernio'
-  ));
-
-notify pgrst, 'reload schema';
-
--- ---- campanhas: disparo de template aprovado pra uma lista de leads/contatos (migration 0167) ----
--- Ver o cabeçalho da migration 0167 pra contexto completo. Duas tabelas:
--- `whatsapp_campaigns` (a intenção) e `whatsapp_campaign_recipients` (o
--- público MATERIALIZADO na criação, não reavaliado a cada tick do
--- despachante).
-create table if not exists public.whatsapp_campaigns (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null references public.organizations(id) on delete cascade,
-  name text not null,
-  channel_session_id uuid not null references public.channel_sessions(id),
-  template_name text not null,
-  template_language text not null,
-  variable_mapping jsonb not null default '{}'::jsonb,
-  audience_filter jsonb not null,
-  status text not null default 'draft',
-  total_recipients integer not null default 0,
-  sent_count integer not null default 0,
-  failed_count integer not null default 0,
-  created_by uuid references auth.users(id),
-  started_at timestamptz,
-  completed_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint whatsapp_campaigns_status_check
-    check (status in ('draft', 'queued', 'running', 'paused', 'completed', 'cancelled'))
-);
-
-create or replace trigger trg_whatsapp_campaigns_updated_at
-  before update on public.whatsapp_campaigns
-  for each row execute function public.fn_set_updated_at();
-
-create index if not exists whatsapp_campaigns_org_status_idx
-  on public.whatsapp_campaigns (organization_id, status);
-
-alter table public.whatsapp_campaigns enable row level security;
-
-drop policy if exists whatsapp_campaigns_select on public.whatsapp_campaigns;
-drop policy if exists whatsapp_campaigns_write on public.whatsapp_campaigns;
-
-create policy whatsapp_campaigns_select
-  on public.whatsapp_campaigns for select
-  using (
-    organization_id in (select public.fn_user_org_ids())
-    or public.fn_is_platform_admin()
-  );
-
-create policy whatsapp_campaigns_write
-  on public.whatsapp_campaigns
-  using (
-    public.fn_is_platform_admin()
-    or (
-      organization_id in (select public.fn_user_org_ids())
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-  )
-  with check (
-    public.fn_is_platform_admin()
-    or (
-      organization_id in (select public.fn_user_org_ids())
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-  );
-
-revoke all on public.whatsapp_campaigns from anon;
-
-create table if not exists public.whatsapp_campaign_recipients (
-  id uuid primary key default gen_random_uuid(),
-  campaign_id uuid not null references public.whatsapp_campaigns(id) on delete cascade,
-  organization_id uuid not null references public.organizations(id) on delete cascade,
-  contact_id uuid not null references public.contacts(id),
-  lead_id uuid references public.crm_leads(id),
-  resolved_values jsonb not null default '{}'::jsonb,
-  status text not null default 'pending',
-  external_id text,
-  error_message text,
-  sent_at timestamptz,
-  created_at timestamptz not null default now(),
-  constraint whatsapp_campaign_recipients_status_check
-    check (status in ('pending', 'sending', 'sent', 'failed', 'skipped'))
-);
-
-create index if not exists whatsapp_campaign_recipients_campaign_status_idx
-  on public.whatsapp_campaign_recipients (campaign_id, status);
-
-alter table public.whatsapp_campaign_recipients enable row level security;
-
-drop policy if exists whatsapp_campaign_recipients_select on public.whatsapp_campaign_recipients;
-drop policy if exists whatsapp_campaign_recipients_write on public.whatsapp_campaign_recipients;
-
-create policy whatsapp_campaign_recipients_select
-  on public.whatsapp_campaign_recipients for select
-  using (
-    organization_id in (select public.fn_user_org_ids())
-    or public.fn_is_platform_admin()
-  );
-
-create policy whatsapp_campaign_recipients_write
-  on public.whatsapp_campaign_recipients
-  using (
-    public.fn_is_platform_admin()
-    or (
-      organization_id in (select public.fn_user_org_ids())
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-  )
-  with check (
-    public.fn_is_platform_admin()
-    or (
-      organization_id in (select public.fn_user_org_ids())
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-  );
-
-revoke all on public.whatsapp_campaign_recipients from anon;
-
--- ---- meta_templates.channel_session_id backfill (migration 0168) ----
--- Ver o cabeçalho da migration 0168: coluna existe desde 0154, mas o sync
--- nunca a preenchia. Idempotente — só toca linha órfã.
-update public.meta_templates mt
-set channel_session_id = cs.id
-from public.channel_sessions cs
-where mt.channel_session_id is null
-  and cs.organization_id = mt.organization_id
-  and cs.meta_waba_id = mt.waba_id;
-
-notify pgrst, 'reload schema';
-
--- ---- message type: button (migration 0170) ----
--- Ver o cabeçalho da migration 0170: resposta de botão de template
--- ("Confirmo presença"/"Preciso remarcar") reprovava no CHECK e se perdia
--- pra sempre — não é payload malformado, a Meta não re-entrega. O valor
--- `button` já está no ÚNICO bloco que reconstrói `messages_type_check`
--- (marcado "migration 0091", no início deste arquivo) — doutrina de
--- `tests/unit/baseline-constraint-reconstruida.test.ts`: uma constraint, um
--- bloco, editado no lugar em vez de reconstruído em série.
-
-notify pgrst, 'reload schema';
-
--- ---- channel_sessions.meta_app_id (migration 0172) ----
--- Ver o cabeçalho da migration 0172: template com imagem no cabeçalho
--- sempre falhava porque faltava o App ID da Meta pra chamar a Resumable
--- Upload API. Nullable — canal conectado antes desta coluna continua
--- funcionando pra template de texto/botão.
-alter table public.channel_sessions
-  add column if not exists meta_app_id text;
-
-comment on column public.channel_sessions.meta_app_id is
-  'App ID da Meta dono da WABA — necessário pra Resumable Upload API (imagem de cabeçalho de template). Nullable: canais conectados antes desta coluna continuam funcionando pra template sem imagem.';
-
-notify pgrst, 'reload schema';
-
--- ---- RBAC na base de conhecimento da IA (migration 0174) ----
--- Ver o cabeçalho da migration 0174: ai_knowledge_sources e
--- ai_knowledge_versions só isolavam por organização na escrita, sem checar
--- papel — qualquer membro, inclusive "viewer", podia alterar ou apagar o
--- material que o agente de IA usa pra responder cliente. Alinha ao mesmo
--- piso que toda rota de mutação já exige ("manager"), no mesmo padrão que
--- ai_agents/ai_agent_versions já usa.
-
-drop policy if exists "tenant_isolation_ai_knowledge_sources_all" on "public"."ai_knowledge_sources";
-
-create policy "tenant_isolation_ai_knowledge_sources_select" on "public"."ai_knowledge_sources"
-  for select
-  using (
-    (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
-  );
-
-create policy "tenant_isolation_ai_knowledge_sources_write" on "public"."ai_knowledge_sources"
-  for all
-  using (
-    (
-      (organization_id in (select public.fn_user_org_ids()))
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-    or public.fn_is_platform_admin()
-  )
-  with check (
-    (
-      (organization_id in (select public.fn_user_org_ids()))
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-    or public.fn_is_platform_admin()
-  );
-
-drop policy if exists "tenant_isolation_ai_kbv_all" on "public"."ai_knowledge_versions";
-
-create policy "tenant_isolation_ai_kbv_select" on "public"."ai_knowledge_versions"
-  for select
-  using (
-    (organization_id in (select public.fn_user_org_ids()))
-    or public.fn_is_platform_admin()
-  );
-
-create policy "tenant_isolation_ai_kbv_write" on "public"."ai_knowledge_versions"
-  for all
-  using (
-    (
-      (organization_id in (select public.fn_user_org_ids()))
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-    or public.fn_is_platform_admin()
-  )
-  with check (
-    (
-      (organization_id in (select public.fn_user_org_ids()))
-      and public.fn_role_at_least(organization_id, 'manager')
-    )
-    or public.fn_is_platform_admin()
-  );
-
-notify pgrst, 'reload schema';
-
 -- ---- agenda por sala (migration 0200) ----
 -- Espelho idempotente da migration 0200; racional completo no arquivo da migration.
 -- Auto-curativo: distribui compromissos existentes em salas sem sobreposição ANTES da constraint de exclusão.
@@ -16936,3 +16600,340 @@ grant execute on function public.fn_due_appointment_reminders(uuid, uuid, timest
 
 
 notify pgrst, 'reload schema';
+
+-- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
+--
+-- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
+-- dele — quem o empurrar para o meio desarma a cura para tudo que vier depois.
+-- Vigiado por `tests/unit/varredura-anon-e-o-ultimo-bloco.test.ts`.
+--
+-- A 0108 revogou anon numa LISTA de 8 funções, medida num banco instalado do
+-- ZERO. Quem ATUALIZA tem outro estado: o `ALTER DEFAULT PRIVILEGES ... GRANT
+-- ALL ON FUNCTIONS TO anon` do corpo deste arquivo grava uma entrada em
+-- `pg_default_acl` que fica no catálogo PARA SEMPRE, e a partir daí toda função
+-- criada em `public` nasce com EXECUTE para anon — inclusive as deste apêndice.
+--
+-- Medido numa VPS real (2026-08-07), comparando com o que um install fresco
+-- produz: 6 definer expostas a anon e 5 a authenticated, entre elas
+-- `fn_decrypt_oauth` — alcançável pela anon key, que vai para o browser.
+--
+-- Lista conserta o estoque e reabre no próximo `create function`. Esta varredura
+-- é auto-curativa e roda DEPOIS de tudo que cria função, então cura no mesmo run
+-- em que o defeito nasceria. Desfazer o ALTER DEFAULT PRIVILEGES não serve: ele
+-- vem do `pg_dump` do Supabase e é reescrito a cada re-aplicação.
+--
+-- As duas origens de EXECUTE (a mesma lição da 0108): grant DIRETO a anon, que
+-- `revoke from public` não remove; e grant a PUBLIC, do qual anon HERDA, que
+-- `revoke from anon` não remove. O privilégio EFETIVO de authenticated e
+-- service_role é medido ANTES e devolvido depois — tira anon sem tirar leitura.
+do $$
+declare
+  f record;
+  tinha_auth boolean;
+  tinha_service boolean;
+begin
+  if to_regrole('anon') is null then
+    return;
+  end if;
+
+  for f in
+    select p.oid, p.oid::regprocedure as assinatura
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.prosecdef
+  loop
+    tinha_auth := to_regrole('authenticated') is not null
+                  and has_function_privilege('authenticated', f.oid, 'EXECUTE');
+    tinha_service := to_regrole('service_role') is not null
+                     and has_function_privilege('service_role', f.oid, 'EXECUTE');
+
+    execute format('revoke execute on function %s from public, anon', f.assinatura);
+
+    if tinha_auth then
+      execute format('grant execute on function %s to authenticated', f.assinatura);
+    end if;
+    if tinha_service then
+      execute format('grant execute on function %s to service_role', f.assinatura);
+    end if;
+  end loop;
+end $$;
+
+-- regra 2 (authenticated): as 5 que o update abriu e o install não abre. Aqui não
+-- cabe varredura — `authenticated` PRECISA de EXECUTE nos helpers de RLS e em
+-- `retrieve_top_k_chunks` (num install fresco ele tem). É julgamento por função,
+-- e o alvo de cada linha é o valor que um install fresco produz, medido.
+revoke execute on function public.fn_audit_log_row() from authenticated;
+revoke execute on function public.fn_decrypt_oauth(bytea) from authenticated;
+revoke execute on function public.fn_encrypt_oauth(text) from authenticated;
+revoke execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) from authenticated;
+revoke execute on function public.fn_update_budget_consumption() from authenticated;
+
+grant execute on function public.fn_audit_log_row() to service_role;
+grant execute on function public.fn_decrypt_oauth(bytea) to service_role;
+grant execute on function public.fn_encrypt_oauth(text) to service_role;
+grant execute on function public.fn_lgpd_cascade_redact_contact(uuid, uuid, uuid) to service_role;
+grant execute on function public.fn_update_budget_consumption() to service_role;
+
+-- ---- mensagem editada e mensagem apagada (migration 0153) ----
+-- O cliente edita ou apaga no aplicativo e o CRM seguia mostrando a versão
+-- velha — sem erro em lugar nenhum. Combinar preço ou endereço a partir de um
+-- texto que o cliente já corrigiu gera um erro que ninguém rastreia depois.
+-- Duas colunas e não um estado: editada continua valendo (o texto novo conta),
+-- apagada deixou de valer (o texto não pode mais aparecer). Timestamp e não
+-- booleano porque a pergunta seguinte é "quando?". A linha apagada NÃO some: a
+-- remoção levaria junto o contexto das vizinhas e o histórico de quem atendeu.
+alter table public.messages add column if not exists edited_at timestamptz;
+alter table public.messages add column if not exists revoked_at timestamptz;
+
+-- ---- definição sabe de qual conexão é (migration 0154) ----
+-- `meta_templates` nasceu para um canal só: a única marca de origem é
+-- `waba_id`, o id da conta na plataforma da Meta. Um segundo canal não tem onde
+-- entrar sem mentir sobre o que aquele campo significa — e o endpoint, que
+-- resolve a sessão por `metaSessionForOrg`, devolvia lista VAZIA numa
+-- instalação que só tem o canal intermediado. A conexão, e não um `provider`:
+-- dois números do mesmo provider têm definições diferentes. `set null` no
+-- delete porque apagar a conexão não pode apagar o registro do que a
+-- plataforma aprovou — ela continua existindo lá.
+alter table public.meta_templates
+  add column if not exists channel_session_id uuid
+    references public.channel_sessions(id) on delete set null;
+create index if not exists meta_templates_sessao_idx
+  on public.meta_templates (channel_session_id, status)
+  where channel_session_id is not null;
+
+-- ---- o arquivo do webhook aceita os canais novos (migration 0151) ----
+-- `webhook_events_log` guarda o corpo CRU do que o provedor mandou — é o único
+-- lugar onde ele fica. O CHECK do dump conhecia três provedores e nenhum dos
+-- canais do seam, então a rota genérica de canal não tinha como gravar sem
+-- mentir sobre a origem ('generic' para um canal que se sabe qual é).
+--
+-- Este é o BLOCO ÚNICO desta constraint (regra da issue #159): canal novo edita
+-- ESTA lista, e não acrescenta um segundo bloco — dois blocos fazem o
+-- `update.sh` de um clone com dados falhar no primeiro e deixar a tabela sem
+-- constraint entre o `drop` e o `add` que funciona.
+--
+-- Alargamento puro: um CHECK que aceita MAIS valores não pode ser violado por
+-- linha que já passava pelo antigo, então não precisa de backfill antes.
+alter table public.webhook_events_log
+  drop constraint if exists webhook_events_log_provider_check;
+alter table public.webhook_events_log
+  add constraint webhook_events_log_provider_check check (provider in (
+    'waha', 'nuvemshop', 'generic', 'meta_cloud', 'zernio'
+  ));
+
+notify pgrst, 'reload schema';
+
+-- ---- campanhas: disparo de template aprovado pra uma lista de leads/contatos (migration 0167) ----
+-- Ver o cabeçalho da migration 0167 pra contexto completo. Duas tabelas:
+-- `whatsapp_campaigns` (a intenção) e `whatsapp_campaign_recipients` (o
+-- público MATERIALIZADO na criação, não reavaliado a cada tick do
+-- despachante).
+create table if not exists public.whatsapp_campaigns (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null,
+  channel_session_id uuid not null references public.channel_sessions(id),
+  template_name text not null,
+  template_language text not null,
+  variable_mapping jsonb not null default '{}'::jsonb,
+  audience_filter jsonb not null,
+  status text not null default 'draft',
+  total_recipients integer not null default 0,
+  sent_count integer not null default 0,
+  failed_count integer not null default 0,
+  created_by uuid references auth.users(id),
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint whatsapp_campaigns_status_check
+    check (status in ('draft', 'queued', 'running', 'paused', 'completed', 'cancelled'))
+);
+
+create or replace trigger trg_whatsapp_campaigns_updated_at
+  before update on public.whatsapp_campaigns
+  for each row execute function public.fn_set_updated_at();
+
+create index if not exists whatsapp_campaigns_org_status_idx
+  on public.whatsapp_campaigns (organization_id, status);
+
+alter table public.whatsapp_campaigns enable row level security;
+
+drop policy if exists whatsapp_campaigns_select on public.whatsapp_campaigns;
+drop policy if exists whatsapp_campaigns_write on public.whatsapp_campaigns;
+
+create policy whatsapp_campaigns_select
+  on public.whatsapp_campaigns for select
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    or public.fn_is_platform_admin()
+  );
+
+create policy whatsapp_campaigns_write
+  on public.whatsapp_campaigns
+  using (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  );
+
+revoke all on public.whatsapp_campaigns from anon;
+
+create table if not exists public.whatsapp_campaign_recipients (
+  id uuid primary key default gen_random_uuid(),
+  campaign_id uuid not null references public.whatsapp_campaigns(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  contact_id uuid not null references public.contacts(id),
+  lead_id uuid references public.crm_leads(id),
+  resolved_values jsonb not null default '{}'::jsonb,
+  status text not null default 'pending',
+  external_id text,
+  error_message text,
+  sent_at timestamptz,
+  created_at timestamptz not null default now(),
+  constraint whatsapp_campaign_recipients_status_check
+    check (status in ('pending', 'sending', 'sent', 'failed', 'skipped'))
+);
+
+create index if not exists whatsapp_campaign_recipients_campaign_status_idx
+  on public.whatsapp_campaign_recipients (campaign_id, status);
+
+alter table public.whatsapp_campaign_recipients enable row level security;
+
+drop policy if exists whatsapp_campaign_recipients_select on public.whatsapp_campaign_recipients;
+drop policy if exists whatsapp_campaign_recipients_write on public.whatsapp_campaign_recipients;
+
+create policy whatsapp_campaign_recipients_select
+  on public.whatsapp_campaign_recipients for select
+  using (
+    organization_id in (select public.fn_user_org_ids())
+    or public.fn_is_platform_admin()
+  );
+
+create policy whatsapp_campaign_recipients_write
+  on public.whatsapp_campaign_recipients
+  using (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or (
+      organization_id in (select public.fn_user_org_ids())
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+  );
+
+revoke all on public.whatsapp_campaign_recipients from anon;
+
+-- ---- meta_templates.channel_session_id backfill (migration 0168) ----
+-- Ver o cabeçalho da migration 0168: coluna existe desde 0154, mas o sync
+-- nunca a preenchia. Idempotente — só toca linha órfã.
+update public.meta_templates mt
+set channel_session_id = cs.id
+from public.channel_sessions cs
+where mt.channel_session_id is null
+  and cs.organization_id = mt.organization_id
+  and cs.meta_waba_id = mt.waba_id;
+
+notify pgrst, 'reload schema';
+
+-- ---- message type: button (migration 0170) ----
+-- Ver o cabeçalho da migration 0170: resposta de botão de template
+-- ("Confirmo presença"/"Preciso remarcar") reprovava no CHECK e se perdia
+-- pra sempre — não é payload malformado, a Meta não re-entrega. O valor
+-- `button` já está no ÚNICO bloco que reconstrói `messages_type_check`
+-- (marcado "migration 0091", no início deste arquivo) — doutrina de
+-- `tests/unit/baseline-constraint-reconstruida.test.ts`: uma constraint, um
+-- bloco, editado no lugar em vez de reconstruído em série.
+
+notify pgrst, 'reload schema';
+
+-- ---- channel_sessions.meta_app_id (migration 0172) ----
+-- Ver o cabeçalho da migration 0172: template com imagem no cabeçalho
+-- sempre falhava porque faltava o App ID da Meta pra chamar a Resumable
+-- Upload API. Nullable — canal conectado antes desta coluna continua
+-- funcionando pra template de texto/botão.
+alter table public.channel_sessions
+  add column if not exists meta_app_id text;
+
+comment on column public.channel_sessions.meta_app_id is
+  'App ID da Meta dono da WABA — necessário pra Resumable Upload API (imagem de cabeçalho de template). Nullable: canais conectados antes desta coluna continuam funcionando pra template sem imagem.';
+
+notify pgrst, 'reload schema';
+
+-- ---- RBAC na base de conhecimento da IA (migration 0174) ----
+-- Ver o cabeçalho da migration 0174: ai_knowledge_sources e
+-- ai_knowledge_versions só isolavam por organização na escrita, sem checar
+-- papel — qualquer membro, inclusive "viewer", podia alterar ou apagar o
+-- material que o agente de IA usa pra responder cliente. Alinha ao mesmo
+-- piso que toda rota de mutação já exige ("manager"), no mesmo padrão que
+-- ai_agents/ai_agent_versions já usa.
+
+drop policy if exists "tenant_isolation_ai_knowledge_sources_all" on "public"."ai_knowledge_sources";
+
+create policy "tenant_isolation_ai_knowledge_sources_select" on "public"."ai_knowledge_sources"
+  for select
+  using (
+    (organization_id in (select public.fn_user_org_ids()))
+    or public.fn_is_platform_admin()
+  );
+
+create policy "tenant_isolation_ai_knowledge_sources_write" on "public"."ai_knowledge_sources"
+  for all
+  using (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  )
+  with check (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  );
+
+drop policy if exists "tenant_isolation_ai_kbv_all" on "public"."ai_knowledge_versions";
+
+create policy "tenant_isolation_ai_kbv_select" on "public"."ai_knowledge_versions"
+  for select
+  using (
+    (organization_id in (select public.fn_user_org_ids()))
+    or public.fn_is_platform_admin()
+  );
+
+create policy "tenant_isolation_ai_kbv_write" on "public"."ai_knowledge_versions"
+  for all
+  using (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  )
+  with check (
+    (
+      (organization_id in (select public.fn_user_org_ids()))
+      and public.fn_role_at_least(organization_id, 'manager')
+    )
+    or public.fn_is_platform_admin()
+  );
+
+notify pgrst, 'reload schema';
+
