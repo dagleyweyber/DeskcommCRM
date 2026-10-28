@@ -22,12 +22,21 @@
  *   construtor — os dois juntos criariam o lead duas vezes.
  *   Formulário que não deve ir ao CRM: <form data-dc-rastreio="off">.
  *
+ * Botão do WhatsApp (Google Ads e qualquer anúncio que leve a uma landing page):
+ *   o Google não entrega identificador quando a pessoa chega ao WhatsApp. Com
+ *   `data-webhook` — ou `data-clique="URL-DE-CLIQUE-DO-CRM"` — todo clique num link de
+ *   WhatsApp (wa.me, api.whatsapp.com) leva um código curto no texto da mensagem
+ *   ("ref:K7M2QX") e o clique é registrado no CRM com a origem do anúncio. A conversa
+ *   que chegar com o código é ligada a ele. Melhor-esforço: se a pessoa apagar o código,
+ *   a conversa nasce sem origem. Link que não deve ser marcado: data-dc-rastreio="off".
+ *
  * Integração manual (formulário próprio em JavaScript):
  *   window.DeskcommRastreio.dados()          → objeto com os campos
  *   window.DeskcommRastreio.preencher(form)  → acrescenta os campos ocultos
  *
  * Sem dependências, sem cookie próprio de terceiros, sem enviar nada sozinho: o dado
- * só sai junto com o formulário que a pessoa decidiu enviar.
+ * só sai junto com o formulário que a pessoa decidiu enviar ou o clique no WhatsApp
+ * que ela decidiu fazer.
  */
 (function () {
   "use strict";
@@ -35,6 +44,10 @@
 
   var script = document.currentScript;
   var WEBHOOK = script && script.getAttribute ? script.getAttribute("data-webhook") : null;
+  // Registro do clique no botão do WhatsApp: endereço próprio (data-clique) ou, no modo
+  // de envio direto, o mesmo token do webhook em outro caminho.
+  var CLIQUE = script && script.getAttribute ? script.getAttribute("data-clique") : null;
+  if (!CLIQUE && WEBHOOK) CLIQUE = WEBHOOK.replace("/webhooks/in/", "/rastreio/clique/");
   var CHAVE = "dc_rastreio_v1";
   var DIAS = 90;
   var PARAMETROS = [
@@ -201,15 +214,79 @@
     }
     // Reenvio (clique duplo, retry) não duplica o lead: o webhook deduplica por external_id.
     corpo.push("external_id=" + encodeURIComponent(idDoEnvio()));
-    var texto = corpo.join("&");
+    postar(WEBHOOK, corpo.join("&"));
+  }
+
+  /** POST que sobrevive à troca de página: sendBeacon e, na falta dele, fetch com keepalive. */
+  function postar(url, texto) {
     var tipoCorpo = "application/x-www-form-urlencoded;charset=UTF-8";
     try {
-      // sendBeacon sobrevive à troca de página que costuma vir logo após o envio
-      if (navigator.sendBeacon && navigator.sendBeacon(WEBHOOK, new Blob([texto], { type: tipoCorpo }))) return;
+      if (navigator.sendBeacon && navigator.sendBeacon(url, new Blob([texto], { type: tipoCorpo }))) return;
     } catch (e) { /* cai para o fetch */ }
     try {
-      fetch(WEBHOOK, { method: "POST", mode: "no-cors", keepalive: true, headers: { "Content-Type": tipoCorpo }, body: texto });
+      fetch(url, { method: "POST", mode: "no-cors", keepalive: true, headers: { "Content-Type": tipoCorpo }, body: texto });
     } catch (e) { /* sem rede: a página segue o próprio fluxo */ }
+  }
+
+  // ── Botão do WhatsApp ────────────────────────────────────────────────────────
+  // O Google não entrega identificador quando a pessoa chega ao WhatsApp. A cada clique
+  // num link de WhatsApp, o texto da mensagem ganha um código curto ("ref:K7M2QX") e o
+  // clique é registrado no CRM com os parâmetros do anúncio; a conversa que chegar com
+  // o código é ligada a ele. Melhor-esforço: a pessoa pode apagar o código antes de enviar.
+  // Mesmo alfabeto e formato de lib/atribuicao/clique-whatsapp.ts (sem 0/O/1/I).
+  var ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  function novoCodigo() {
+    var bytes = null;
+    var i, saida = "";
+    try {
+      if (window.crypto && window.crypto.getRandomValues) {
+        bytes = new Uint8Array(6);
+        window.crypto.getRandomValues(bytes);
+      }
+    } catch (e) { bytes = null; }
+    for (i = 0; i < 6; i++) saida += ALFABETO.charAt((bytes ? bytes[i] : Math.floor(Math.random() * 256)) % 32);
+    return saida;
+  }
+
+  function ehLinkDeWhatsApp(a) {
+    var h = a && a.href ? String(a.href) : "";
+    // wa.me/message/... (link de catálogo) não aceita texto: fica de fora
+    if (/^https?:\/\/wa\.me\/message\//i.test(h)) return false;
+    return /^https?:\/\/(wa\.me|api\.whatsapp\.com|web\.whatsapp\.com)(\/|\?|$)/i.test(h) || /^whatsapp:\/\/send/i.test(h);
+  }
+
+  /** O mesmo link com "ref:CODIGO" no fim do texto; um código antigo é trocado, não somado. */
+  function comCodigo(href, codigo) {
+    try {
+      var u = new URL(href);
+      var texto = (u.searchParams.get("text") || "").replace(/\s*ref:[A-HJ-NP-Z2-9]{6}/gi, "");
+      u.searchParams.set("text", (texto ? texto : "Olá!") + " ref:" + codigo);
+      // searchParams usa "+" para espaço; o WhatsApp lê melhor %20
+      u.search = u.search.replace(/\+/g, "%20");
+      return u.toString();
+    } catch (e) { return null; }
+  }
+
+  function registrarClique(codigo) {
+    if (!CLIQUE) return;
+    var d = dados();
+    var corpo = ["codigo=" + encodeURIComponent(codigo)];
+    for (var k in d) {
+      if (Object.prototype.hasOwnProperty.call(d, k)) corpo.push(encodeURIComponent(k) + "=" + encodeURIComponent(d[k]));
+    }
+    postar(CLIQUE, corpo.join("&"));
+  }
+
+  function aoClicar(e) {
+    if (!ativa() || !CLIQUE) return;
+    var el = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    if (!el || !ehLinkDeWhatsApp(el) || el.getAttribute("data-dc-rastreio") === "off") return;
+    var codigo = novoCodigo();
+    var novo = comCodigo(el.href, codigo);
+    if (!novo) return;
+    el.href = novo; // ainda antes de o navegador seguir o link
+    registrarClique(codigo);
   }
 
   // Na fase de CAPTURA: roda antes do handler do construtor da página, que costuma
@@ -224,7 +301,10 @@
     enviarAoCrm(e.target);
   }, true);
 
-  var api = { dados: dados, preencher: preencher, enviar: enviarAoCrm, versao: 1 };
+  document.addEventListener("click", aoClicar, true);
+  document.addEventListener("auxclick", aoClicar, true);
+
+  var api = { dados: dados, preencher: preencher, enviar: enviarAoCrm, versao: 2 };
   window.DeskcommRastreio = api;
 
   if (document.readyState === "loading") {

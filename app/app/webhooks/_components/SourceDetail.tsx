@@ -42,6 +42,7 @@ import {
   useWebhookSourceEvents,
   type WebhookSourceRow,
 } from "@/hooks/webhooks/useWebhookSources";
+import { useResumoDeCliques } from "@/hooks/rastreio/useResumoDeCliques";
 
 interface Props {
   source: WebhookSourceRow;
@@ -89,6 +90,7 @@ export function SourceDetail({ source, open, onOpenChange }: Props) {
   const { data: eventsRes, refetch: refetchEvents } = useWebhookSourceEvents(
     open ? source.id : null,
   );
+  const resumoDeCliques = useResumoDeCliques(open);
   const [testing, setTesting] = React.useState(false);
   const [testOk, setTestOk] = React.useState(false);
 
@@ -180,6 +182,19 @@ export function SourceDetail({ source, open, onOpenChange }: Props) {
                 Cole esta linha na sua landing page, antes de <code>&lt;/body&gt;</code>. Ela guarda de qual anúncio a
                 pessoa veio e envia o lead para cá junto com essa origem — funciona com qualquer construtor de página.
               </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                <span className="font-medium text-text">Botão do WhatsApp:</span> o mesmo script marca o link com um código
+                curto no fim da mensagem (<code>ref:K7M2QX</code>) e, quando a conversa chega com ele, liga a conversa ao
+                anúncio — é assim que o Google Ads, que não entrega a origem no WhatsApp, passa a ser rastreado. Se a
+                pessoa apagar o código antes de enviar, a conversa nasce sem origem.
+              </p>
+              {resumoDeCliques.data && (
+                <p className="mt-1 text-xs text-muted-foreground" data-testid="resumo-de-cliques">
+                  <span className="font-medium text-text">Últimos {resumoDeCliques.data.dias} dias:</span>{" "}
+                  {resumoDeCliques.data.cliques} clique(s) no botão · {resumoDeCliques.data.ligados} viraram conversa
+                  {resumoDeCliques.data.taxa !== null ? ` (${resumoDeCliques.data.taxa}%)` : ""}. {resumoDeCliques.data.leitura}
+                </p>
+              )}
             </div>
             <Textarea readOnly rows={3} value={scriptDeRastreio(origemDoCrm, url)} className="font-mono text-xs" />
             <Button
@@ -200,10 +215,10 @@ export function SourceDetail({ source, open, onOpenChange }: Props) {
                 O seu construtor já envia o formulário para este endereço?
               </summary>
               <p className="mt-2 text-xs text-muted-foreground">
-                Use esta versão, que só acrescenta a origem como campos ocultos — com as duas juntas o lead entraria duas
-                vezes:
+                Use esta versão, que só acrescenta a origem como campos ocultos (e continua rastreando o botão do
+                WhatsApp) — com as duas juntas o lead entraria duas vezes:
               </p>
-              <code className="mt-1 block break-all rounded-sm bg-muted p-2 text-xs">{scriptSoCampos(origemDoCrm)}</code>
+              <code className="mt-1 block break-all rounded-sm bg-muted p-2 text-xs">{scriptSoCampos(origemDoCrm, url)}</code>
             </details>
             <div className="space-y-1">
               <p className="text-xs font-medium text-text">Meta Ads — campo &quot;Parâmetros de URL&quot; do anúncio</p>

@@ -39,6 +39,7 @@
  * dentro, com log, e o seguinte roda mesmo assim.
  */
 import { audit } from "@/lib/audit";
+import { ligarCliqueAoLead } from "@/lib/atribuicao/ligar-clique";
 import { garantirLeadDaConversa } from "@/lib/leads/nascimento-do-lead";
 import { logger } from "@/lib/logger";
 import type { createAdminClient } from "@/lib/supabase/admin";
@@ -191,6 +192,18 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
       nomeDoContato: entrada.nomeDoContato,
       adReferral: entrada.adReferral,
     });
+
+    // Veio do botão de WhatsApp de uma landing page? O código `ref:` que o script da
+    // página põe no texto liga esta conversa ao clique (e ao gclid/UTMs dele). Só para
+    // lead novo: a origem dita no nascimento não é reescrita por mensagem posterior.
+    // Não lança e não depende do canal (olha só o texto) — ver `ligar-clique.ts`.
+    if (nascimento.criado) {
+      await ligarCliqueAoLead(
+        admin,
+        { organizationId: entrada.organizationId, leadId: nascimento.leadId, contactId: entrada.contactId },
+        entrada.texto,
+      );
+    }
 
     // Os DOIS desfechos viram log. Sem a linha do "não criou", o silêncio de
     // "já existia" e o de "a organização não tem funil configurado" têm a mesma

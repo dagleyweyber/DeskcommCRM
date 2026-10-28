@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Rastreamento de campanha — de qual campanha, conjunto e anúncio o lead veio",
-    "subtitle": "Fases 1 a 3: dois caminhos de entrada gravam o mesmo ponto de contato; a origem vira tag estruturada (grupo:valor) e a temperatura é marcada à mão",
+    "subtitle": "Fases 1 a 4a: dois caminhos de entrada gravam o mesmo ponto de contato; a origem vira tag estruturada (grupo:valor); o botão do WhatsApp da landing page liga a conversa ao clique do anúncio (Google)",
     "output": "rastreamento-de-campanha.html",
     "quality_profile": "standard"
   },
@@ -37,7 +37,11 @@
     { "id": "tags_origem", "lane": "regra", "col": 5, "type": "backend", "label": "lib/atribuicao/tags-de-origem.ts + aplicar-tags.ts", "sublabel": "1º toque ganha · idempotente · não emite lead.tag_added · nunca lança" },
     { "id": "tags_lead", "lane": "dados", "col": 2, "type": "database", "label": "crm_leads.tags (grupo:valor)", "sublabel": "mesmo text[] de sempre — sem migration; tag comum continua comum" },
     { "id": "tags_uso", "lane": "consumidor", "col": 2, "type": "backend", "label": "Público de campanha · automações · MCP", "sublabel": "contains(tags) e lead.tag_added já leem este campo" },
-    { "id": "temperatura", "lane": "humano", "col": 4, "type": "frontend", "label": "TemperaturaDoLead · bolinha no card · filtro por grupo", "sublabel": "Quente/Morno/Frio à mão; origem como chip no dossiê" }
+    { "id": "temperatura", "lane": "humano", "col": 4, "type": "frontend", "label": "TemperaturaDoLead · bolinha no card · filtro por grupo", "sublabel": "Quente/Morno/Frio à mão; origem como chip no dossiê" },
+    { "id": "clique_rota", "lane": "borda", "col": 5, "type": "backend", "label": "POST /api/v1/rastreio/clique/[token]", "sublabel": "pública · token da fonte → organização · limite por token e IP · allowlist de parâmetros" },
+    { "id": "cliques_tabela", "lane": "dados", "col": 6, "type": "database", "label": "rastreio_cliques (0203)", "sublabel": "código único por organização · RLS leitura · escrita só servidor" },
+    { "id": "ligar_clique", "lane": "regra", "col": 6, "type": "backend", "label": "lib/atribuicao/ligar-clique.ts", "sublabel": "consome o clique antes de registrar · 14 dias · nunca lança" },
+    { "id": "resumo_cliques", "lane": "consumidor", "col": 6, "type": "backend", "label": "GET /api/v1/rastreio/cliques/resumo", "sublabel": "cliques × conversas ligadas — a taxa diz se o código está sendo apagado" }
   ],
   "edges": [
     { "id": "e1", "from": "anuncio", "to": "lp", "label": "clique com ids na URL" },
@@ -66,7 +70,14 @@
     { "id": "e24", "from": "temperatura", "to": "tags_lead", "label": "PATCH /leads/:id — marca à mão" },
     { "id": "e25", "from": "tags_lead", "to": "tags_uso", "label": "contains(tags) e lead.tag_added" },
     { "id": "e26", "from": "tags_catalogo", "to": "temperatura", "label": "rótulos, tons e valores aceitos" },
-    { "id": "e27", "from": "tags_uso", "to": "tags_lead", "label": "ação add_tag das automações também escreve" }
+    { "id": "e27", "from": "tags_uso", "to": "tags_lead", "label": "ação add_tag das automações também escreve" },
+    { "id": "e28", "from": "script", "to": "clique_rota", "label": "clique no botão do WhatsApp: código ref: + parâmetros do anúncio" },
+    { "id": "e29", "from": "clique_rota", "to": "cliques_tabela", "label": "insert (service_role); 23505 = reenvio, o primeiro vale" },
+    { "id": "e30", "from": "nascimento", "to": "ligar_clique", "label": "depois de criar o lead, passa o texto da mensagem (pos-entrada)" },
+    { "id": "e31", "from": "cliques_tabela", "to": "ligar_clique", "label": "lê pelo código, na organização da conversa" },
+    { "id": "e32", "from": "ligar_clique", "to": "registrar", "label": "ponto de contato via link_whatsapp (+ tags de origem)" },
+    { "id": "e33", "from": "cliques_tabela", "to": "resumo_cliques", "label": "contagem pela RLS do caller" },
+    { "id": "e34", "from": "resumo_cliques", "to": "fonte", "label": "linha cliques × conversas ligadas na tela da fonte" }
   ],
   "cards": [
     {
@@ -101,6 +112,16 @@
         "primeiro toque ganha e nada é sobrescrito — inclusive correção manual; os toques seguintes continuam em lead_touchpoints",
         "Origem é aditiva: anúncio do Instagram = Meta Ads + Instagram (526 de 620 pontos medidos em produção têm link instagram.com)",
         "laço de retorno: tag errada se corrige à mão e o sistema respeita; falha ao aplicar vai ao log (atribuicao: falha ao aplicar tags de origem). Sem atividade na timeline de propósito: é classificação derivada de lead_touchpoints, que é o registro"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Fase 4a — botão do WhatsApp",
+      "items": [
+        "o Google não entrega identificador quando a pessoa chega ao WhatsApp (a Meta entrega ctwa_clid): o código ref: no texto do link é a ponte entre o clique na página e a conversa",
+        "melhor-esforço e declarado: se a pessoa apagar o código, a conversa nasce sem origem — a tela da fonte mostra a taxa de ligação e diz o que conferir quando ela é baixa (laço de retorno)",
+        "rota pública: organização vem do token da fonte (nunca do corpo), limite por token e por IP, allowlist de parâmetros, 204 sem revelar se o código já existia",
+        "o clique é consumido ANTES de virar ponto de contato: duas mensagens com o mesmo código não duplicam a atribuição"
       ]
     }
   ]

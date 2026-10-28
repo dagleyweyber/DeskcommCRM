@@ -10,9 +10,22 @@ export function scriptDeRastreio(origemDoCrm: string, urlDoWebhook: string): str
   return `<script src="${origemDoCrm}/rastreio.js" data-webhook="${urlDoWebhook}" async></script>`;
 }
 
-/** A linha do script SEM envio direto — para quando o construtor já manda o formulário ao webhook. */
-export function scriptSoCampos(origemDoCrm: string): string {
-  return `<script src="${origemDoCrm}/rastreio.js" async></script>`;
+/**
+ * O endereço onde o script registra o clique no botão do WhatsApp: o mesmo token do webhook,
+ * em outro caminho (`/rastreio/clique/`). A rota resolve a organização por ele.
+ */
+export function urlDeCliqueDoWebhook(urlDoWebhook: string): string {
+  return urlDoWebhook.replace("/webhooks/in/", "/rastreio/clique/");
+}
+
+/**
+ * A linha do script SEM envio direto — para quando o construtor já manda o formulário ao
+ * webhook. Com `urlDoWebhook`, leva também `data-clique`: o botão do WhatsApp continua
+ * rastreado (esse modo não tem `data-webhook` de onde derivar o endereço).
+ */
+export function scriptSoCampos(origemDoCrm: string, urlDoWebhook?: string): string {
+  const clique = urlDoWebhook ? ` data-clique="${urlDeCliqueDoWebhook(urlDoWebhook)}"` : "";
+  return `<script src="${origemDoCrm}/rastreio.js"${clique} async></script>`;
 }
 
 /**

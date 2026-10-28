@@ -22,6 +22,7 @@ import type { PontoDeContatoVisao } from "@/lib/atribuicao/visao";
 const ROTULO_DA_VIA: Record<string, string> = {
   [VIA.ANUNCIO_WHATSAPP]: "anúncio para WhatsApp",
   [VIA.LANDING_PAGE]: "landing page",
+  [VIA.LINK_WHATSAPP]: "botão de WhatsApp da landing page",
   [VIA.HISTORICO]: "registro anterior",
 };
 

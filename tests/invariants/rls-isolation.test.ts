@@ -184,6 +184,13 @@ beforeAll(() => {
               from public.crm_leads l where l.organization_id = v_org limit 1;
         end if;
 
+        -- rastreio_cliques (migration 0203): clique no WhatsApp da landing page, com o
+        -- gclid/UTMs do anúncio — dado comercial que o vizinho não pode ler.
+        if not exists (select 1 from public.rastreio_cliques where organization_id = v_org) then
+          insert into public.rastreio_cliques (organization_id, codigo, parametros)
+            values (v_org, 'K7M2QX', '{"gclid":"Cj0K_rls"}'::jsonb);
+        end if;
+
         -- contact_field_proposals (migration 0123): a fila guarda e-mail e
         -- telefone que o cliente DITOU na conversa — PII crua, e a tabela nasce
         -- com CRUD inteiro para "authenticated" (o ALTER DEFAULT PRIVILEGES do
@@ -233,6 +240,8 @@ const TABLES = [
   "org_guardrail_layers",
   // migration 0202 — pontos de contato (campanha/conjunto/anúncio de cada lead).
   "lead_touchpoints",
+  // migration 0203 — cliques no WhatsApp da landing page (gclid/UTMs do anúncio).
+  "rastreio_cliques",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

@@ -19,11 +19,12 @@ declare global {
   }
 }
 
-function visitar(caminho: string, opts: { webhook?: string } = {}) {
+function visitar(caminho: string, opts: { webhook?: string; clique?: string } = {}) {
   window.history.replaceState({}, "", caminho);
   delete window.DeskcommRastreio;
   const script = document.createElement("script");
   if (opts.webhook) script.setAttribute("data-webhook", opts.webhook);
+  if (opts.clique) script.setAttribute("data-clique", opts.clique);
   Object.defineProperty(document, "currentScript", { configurable: true, get: () => script });
   new Function(CODIGO)();
 }
@@ -181,6 +182,108 @@ describe("public/rastreio.js — envio direto ao CRM (data-webhook)", () => {
     visitar("/?utm_source=facebook");
     const form = novoFormulario(`<form><input name="nome" value="Ana"></form>`);
     enviar(form);
+    expect(chamadas).toHaveLength(0);
+  });
+});
+
+describe("public/rastreio.js — botão do WhatsApp (código ref: + registro do clique)", () => {
+  const WEBHOOK = "https://crm.exemplo/api/v1/webhooks/in/tok_teste123";
+  const CLIQUE = "https://crm.exemplo/api/v1/rastreio/clique/tok_teste123";
+
+  function capturaBeacon() {
+    const chamadas: Array<{ url: string; corpo: Promise<string> }> = [];
+    Object.defineProperty(navigator, "sendBeacon", {
+      configurable: true,
+      value: (url: string, dados: Blob) => {
+        chamadas.push({ url, corpo: dados.text() });
+        return true;
+      },
+    });
+    return chamadas;
+  }
+
+  function novoLink(href: string, extra = ""): HTMLAnchorElement {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `<a href="${href}" ${extra}><span>Falar no WhatsApp</span></a>`;
+    document.body.appendChild(wrap);
+    return wrap.querySelector("a") as HTMLAnchorElement;
+  }
+
+  /** O clique que o navegador faria — o clique é cancelado para o jsdom não navegar. */
+  function clicar(el: Element) {
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  }
+
+  const textoDe = (a: HTMLAnchorElement) => new URL(a.href).searchParams.get("text");
+
+  it("⭐ o link do WhatsApp ganha 'ref:CODIGO' no texto e o clique é registrado com o gclid", async () => {
+    const chamadas = capturaBeacon();
+    visitar("/lp?utm_source=google&gclid=Cj0K_ABC&campaign_id=987654", { webhook: WEBHOOK });
+    const a = novoLink("https://wa.me/5581999990000?text=Quero%20agendar");
+    a.addEventListener("click", (e) => e.preventDefault());
+    clicar(a.querySelector("span")!);
+
+    const texto = textoDe(a)!;
+    expect(texto).toMatch(/^Quero agendar ref:[A-HJ-NP-Z2-9]{6}$/);
+    expect(a.href).not.toContain("+"); // espaço é %20, não "+"
+    const codigo = /ref:([A-Z0-9]{6})/.exec(texto)![1]!;
+
+    expect(chamadas).toHaveLength(1);
+    expect(chamadas[0]!.url).toBe(CLIQUE);
+    const corpo = new URLSearchParams(await chamadas[0]!.corpo);
+    expect(corpo.get("codigo")).toBe(codigo);
+    expect(corpo.get("gclid")).toBe("Cj0K_ABC");
+    expect(corpo.get("campaign_id")).toBe("987654");
+  });
+
+  it("⭐ cada clique tem código novo — o antigo é trocado, não somado", () => {
+    capturaBeacon();
+    visitar("/lp?utm_source=google&gclid=Cj0K_ABC", { webhook: WEBHOOK });
+    const a = novoLink("https://wa.me/5581999990000");
+    a.addEventListener("click", (e) => e.preventDefault());
+    clicar(a);
+    const primeiro = /ref:([A-Z0-9]{6})/.exec(textoDe(a)!)![1];
+    clicar(a);
+    const texto = textoDe(a)!;
+    expect(texto.match(/ref:/g)).toHaveLength(1);
+    expect(texto.startsWith("Olá!")).toBe(true);
+    expect(/ref:([A-Z0-9]{6})/.exec(texto)![1]).not.toBe(primeiro);
+  });
+
+  it("endereço de clique próprio (data-clique) funciona sem data-webhook", async () => {
+    const chamadas = capturaBeacon();
+    visitar("/lp?utm_source=google&gclid=Cj0K_ABC", { clique: CLIQUE });
+    const a = novoLink("https://api.whatsapp.com/send?phone=5581999990000");
+    a.addEventListener("click", (e) => e.preventDefault());
+    clicar(a);
+    expect(chamadas).toHaveLength(1);
+    expect(chamadas[0]!.url).toBe(CLIQUE);
+  });
+
+  it("⭐ sem data-webhook nem data-clique, o link NÃO é mexido (nada para registrar)", () => {
+    const chamadas = capturaBeacon();
+    visitar("/lp?utm_source=google&gclid=Cj0K_ABC");
+    const a = novoLink("https://wa.me/5581999990000?text=Oi");
+    a.addEventListener("click", (e) => e.preventDefault());
+    clicar(a);
+    expect(textoDe(a)).toBe("Oi");
+    expect(chamadas).toHaveLength(0);
+  });
+
+  it("não mexe em link que não é de WhatsApp, em wa.me/message/ nem em data-dc-rastreio=off", () => {
+    const chamadas = capturaBeacon();
+    visitar("/lp?utm_source=google&gclid=Cj0K_ABC", { webhook: WEBHOOK });
+    const outros = [
+      novoLink("https://exemplo.com/contato?text=Oi"),
+      novoLink("https://wa.me/message/ABCDEF"),
+      novoLink("https://wa.me/5581999990000?text=Oi", `data-dc-rastreio="off"`),
+    ];
+    for (const a of outros) {
+      a.addEventListener("click", (e) => e.preventDefault());
+      const antes = a.href;
+      clicar(a);
+      expect(a.href).toBe(antes);
+    }
     expect(chamadas).toHaveLength(0);
   });
 });

@@ -8,6 +8,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { POST } from "@/app/api/v1/webhooks/in/[token]/route";
+import { ligarCliqueAoLead } from "@/lib/atribuicao/ligar-clique";
 import { GOV_ORG, GOV_PIPELINE, GOV_STAGE, seedGov, sql } from "./gov-helpers";
 
 /**
@@ -592,6 +593,31 @@ describe("POST /api/v1/webhooks/in/[token] (Task 6)", () => {
     expect(
       rows(`select 1 from public.event_log where event_type = 'lead.tag_added' and entity_id = '${leadId}'`).length,
     ).toBe(0);
+  });
+
+  it("caso 13 — ⭐ conversa que chega com 'ref:' é ligada ao clique do botão do WhatsApp: ponto de contato do Google + tag de origem", async () => {
+    // O lead nasce SEM origem (conversa de WhatsApp vinda do botão da landing page).
+    const res = await POST(jsonReq(TOKEN_JSON, { nome: "Veio do Botao", telefone: "11911110000" }), reqCtx(TOKEN_JSON));
+    const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
+    expect(rows(`select 1 from public.lead_touchpoints where lead_id = '${leadId}'`).length).toBe(0);
+
+    // O clique foi registrado pelo script da página, com o gclid do anúncio do Google.
+    sql(`insert into public.rastreio_cliques (organization_id, codigo, parametros)
+           values ('${GOV_ORG}', 'M3N4P5', '{"utm_source":"google","gclid":"Cj0K_botao","campaign_id":"987654"}'::jsonb);`);
+
+    const r = await ligarCliqueAoLead(createAdminClient(), { organizationId: GOV_ORG, leadId, contactId: null }, "Quero agendar ref:M3N4P5");
+    expect(r.ligado).toBe(true);
+
+    const pontos = rows(`select canal, via, click_id_type, click_id, campaign_id from public.lead_touchpoints where lead_id = '${leadId}'`);
+    expect(pontos).toEqual([{ canal: "google_ads", via: "link_whatsapp", click_id_type: "gclid", click_id: "Cj0K_botao", campaign_id: "987654" }]);
+    expect(rows(`select tags from public.crm_leads where id = '${leadId}'`)[0]!.tags).toEqual(['origem:google-ads']);
+    // o clique foi consumido e aponta para o lead
+    expect(rows(`select lead_id, usado_em is not null as usado from public.rastreio_cliques where codigo = 'M3N4P5'`)[0]).toEqual({ lead_id: leadId, usado: true });
+
+    // a mesma mensagem de novo não duplica a atribuição
+    const de_novo = await ligarCliqueAoLead(createAdminClient(), { organizationId: GOV_ORG, leadId, contactId: null }, "ref:M3N4P5");
+    expect(de_novo.ligado).toBe(false);
+    expect(rows(`select 1 from public.lead_touchpoints where lead_id = '${leadId}'`).length).toBe(1);
   });
 
   it("caso 11 — lead de formulário sem nenhuma origem não ganha ponto de contato inventado", async () => {

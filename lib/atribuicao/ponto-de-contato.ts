@@ -44,6 +44,8 @@ export type Canal = (typeof CANAL)[keyof typeof CANAL];
 export const VIA = {
   ANUNCIO_WHATSAPP: "anuncio_whatsapp",
   LANDING_PAGE: "landing_page",
+  /** Clicou no botão do WhatsApp de uma landing page; a conversa foi ligada ao clique pelo código `ref:` (migration 0203). */
+  LINK_WHATSAPP: "link_whatsapp",
   HISTORICO: "historico",
 } as const;
 export type Via = (typeof VIA)[keyof typeof VIA];
