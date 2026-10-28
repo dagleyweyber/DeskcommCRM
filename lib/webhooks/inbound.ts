@@ -4,6 +4,8 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { CAMPO_PRIMEIRO_CONTATO, CHAVES_DE_ATRIBUICAO, valorLimpo } from "@/lib/atribuicao/ponto-de-contato";
+
 export interface FieldMap {
   name?: string[];
   phone?: string[];
@@ -23,7 +25,7 @@ const DEFAULT_FIELD_MAP: Required<FieldMap> = {
  * parâmetro que a Meta gruda na URL de quem clicou; `fbc`/`fbp` são os
  * cookies do Pixel quando o site os tem instalados.
  */
-const ATTRIBUTION_KEYS = new Set(["fbclid", "fbc", "fbp", "gclid"]);
+const ATTRIBUTION_KEYS: ReadonlySet<string> = new Set(CHAVES_DE_ATRIBUICAO);
 
 /**
  * Achado ao vivo (RevitaFio Mossoró): o MESMO webhook genérico atende a
@@ -44,6 +46,12 @@ export interface MappedLead {
   origin: string | null;
   custom_fields: Record<string, string>;
   source_metadata: Record<string, string>;
+  /**
+   * O PRIMEIRO toque guardado pelo script de rastreamento (`dc_primeiro_contato`,
+   * JSON) — separado porque não é dado do lead nem origem "plana": vira um ponto de
+   * contato próprio em `lead_touchpoints` (ver `lib/atribuicao/`).
+   */
+  primeiro_contato: string | null;
 }
 
 /** Normaliza telefone BR para E.164. ponytail: heurística BR-only (público-alvo); internacional entra quando houver demanda. */
@@ -99,14 +107,24 @@ export function mapInboundPayload(
 
   const custom_fields: Record<string, string> = {};
   const source_metadata: Record<string, string> = {};
+  let primeiro_contato: string | null = null;
   for (const [key, value] of Object.entries(payload)) {
     if (consumed.has(key)) continue;
+    if (key.toLowerCase() === CAMPO_PRIMEIRO_CONTATO) {
+      primeiro_contato = typeof value === "string" ? value.slice(0, 4000) : null;
+      continue;
+    }
     const str =
       typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : null;
     if (str === null) continue; // objetos/arrays aninhados: descartados no v1
     const lower = key.toLowerCase();
-    if (lower.startsWith("utm_") || ATTRIBUTION_KEYS.has(lower)) source_metadata[lower] = str;
-    else custom_fields[key] = str;
+    if (lower.startsWith("utm_") || ATTRIBUTION_KEYS.has(lower)) {
+      // Parâmetro dinâmico NÃO substituído (`{{ad.id}}`, `{campaignid}`) e vazio
+      // não são origem: gravá-los faria o relatório agrupar leads num anúncio que
+      // não existe. Some dos dois lados — também não é dado do lead.
+      const limpo = valorLimpo(str);
+      if (limpo) source_metadata[lower] = limpo;
+    } else custom_fields[key] = str;
   }
 
   return {
@@ -120,6 +138,7 @@ export function mapInboundPayload(
     origin: originHit ? originHit.value.trim().toLowerCase() : null,
     custom_fields,
     source_metadata,
+    primeiro_contato,
   };
 }
 

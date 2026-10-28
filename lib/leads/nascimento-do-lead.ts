@@ -41,6 +41,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { pontoDoAnuncioWhatsApp } from "@/lib/atribuicao/ponto-de-contato";
+import { registrarPontosDeContato } from "@/lib/atribuicao/registrar";
 import { logger } from "@/lib/logger";
 
 import { ehIdentificadorTecnico, rotuloDoContato, SEM_NOME } from "@/lib/contacts/rotulo-do-contato";
@@ -197,6 +199,17 @@ async function reabreLead(
 
   if (error) {
     return { criado: false, motivo: "erro", detalhe: error.message.slice(0, 120) };
+  }
+
+  // Clique novo que reabriu a demanda vira mais um ponto de contato — o histórico
+  // de origem não é sobrescrito como em `source_metadata`.
+  const pontoReaberto = dados.adReferral ? pontoDoAnuncioWhatsApp(dados.adReferral) : null;
+  if (pontoReaberto) {
+    await registrarPontosDeContato(
+      db,
+      { organizationId, leadId: leadPerdido.id, contactId },
+      [pontoReaberto],
+    );
   }
 
   const diasFechado = Math.max(
@@ -421,6 +434,16 @@ export async function garantirLeadDaConversa(
 
   if (error || !lead) {
     return { criado: false, motivo: "erro", detalhe: error?.message.slice(0, 120) };
+  }
+
+  // De onde veio, em campos estruturados (`lead_touchpoints`, migration 0202).
+  const pontoDoAnuncio = dados.adReferral ? pontoDoAnuncioWhatsApp(dados.adReferral) : null;
+  if (pontoDoAnuncio) {
+    await registrarPontosDeContato(
+      db,
+      { organizationId, leadId: lead.id as string, contactId },
+      [pontoDoAnuncio],
+    );
   }
 
   // 4.5 · avisa o resto do sistema que um lead nasceu.

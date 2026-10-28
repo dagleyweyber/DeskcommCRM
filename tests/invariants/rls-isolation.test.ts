@@ -176,6 +176,14 @@ beforeAll(() => {
             values (v_org, 1, 0.81, 0.72);
         end if;
 
+        -- lead_touchpoints (migration 0202): de qual campanha/anúncio cada lead veio —
+        -- dado comercial que o vizinho não pode ler.
+        if not exists (select 1 from public.lead_touchpoints where organization_id = v_org) then
+          insert into public.lead_touchpoints (organization_id, lead_id, canal, via, utm_source, campaign_id)
+            select v_org, l.id, 'meta_ads', 'landing_page', 'facebook', '120211'
+              from public.crm_leads l where l.organization_id = v_org limit 1;
+        end if;
+
         -- contact_field_proposals (migration 0123): a fila guarda e-mail e
         -- telefone que o cliente DITOU na conversa — PII crua, e a tabela nasce
         -- com CRUD inteiro para "authenticated" (o ALTER DEFAULT PRIVILEGES do
@@ -223,6 +231,8 @@ const TABLES = [
   // sabotada para `... or true` a suíte seguia 31/31 verde num banco em que o vizinho
   // lia e escrevia. É o modo de falha que o aviso acima descreve, encontrado vivo.
   "org_guardrail_layers",
+  // migration 0202 — pontos de contato (campanha/conjunto/anúncio de cada lead).
+  "lead_touchpoints",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

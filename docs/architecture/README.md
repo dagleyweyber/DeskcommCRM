@@ -24,6 +24,7 @@ ser fonte sem ninguém decidir isso.
 | `ia-360-retencao.architecture.json` | pacote **Não perder o cliente** (IA 360 · wave 2) — 26 peças, 36 arestas; a regra única do retorno para o motor e para a capacidade configurável, e por que cancelado precisou deixar de ser igual a disparado |
 | `escalacao-ciclo-humano.architecture.json` | o ciclo agente ↔ pessoa — 30 peças, 38 arestas; as **três** travas da passagem (só uma era solta) e por onde a decisão da pessoa volta ao contexto do turno |
 | `followup-dossie.architecture.json` | dossiê do follow-up e intervenção humana — 20 peças, 30 arestas; as **duas metades** da corrida contra o motor (o tick reclamado e o turno em voo) e quatro não-ligações declaradas |
+| `rastreamento-de-campanha.architecture.json` | rastreamento de campanha (Fase 1) — 16 peças, 17 arestas; os dois caminhos de entrada (anúncio para WhatsApp e landing page) gravam o mesmo ponto de contato, e o que lê a atribuição |
 
 
 ### Aviso: só o `agent-turn.workflow.json` é renderizável hoje

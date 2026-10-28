@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Rastreamento de campanha — de qual campanha, conjunto e anúncio o lead veio",
+    "subtitle": "Fase 1: os dois caminhos de entrada (anúncio para WhatsApp e landing page) gravam o mesmo ponto de contato estruturado",
+    "output": "rastreamento-de-campanha.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "externo", "label": "Fora do CRM" },
+    { "id": "borda", "label": "Borda de entrada" },
+    { "id": "regra", "label": "Regras puras" },
+    { "id": "dados", "label": "Banco" },
+    { "id": "consumidor", "label": "Quem lê a atribuição" },
+    { "id": "humano", "label": "O que o humano vê" }
+  ],
+  "mainPath": ["lp", "script", "webhook", "ponto", "touchpoints", "rota", "dossie"],
+  "nodes": [
+    { "id": "anuncio", "lane": "externo", "col": 1, "type": "external", "label": "Anúncio Meta / Google", "sublabel": "Parâmetros de URL com {{campaign.id}} / {campaignid}" },
+    { "id": "lp", "lane": "externo", "col": 2, "type": "external", "label": "Landing page do cliente", "sublabel": "qualquer construtor" },
+    { "id": "script", "lane": "externo", "col": 3, "type": "frontend", "label": "public/rastreio.js", "sublabel": "guarda 1º e último toque · fbc com hora do clique · data-webhook envia direto" },
+    { "id": "ctwa", "lane": "externo", "col": 4, "type": "external", "label": "Clique para WhatsApp", "sublabel": "referral: ctwa_clid + source_id (ad_id)" },
+    { "id": "webhook", "lane": "borda", "col": 3, "type": "backend", "label": "POST /api/v1/webhooks/in/[token]", "sublabel": "mapInboundPayload → source_metadata + dc_primeiro_contato" },
+    { "id": "nascimento", "lane": "borda", "col": 4, "type": "backend", "label": "nascimento-do-lead.ts", "sublabel": "cria / reabre o lead a partir da conversa" },
+    { "id": "ponto", "lane": "regra", "col": 3, "type": "backend", "label": "lib/atribuicao/ponto-de-contato.ts", "sublabel": "canal · clique · ids e nomes · descarta macro não substituída" },
+    { "id": "registrar", "lane": "regra", "col": 4, "type": "backend", "label": "lib/atribuicao/registrar.ts", "sublabel": "grava; nunca derruba o nascimento do lead" },
+    { "id": "touchpoints", "lane": "dados", "col": 3, "type": "database", "label": "lead_touchpoints (0202)", "sublabel": "RLS leitura por org · escrita só servidor" },
+    { "id": "source_metadata", "lane": "dados", "col": 4, "type": "database", "label": "crm_leads.source_metadata", "sublabel": "continua gravado (compatibilidade)" },
+    { "id": "hierarquia", "lane": "dados", "col": 5, "type": "database", "label": "meta_ads_ad_metadata", "sublabel": "nomes de campanha/conjunto/anúncio pela API da Meta" },
+    { "id": "capi", "lane": "consumidor", "col": 4, "type": "backend", "label": "lib/meta-ads/send.ts (CAPI)", "sublabel": "Fase 2: passa a ler o ponto de contato" },
+    { "id": "dashboard", "lane": "consumidor", "col": 5, "type": "backend", "label": "fn_sales_dashboard (receita por anúncio)", "sublabel": "lê source_metadata.ad_id — agora também de landing page" },
+    { "id": "rota", "lane": "consumidor", "col": 3, "type": "backend", "label": "GET /api/v1/leads/[id]/attribution", "sublabel": "montaAtribuicao: une pontos + hierarquia da Meta" },
+    { "id": "dossie", "lane": "humano", "col": 3, "type": "frontend", "label": "Dossiê do lead → OrigemDoAnuncio", "sublabel": "campanha · conjunto · anúncio · 1º contato" },
+    { "id": "fonte", "lane": "humano", "col": 2, "type": "frontend", "label": "Webhooks → SourceDetail", "sublabel": "script pronto + parâmetros de URL Meta/Google" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "anuncio", "to": "lp", "label": "clique com ids na URL" },
+    { "id": "e2", "from": "lp", "to": "script", "label": "1 linha de <script>" },
+    { "id": "e3", "from": "script", "to": "webhook", "label": "formulário + origem (campos ocultos ou envio direto)" },
+    { "id": "e4", "from": "anuncio", "to": "ctwa", "label": "anúncio de mensagem" },
+    { "id": "e5", "from": "ctwa", "to": "nascimento", "label": "webhook do canal (Meta Cloud / WAHA)" },
+    { "id": "e6", "from": "webhook", "to": "ponto", "label": "pontosDaLandingPage" },
+    { "id": "e7", "from": "nascimento", "to": "ponto", "label": "pontoDoAnuncioWhatsApp" },
+    { "id": "e8", "from": "ponto", "to": "registrar", "label": "PontoDeContato" },
+    { "id": "e9", "from": "registrar", "to": "touchpoints", "label": "insert (service_role)" },
+    { "id": "e10", "from": "webhook", "to": "source_metadata", "label": "ad_id, UTMs, clique" },
+    { "id": "e11", "from": "source_metadata", "to": "hierarquia", "label": "lead.created → hierarchy-handler resolve nomes" },
+    { "id": "e12", "from": "touchpoints", "to": "rota", "label": "select pela RLS do caller" },
+    { "id": "e13", "from": "hierarquia", "to": "rota", "label": "nomes atuais da Meta" },
+    { "id": "e14", "from": "rota", "to": "dossie", "label": "useAtribuicaoDoLead" },
+    { "id": "e15", "from": "source_metadata", "to": "capi", "label": "fbc/fbp/ctwa_clid → conversões" },
+    { "id": "e16", "from": "source_metadata", "to": "dashboard", "label": "receita por anúncio" },
+    { "id": "e17", "from": "fonte", "to": "script", "label": "o cliente copia o script e os parâmetros" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Por que existe",
+      "items": [
+        "medido em produção (90 dias): 611 de 630 leads de anúncio do WhatsApp com anúncio identificado — e 0 de 19 leads de landing page com qualquer origem",
+        "a origem morava em source_metadata (JSON solto, sobrescrito quando um clique novo reabre o lead)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Laço de retorno",
+      "items": [
+        "a atribuição alimenta o envio de conversões (Meta CAPI hoje, Google na Fase 4): quando o lead vira venda, a plataforma aprende QUAL anúncio trouxe venda e muda onde gasta",
+        "falha ao gravar o ponto de contato vai ao log ('atribuicao: falha ao gravar ponto de contato') e o lead nasce mesmo assim"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Não-ligações declaradas",
+      "items": [
+        "o id do anúncio do Google vai em `creative`, nunca em `ad_id`: ad_id em source_metadata dispara a resolução pela API da Meta",
+        "o identificador do clique não vai para a tela — é dado de envio, não de leitura"
+      ]
+    }
+  ]
+}

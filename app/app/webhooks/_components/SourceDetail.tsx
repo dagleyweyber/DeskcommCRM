@@ -27,6 +27,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  PARAMETROS_URL_GOOGLE,
+  PARAMETROS_URL_META,
+  scriptDeRastreio,
+  scriptSoCampos,
+} from "@/lib/atribuicao/guia";
 import { copyToClipboard } from "@/lib/clipboard";
 import { Copy, Trash, CaretDown } from "@/lib/ui/icons";
 import { cn } from "@/lib/utils";
@@ -87,6 +93,7 @@ export function SourceDetail({ source, open, onOpenChange }: Props) {
   const [testOk, setTestOk] = React.useState(false);
 
   const url = publicUrl(source.path_token);
+  const origemDoCrm = url.replace(/\/api\/v1\/webhooks\/in\/.*$/, "");
   const events = eventsRes?.data ?? [];
 
   const sendTestLead = async () => {
@@ -162,6 +169,66 @@ export function SourceDetail({ source, open, onOpenChange }: Props) {
             >
               <Copy /> Copiar formulário
             </Button>
+          </section>
+
+          {/* Rastreamento de campanha: sem isto, lead de landing page chega sem
+              campanha, conjunto nem anúncio (medido: 0 de 19 tinham origem). */}
+          <section className="space-y-3 rounded-sm border border-border p-3" data-testid="rastreio-de-campanha">
+            <div>
+              <p className="text-sm font-medium text-text">Rastrear campanha, conjunto e anúncio</p>
+              <p className="text-xs text-muted-foreground">
+                Cole esta linha na sua landing page, antes de <code>&lt;/body&gt;</code>. Ela guarda de qual anúncio a
+                pessoa veio e envia o lead para cá junto com essa origem — funciona com qualquer construtor de página.
+              </p>
+            </div>
+            <Textarea readOnly rows={3} value={scriptDeRastreio(origemDoCrm, url)} className="font-mono text-xs" />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => copy(scriptDeRastreio(origemDoCrm, url), "Script copiado.")}
+            >
+              <Copy /> Copiar script
+            </Button>
+            {source.has_secret && (
+              <p className="text-xs text-warning-fg">
+                Esta fonte exige assinatura (segredo), e o navegador não tem como assinar. Para o envio direto da
+                landing page, use uma fonte sem segredo.
+              </p>
+            )}
+            <details className="group">
+              <summary className="cursor-pointer list-none text-xs font-medium text-text">
+                O seu construtor já envia o formulário para este endereço?
+              </summary>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Use esta versão, que só acrescenta a origem como campos ocultos — com as duas juntas o lead entraria duas
+                vezes:
+              </p>
+              <code className="mt-1 block break-all rounded-sm bg-muted p-2 text-xs">{scriptSoCampos(origemDoCrm)}</code>
+            </details>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-text">Meta Ads — campo &quot;Parâmetros de URL&quot; do anúncio</p>
+              <code className="block break-all rounded-sm bg-muted p-2 text-xs">{PARAMETROS_URL_META}</code>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => copy(PARAMETROS_URL_META, "Parâmetros da Meta copiados.")}
+              >
+                <Copy /> Copiar
+              </Button>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-text">Google Ads — campo &quot;Sufixo do URL final&quot;</p>
+              <code className="block break-all rounded-sm bg-muted p-2 text-xs">{PARAMETROS_URL_GOOGLE}</code>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => copy(PARAMETROS_URL_GOOGLE, "Parâmetros do Google copiados.")}
+              >
+                <Copy /> Copiar
+              </Button>
+            </div>
           </section>
 
           <section className="space-y-2 rounded-sm border border-border">

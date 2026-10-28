@@ -10,6 +10,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
+import { pontosDaLandingPage } from "@/lib/atribuicao/ponto-de-contato";
+import { registrarPontosDeContato } from "@/lib/atribuicao/registrar";
 import { audit } from "@/lib/audit";
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { logger } from "@/lib/logger";
@@ -288,6 +290,20 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     }
     throw err;
   }
+
+  // De onde o lead veio — campanha, conjunto, anúncio, clique — em campos
+  // estruturados (`lead_touchpoints`). Último toque = os campos do formulário;
+  // primeiro toque = o que o script de rastreamento guardou na primeira visita.
+  // Não derruba a captação se falhar (ver `registrar.ts`).
+  await registrarPontosDeContato(
+    admin,
+    {
+      organizationId: source.organization_id,
+      leadId: String(lead.id),
+      contactId: contactId ?? null,
+    },
+    pontosDaLandingPage(mapped.source_metadata, mapped.primeiro_contato),
+  );
 
   await admin
     .from("webhook_sources")
