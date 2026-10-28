@@ -5,6 +5,7 @@ import { Check, Checks, Robot, WarningOctagon } from "@/lib/ui/icons";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Message } from "@/lib/types/messaging";
+import { motivoParaTela } from "@/lib/messaging/motivo-da-falha";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import {
@@ -128,9 +129,10 @@ export function MessageBubble({ message, debugCitations }: Props) {
                     <WarningOctagon size={10} weight="fill" aria-hidden /> Falhou
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {message.error_message ?? message.error_code ?? "Erro desconhecido"}
-                </TooltipContent>
+                {/* Falha de ENTREGA (a Meta aceitou e depois recusou) vem em metadata, não em
+                    error_message — sem ler os dois, a bolha dizia "Erro desconhecido" com o
+                    motivo real (ex.: pagamento inválido na conta do WhatsApp) gravado ao lado. */}
+                <TooltipContent className="max-w-xs">{motivoParaTela(message)}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
