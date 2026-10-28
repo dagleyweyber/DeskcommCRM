@@ -48,8 +48,31 @@ function lerCorpo(bruto: string): CorpoDeErro | null {
   try {
     return JSON.parse(bruto.slice(i)) as CorpoDeErro;
   } catch {
-    return null;
+    return lerCorpoCortado(bruto.slice(i));
   }
+}
+
+/**
+ * Corpo que não é JSON válido — o log guardou só o começo da resposta (o corte era
+ * menor em versões antigas). Os campos que decidem o tratamento vêm no início do
+ * objeto, então ainda dá para lê-los; sem isso o painel mostrava o JSON cru.
+ */
+function lerCorpoCortado(trecho: string): CorpoDeErro | null {
+  const numero = (campo: string): number | undefined => {
+    const m = new RegExp(`"${campo}"\\s*:\\s*(\\d+)`).exec(trecho);
+    return m ? Number(m[1]) : undefined;
+  };
+  const code = numero("code");
+  const error_subcode = numero("error_subcode");
+  if (code === undefined && error_subcode === undefined) return null;
+  const transiente = /"is_transient"\s*:\s*(true|false)/.exec(trecho);
+  return {
+    error: {
+      code,
+      error_subcode,
+      is_transient: transiente ? transiente[1] === "true" : undefined,
+    },
+  };
 }
 
 const CONHECIDOS: Record<string, { motivo: string; oQueFazer: string; deConfiguracao: boolean }> = {
@@ -67,7 +90,10 @@ const CONHECIDOS: Record<string, { motivo: string; oQueFazer: string; deConfigur
   },
   "2804066": {
     motivo: "A Meta não aceita este nome de evento para conversas de WhatsApp.",
-    oQueFazer: "Escolha outro evento para essa etapa do funil (em Funis → etapas).",
+    // "Lead" era o caso medido, e o CRM já o envia como "LeadSubmitted" desde 2026-10-28
+    // (capi.ts → nomeDoEventoPara). Recusa nova com este código é de outro evento.
+    oQueFazer:
+      "Para \"Lead\", o CRM já corrige sozinho: os envios novos vão como \"LeadSubmitted\", que a Meta aceita. Se a recusa for de outro evento, escolha outro evento para essa etapa do funil (em Funis → etapas).",
     deConfiguracao: true,
   },
   "2804010": {

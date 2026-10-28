@@ -47,4 +47,18 @@ describe("interpretaErroDaMeta", () => {
     );
     expect(e).toMatchObject({ subcode: "9999", transitorio: true, deConfiguracao: false, motivo: "Algo novo", oQueFazer: null });
   });
+
+  it("⭐ corpo CORTADO (JSON inválido) ainda é lido: subcode e is_transient vêm do começo", () => {
+    // Exatamente o que o painel mostrava cru em produção (RevitaFio Mossoró, 2026-10-28).
+    const e = interpretaErroDaMeta(
+      'http_400: {"error":{"message":"Invalid parameter","type":"OAuthException","code":100,"error_subcode":2804131,"is_transient":false,"error_user_title":"Evento de mensagem nenhuma P\\u00e1gina associada a',
+    );
+    expect(e).toMatchObject({ subcode: "2804131", transitorio: false, deConfiguracao: true });
+    expect(e.oQueFazer).toMatch(/associe este conjunto de dados/);
+  });
+
+  it("corpo cortado com token expirado (code 190) é reconhecido", () => {
+    const e = interpretaErroDaMeta('http_401: {"error":{"message":"Error validating access token","code":190,"err');
+    expect(e.motivo).toMatch(/token/);
+  });
 });
