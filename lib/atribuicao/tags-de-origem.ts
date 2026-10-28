@@ -11,7 +11,7 @@
  * • Instagram é detectado por sinal, nunca por palpite: `utm_source` instagram/ig, o
  *   link do anúncio (`www.instagram.com` — 526 dos 620 pontos de contato medidos em
  *   produção em 2026-10-28) ou o referenciador da visita.
- * • Campanha e anúncio só entram com NOME. Id numérico numa tag ("campanha:12038…")
+ * • Campanha e anúncio só entram com NOME (exato, com a vírgula do preço). Id numérico numa tag ("campanha:12038…")
  *   não diz nada a quem filtra; o nome chega depois (a Meta é consultada após o lead
  *   nascer) e a tag é acrescentada nessa hora.
  * • Canal `outro` (utm de origem que não é mídia paga) não vira tag: classificar

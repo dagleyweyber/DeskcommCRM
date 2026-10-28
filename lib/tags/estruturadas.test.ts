@@ -17,8 +17,8 @@ import {
 } from "./estruturadas";
 
 describe("limpaValor", () => {
-  it("⭐ tira a vírgula: o formulário do lead separa tags por vírgula e partiria o nome em duas", () => {
-    expect(limpaValor("Botox, Curitiba  — Out/26")).toBe("Botox Curitiba — Out/26");
+  it("⭐ MANTÉM a vírgula: nome de campanha tem preço dentro (LASER 29,90) e não pode ser deformado", () => {
+    expect(limpaValor("  🟢1546_RGA_WPP_LASER 29,90_IMAGEM   11/09 ")).toBe("🟢1546_RGA_WPP_LASER 29,90_IMAGEM 11/09");
   });
 
   it("corta no limite e não deixa espaço pendurado no fim", () => {

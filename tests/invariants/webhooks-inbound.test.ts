@@ -586,7 +586,7 @@ describe("POST /api/v1/webhooks/in/[token] (Task 6)", () => {
     const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
 
     const tags = rows(`select tags from public.crm_leads where id = '${leadId}'`)[0]!.tags as string[];
-    expect(tags).toEqual(['origem:meta-ads', 'origem:instagram', 'campanha:Botox Curitiba', 'anuncio:Vídeo 1']);
+    expect(tags).toEqual(['origem:meta-ads', 'origem:instagram', 'campanha:Botox, Curitiba', 'anuncio:Vídeo 1']);
 
     // lead.tag_added aciona automação já configurada; tag automática de origem não pode disparar.
     expect(

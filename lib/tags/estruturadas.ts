@@ -103,13 +103,18 @@ export function grupoDe(chave: string): GrupoDeTag | null {
 export const LIMITE_DO_VALOR = 80;
 
 /**
- * Valor pronto para ir na tag: sem espaço sobrando e SEM VÍRGULA — o formulário do
- * lead separa as tags por vírgula, e uma vírgula no nome da campanha a partiria em
- * duas. Vazio devolve "".
+ * Valor pronto para ir na tag: sem espaço sobrando e no limite de tamanho. Vazio
+ * devolve "".
+ *
+ * A VÍRGULA FICA. Nome de campanha tem preço dentro ("LASER 29,90" — medido em
+ * produção) e trocar por espaço deformaria o nome que a pessoa vê na Meta. A vírgula
+ * só atrapalharia o campo de texto do formulário do lead, e ele não mostra tag de grupo
+ * (`mesclaTagsLivres` as preserva à parte). Os outros campos que separam por vírgula
+ * são de CONTATO, onde tag estruturada não existe.
  */
 export function limpaValor(texto: string | null | undefined): string {
   if (!texto) return "";
-  return texto.replace(/,/g, " ").replace(/\s+/g, " ").trim().slice(0, LIMITE_DO_VALOR).trim();
+  return texto.replace(/\s+/g, " ").trim().slice(0, LIMITE_DO_VALOR).trim();
 }
 
 /** Valor aceito pelo grupo: grupo fechado só aceita o que está no vocabulário. */

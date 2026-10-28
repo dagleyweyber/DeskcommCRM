@@ -67,9 +67,9 @@ describe("tagsDeOrigem", () => {
     expect(textosDasTags(t)).toContain("campanha:da-utm");
   });
 
-  it("⭐ vírgula no nome da campanha não parte a tag em duas", () => {
-    const t = tagsDeOrigem(ponto({ campaignName: "Botox, Curitiba" }));
-    expect(textosDasTags(t)).toContain("campanha:Botox Curitiba");
+  it("⭐ o nome da campanha vai EXATO, com a vírgula do preço", () => {
+    const t = tagsDeOrigem(ponto({ campaignName: "LASER 29,90 IMAGEM" }));
+    expect(textosDasTags(t)).toContain("campanha:LASER 29,90 IMAGEM");
   });
 
   it("canal outro: nenhuma tag", () => {
