@@ -514,4 +514,62 @@ describe("POST /api/v1/webhooks/in/[token] (Task 6)", () => {
     expect(leadRows[0]!.source).toBe("webhook");
     expect(leadRows[0]!.tags).toEqual([]);
   });
+
+  it("caso 10 — ⭐ envio do script de rastreamento: lead nasce com campanha, conjunto e anúncio em lead_touchpoints", async () => {
+    const primeiro = JSON.stringify({
+      ts: "2026-10-20T12:00:00.000Z",
+      utm_source: "google",
+      gclid: "Cj0K_primeiro",
+      campaign_id: "987654321",
+    });
+    const corpo = new URLSearchParams({
+      nome: "Rastreada",
+      telefone: "11944443333",
+      utm_source: "facebook",
+      utm_campaign: "Laser Outubro",
+      campaign_id: "120211",
+      adset_id: "120222",
+      ad_id: "120233",
+      fbclid: "IwAR_ultimo",
+      fbc: "fb.1.1761566400000.IwAR_ultimo",
+      landing_url: "https://lp.exemplo/?utm_source=facebook",
+      client_user_agent: "Mozilla/5.0 (teste)",
+      dc_primeiro_contato: primeiro,
+      external_id: "dc-envio-rastreada-1",
+    }).toString();
+    const res = await POST(formReq(TOKEN_JSON, corpo), reqCtx(TOKEN_JSON));
+    expect(res.status).toBe(200);
+    const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
+
+    const pontos = rows(
+      `select canal, via, click_id_type, campaign_id, adset_id, ad_id, campaign_name, fbc, client_user_agent, occurred_at
+         from public.lead_touchpoints where lead_id = '${leadId}' order by occurred_at`,
+    );
+    expect(pontos.length).toBe(2);
+    expect(pontos[0]).toMatchObject({ canal: "google_ads", via: "landing_page", click_id_type: "gclid", campaign_id: "987654321" });
+    expect(pontos[1]).toMatchObject({
+      canal: "meta_ads",
+      click_id_type: "fbclid",
+      campaign_id: "120211",
+      adset_id: "120222",
+      ad_id: "120233",
+      campaign_name: "Laser Outubro",
+      fbc: "fb.1.1761566400000.IwAR_ultimo",
+      client_user_agent: "Mozilla/5.0 (teste)",
+    });
+
+    const lead = rows(`select custom_fields, source_metadata from public.crm_leads where id = '${leadId}'`)[0]!;
+    // dados de origem não poluem os campos do lead…
+    expect(lead.custom_fields).toEqual({});
+    // …e o ad_id continua em source_metadata: é o que a resolução de nomes da Meta e o
+    // dashboard de receita por anúncio leem.
+    expect((lead.source_metadata as Record<string, unknown>).ad_id).toBe("120233");
+    expect((lead.source_metadata as Record<string, unknown>).dc_primeiro_contato).toBeUndefined();
+  });
+
+  it("caso 11 — lead de formulário sem nenhuma origem não ganha ponto de contato inventado", async () => {
+    const res = await POST(jsonReq(TOKEN_JSON, { nome: "Sem Rastro", telefone: "11933332222" }), reqCtx(TOKEN_JSON));
+    const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
+    expect(rows(`select 1 from public.lead_touchpoints where lead_id = '${leadId}'`).length).toBe(0);
+  });
 });

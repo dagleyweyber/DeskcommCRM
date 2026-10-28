@@ -50,26 +50,22 @@ export async function registrarPontosDeContato(
   ids: { organizationId: string; leadId: string; contactId: string | null },
   pontos: readonly PontoDeContato[],
 ): Promise<{ gravados: number }> {
-  if (pontos.length === 0) return { gravados: 0 };
-  try {
-    const { error } = await db
-      .from("lead_touchpoints")
-      .insert(pontos.map((p) => linhaDoPontoDeContato(p, ids)));
-    if (error) {
+  // Uma linha por vez (são no máximo duas: primeiro e último toque). Mantém o
+  // caminho igual ao do adaptador dos testes de banco, que só insere linha única —
+  // assim o webhook e o nascimento do lead exercitam esta gravação de verdade lá.
+  let gravados = 0;
+  for (const ponto of pontos) {
+    try {
+      const { error } = await db.from("lead_touchpoints").insert(linhaDoPontoDeContato(ponto, ids));
+      if (error) throw new Error(error.message);
+      gravados += 1;
+    } catch (err) {
       logger.warn("atribuicao: falha ao gravar ponto de contato", {
         organization_id: ids.organizationId,
         lead_id: ids.leadId,
-        erro: error.message.slice(0, 200),
+        erro: err instanceof Error ? err.message.slice(0, 200) : String(err),
       });
-      return { gravados: 0 };
     }
-    return { gravados: pontos.length };
-  } catch (err) {
-    logger.warn("atribuicao: falha ao gravar ponto de contato", {
-      organization_id: ids.organizationId,
-      lead_id: ids.leadId,
-      erro: err instanceof Error ? err.message.slice(0, 200) : String(err),
-    });
-    return { gravados: 0 };
   }
+  return { gravados };
 }

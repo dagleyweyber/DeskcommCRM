@@ -207,7 +207,7 @@
   // montar o envio (FormData) no próprio evento de submit.
   // Só a instância ATIVA age: o script colado duas vezes na mesma página não pode
   // mandar o lead em dobro.
-  function ativa() { return window.DeskcommRastreio === api; }
+  function ativa() { return typeof window !== "undefined" && window.DeskcommRastreio === api; }
 
   document.addEventListener("submit", function (e) {
     if (!ativa()) return;
