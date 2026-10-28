@@ -24,6 +24,7 @@ import {
 } from "@/hooks/integrations/useMetaAdsCredentials";
 import { ConnectMetaAdsDialog } from "./_components/ConnectMetaAdsDialog";
 import { ConnectAdsReadTokenDialog } from "./_components/ConnectAdsReadTokenDialog";
+import { PainelDeEnvios } from "./_components/PainelDeEnvios";
 
 const STATUS_LABELS: Record<MetaAdsCredentialsRow["status"], string> = {
   connecting: "Conectando…",
@@ -120,6 +121,8 @@ export function MetaAdsIntegrationClient({ initialData, canWrite }: Props) {
           </AlertDialogContent>
         </AlertDialog>
       </Card>
+
+      <PainelDeEnvios />
 
       <Card className="flex flex-col items-start gap-4 p-6">
         <div className="flex w-full items-start justify-between gap-4">

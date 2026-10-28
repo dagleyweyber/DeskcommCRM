@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { MAX_ATTEMPTS } from "@/lib/event-log/drain";
 import type { HandlerResult } from "@/lib/event-log/dispatcher";
+import { interpretaErroDaMeta, type ErroDaMeta } from "@/lib/meta-ads/erro-da-meta";
 import type { SendMetaCapiResult } from "@/lib/meta-ads/send";
 import { logger } from "@/lib/logger";
 
@@ -55,8 +56,34 @@ export async function recordCapiSendResult(
     }
   }
 
+  if (result.status === "sent") {
+    // Um envio aceito prova que a conexão funciona: some o "Erro" da tela.
+    await marcaConexao(admin, organizationId, { status: "healthy", last_error: null }, ["error", "invalid"]);
+  }
+
   if (result.status !== "failed") {
     return { consumer_key: consumerKey, status: "ok" };
+  }
+
+  const erro = interpretaErroDaMeta(result.error);
+
+  // Problema de configuração afeta TODO envio da organização — a tela da integração
+  // tem de dizer, com a instrução, em vez de seguir "Conectado".
+  if (erro.deConfiguracao) {
+    await marcaConexao(
+      admin,
+      organizationId,
+      { status: "error", last_error: [erro.motivo, erro.oQueFazer].filter(Boolean).join(" ") },
+      ["healthy", "connecting", "error"],
+    );
+  }
+
+  // A Meta disse que reenviar não adianta (`is_transient: false`): não reenvia — cinco
+  // tentativas idênticas só enchiam o log (140 em 7 dias para 25 vendas da Caruaru). Um
+  // aviso por MOTIVO na Central, não um por lead: vinte avisos iguais escondem o que fazer.
+  if (!erro.transitorio) {
+    await avisaPorMotivo(admin, organizationId, eventName, erro);
+    return { consumer_key: consumerKey, status: "skipped", detail: `meta_recusou:${erro.subcode ?? "sem_codigo"}` };
   }
 
   logger.warn("[meta-ads] envio ao Meta CAPI falhou", {
@@ -79,7 +106,7 @@ export async function recordCapiSendResult(
       body:
         `Tentamos enviar o evento "${eventName}" pro Meta Ads ${MAX_ATTEMPTS} vezes e todas falharam. ` +
         `Esse lead não está contando nos dados de otimização de campanha do Meta. ` +
-        `Último erro: ${result.error ?? "desconhecido"}`,
+        `Motivo: ${erro.motivo}${erro.oQueFazer ? ` O que fazer: ${erro.oQueFazer}` : ""}`,
       ref_kind: "crm_lead",
       ref_id: leadId,
     });
@@ -94,4 +121,69 @@ export async function recordCapiSendResult(
   }
 
   return { consumer_key: consumerKey, status: "error", detail: result.error };
+}
+
+async function marcaConexao(
+  admin: SupabaseClient,
+  organizationId: string,
+  valores: { status: "healthy" | "error"; last_error: string | null },
+  seStatusEm: string[],
+): Promise<void> {
+  try {
+    const { error } = await admin
+      .from("tenant_meta_ads_credentials")
+      .update(valores)
+      .eq("organization_id", organizationId)
+      .in("status", seStatusEm);
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    logger.warn("[meta-ads] falha ao atualizar o status da conexão", {
+      organization_id: organizationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Um aviso aberto por (organização, motivo) — o próximo lead com o mesmo motivo não cria outro. */
+async function avisaPorMotivo(
+  admin: SupabaseClient,
+  organizationId: string,
+  eventName: string,
+  erro: ErroDaMeta,
+): Promise<void> {
+  const title = `Meta Ads recusou conversões: ${erro.motivo}`.slice(0, 200);
+  try {
+    const { data: aberto } = await admin
+      .from("agent_inbox_items")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("kind", "meta_capi_send_exhausted")
+      .eq("ref_kind", "organization")
+      .eq("status", "open")
+      .eq("title", title)
+      .limit(1)
+      .maybeSingle();
+    if (aberto) return;
+
+    const { error } = await admin.from("agent_inbox_items").insert({
+      organization_id: organizationId,
+      kind: "meta_capi_send_exhausted",
+      severity: erro.deConfiguracao ? "critical" : "warn",
+      title,
+      body:
+        `A Meta recusou o evento "${eventName}" e avisou que reenviar não resolve. ` +
+        `Enquanto isso não for corrigido, as conversões deste tipo não ajudam a otimizar as campanhas.` +
+        (erro.oQueFazer ? ` O que fazer: ${erro.oQueFazer}` : "") +
+        ` Os envios aceitos e recusados aparecem em Configurações → Integrações → Meta Ads.`,
+      ref_kind: "organization",
+      ref_id: organizationId,
+    });
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    logger.error("[meta-ads] aviso na Central (recusa definitiva) falhou", {
+      organization_id: organizationId,
+      event_name: eventName,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

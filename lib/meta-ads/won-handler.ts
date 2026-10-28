@@ -52,8 +52,10 @@ export async function handleLeadWonForMetaCapi(
     valueCents,
     currency,
     phone: (contact?.phone_number as string | null) ?? null,
+    email: (contact?.email as string | null) ?? null,
+    externalId: (contact?.id as string | null) ?? null,
     sourceMetadata: (lead.source_metadata as Record<string, unknown> | null) ?? null,
-  });
+  }, { leadId: lead.id as string });
 
   return recordCapiSendResult(admin, {
     consumerKey: META_CAPI_PURCHASE_CONSUMER_KEY,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { buildCapiPayload } from "./capi";
+import { buildCapiPayload, nomeDoEventoPara } from "./capi";
 
 const BASE = {
   eventName: "Purchase",
@@ -68,21 +68,35 @@ describe("buildCapiPayload", () => {
     expect(p.user_data.page_id).toBeUndefined();
   });
 
-  it("⭐ sem ctwa_clid mas com fbc/fbp → action_source website, campos passam direto", () => {
+  it("⭐ sem ctwa_clid, com fbc/fbp E navegador → action_source website, com client_user_agent e event_source_url", () => {
     const p = buildCapiPayload({
       ...BASE,
-      sourceMetadata: { fbc: "fb.1.111.222", fbp: "fb.1.333.444" },
+      sourceMetadata: {
+        fbc: "fb.1.111.222",
+        fbp: "fb.1.333.444",
+        client_user_agent: "Mozilla/5.0",
+        landing_url: "https://lp.exemplo/oferta",
+      },
     });
     expect(p.action_source).toBe("website");
     expect(p.messaging_channel).toBeUndefined();
     expect(p.user_data.fbc).toBe("fb.1.111.222");
     expect(p.user_data.fbp).toBe("fb.1.333.444");
+    expect(p.user_data.client_user_agent).toBe("Mozilla/5.0");
+    expect(p.event_source_url).toBe("https://lp.exemplo/oferta");
   });
 
-  it("fbclid sozinho (sem fbc) vira fbc sintético no formato fb.1.<time>.<fbclid>", () => {
+  it("⭐ fbc/fbp SEM o navegador do visitante → system_generated (site exige client_user_agent), mantendo fbc/fbp", () => {
+    const p = buildCapiPayload({ ...BASE, sourceMetadata: { fbc: "fb.1.111.222", fbp: "fb.1.333.444" } });
+    expect(p.action_source).toBe("system_generated");
+    expect(p.user_data.fbc).toBe("fb.1.111.222");
+    expect(p.user_data.client_user_agent).toBeUndefined();
+    expect(p.event_source_url).toBeUndefined();
+  });
+
+  it("⭐ fbclid sozinho vira fbc em MILISSEGUNDOS (formato fb.1.<ms>.<fbclid>), não em segundos", () => {
     const p = buildCapiPayload({ ...BASE, sourceMetadata: { fbclid: "IwAR123" } });
-    expect(p.action_source).toBe("website");
-    expect(p.user_data.fbc).toBe(`fb.1.${BASE.eventTimeSeconds}.IwAR123`);
+    expect(p.user_data.fbc).toBe(`fb.1.${BASE.eventTimeSeconds * 1000}.IwAR123`);
   });
 
   it("⭐ sem nenhuma atribuição → action_source system_generated, só telefone", () => {
@@ -134,5 +148,58 @@ describe("buildCapiPayload", () => {
       sourceMetadata: { ad_click_id: "algo", ad_click_id_type: "outro_tipo" },
     });
     expect(p.action_source).toBe("system_generated");
+  });
+
+  it("⭐ 'Lead' em conversa de WhatsApp sai como 'LeadSubmitted' (a Meta recusa 'Lead' em business_messaging — subcode 2804066)", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      eventName: "Lead",
+      sourceMetadata: { ad_click_id: "AbC", ad_click_id_type: "ctwa_clid" },
+    });
+    expect(p.action_source).toBe("business_messaging");
+    expect(p.event_name).toBe("LeadSubmitted");
+  });
+
+  it("'Lead' fora de conversa de WhatsApp continua 'Lead'", () => {
+    expect(buildCapiPayload({ ...BASE, eventName: "Lead", sourceMetadata: {} }).event_name).toBe("Lead");
+    expect(nomeDoEventoPara("website", "Lead")).toBe("Lead");
+    expect(nomeDoEventoPara("business_messaging", "Purchase")).toBe("Purchase");
+  });
+
+  it("⭐ o ponto de contato (Fase 1) tem precedência: fbc gravado no clique e navegador do visitante", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { fbclid: "VELHO" },
+      atribuicao: {
+        clickIdType: "fbclid",
+        clickId: "IwAR_novo",
+        fbc: null,
+        fbp: "fb.1.1.2",
+        clientUserAgent: "Mozilla/5.0 (LP)",
+        eventSourceUrl: "https://lp.exemplo/",
+        clickTimeMs: 1_761_566_400_123,
+      },
+    });
+    expect(p.action_source).toBe("website");
+    expect(p.user_data.fbc).toBe("fb.1.1761566400123.IwAR_novo");
+    expect(p.user_data.client_user_agent).toBe("Mozilla/5.0 (LP)");
+    expect(p.event_source_url).toBe("https://lp.exemplo/");
+  });
+
+  it("⭐ e-mail e id do contato entram hasheados (SHA-256, e-mail normalizado) fora do ramo de mensagem", () => {
+    const p = buildCapiPayload({ ...BASE, sourceMetadata: {}, email: "  Ana@Exemplo.COM ", externalId: "contato-1" });
+    expect(p.user_data.em).toEqual([createHash("sha256").update("ana@exemplo.com").digest("hex")]);
+    expect(p.user_data.external_id).toEqual([createHash("sha256").update("contato-1").digest("hex")]);
+  });
+
+  it("no ramo de mensagem (ctwa_clid) não manda e-mail nem id externo — campo a mais é risco de recusa", () => {
+    const p = buildCapiPayload({
+      ...BASE,
+      sourceMetadata: { ad_click_id: "AbC", ad_click_id_type: "ctwa_clid" },
+      email: "ana@exemplo.com",
+      externalId: "contato-1",
+    });
+    expect(p.user_data.em).toBeUndefined();
+    expect(p.user_data.external_id).toBeUndefined();
   });
 });

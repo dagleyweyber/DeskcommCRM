@@ -59,14 +59,16 @@ export async function handleStageChangedForMetaCapi(
   }
 
   let phone: string | null = null;
+  let email: string | null = null;
   if (lead.contact_id) {
     const { data: contact } = await admin
       .from("contacts")
-      .select("phone_number")
+      .select("phone_number, email")
       .eq("id", lead.contact_id)
       .eq("organization_id", row.organization_id)
       .maybeSingle();
     phone = (contact?.phone_number as string | null) ?? null;
+    email = (contact?.email as string | null) ?? null;
   }
 
   // Sem `valueCents`/`currency` de propósito: Schedule/Lead/etc. não carregam
@@ -77,8 +79,10 @@ export async function handleStageChangedForMetaCapi(
     eventId: row.id,
     eventTimeSeconds: Math.floor(new Date(row.created_at ?? new Date().toISOString()).getTime() / 1000),
     phone,
+    email,
+    externalId: (lead.contact_id as string | null) ?? null,
     sourceMetadata: (lead.source_metadata as Record<string, unknown> | null) ?? null,
-  });
+  }, { leadId: lead.id as string });
 
   return recordCapiSendResult(admin, {
     consumerKey: META_CAPI_STAGE_CONSUMER_KEY,

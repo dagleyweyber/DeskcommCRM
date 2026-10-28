@@ -10,7 +10,7 @@
  * Meta de verdade) — em produção sempre usa o `fetch` global.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildCapiPayload, type CapiPayloadInput } from "@/lib/meta-ads/capi";
+import { buildCapiPayload, type AtribuicaoParaCapi, type CapiPayloadInput } from "@/lib/meta-ads/capi";
 import { resolveMetaAdsCredentials } from "@/lib/meta-ads/credentials";
 
 const GRAPH_API_VERSION = "v21.0";
@@ -25,16 +25,25 @@ export async function sendMetaCapiEvent(
   admin: SupabaseClient,
   organizationId: string,
   input: CapiPayloadInput,
-  opts: { fetchImpl?: typeof fetch } = {},
+  opts: { fetchImpl?: typeof fetch; leadId?: string | null } = {},
 ): Promise<SendMetaCapiResult> {
   const creds = await resolveMetaAdsCredentials(admin, organizationId);
   if (!creds) return { status: "skipped", error: "no_credentials" };
+
+  // De onde o lead veio, como a Fase 1 do rastreamento gravou (clique, cookies do
+  // Pixel com a hora certa, navegador e página). Sem ponto de contato, o montador cai
+  // em `source_metadata` como sempre.
+  const atribuicao = opts.leadId
+    ? await atribuicaoParaCapi(admin, organizationId, opts.leadId)
+    : null;
+  input = { ...input, atribuicao: input.atribuicao ?? atribuicao };
 
   // Page ID do criativo (cache da Fase E2, `lib/meta-ads/ad-hierarchy.ts`) —
   // sem ele a Meta rejeita todo evento `business_messaging` (subcode
   // 2804116). Só consulta quando há `ad_id`: a maioria dos envios (website/
   // system_generated) nem usa esse campo.
-  const adId = (input.sourceMetadata as Record<string, unknown> | null | undefined)?.ad_id;
+  const adId =
+    (input.sourceMetadata as Record<string, unknown> | null | undefined)?.ad_id ?? atribuicao?.adId;
   let pageId: string | null = null;
   if (typeof adId === "string" && adId) {
     const { data } = await admin
@@ -56,7 +65,9 @@ export async function sendMetaCapiEvent(
   // consulta no ramo ctwa_clid (mesmo gate de `buildCapiPayload`): website/
   // system_generated nunca usam esse campo, não vale o round trip.
   const meta = (input.sourceMetadata as Record<string, unknown> | null | undefined) ?? {};
-  const isCtwa = meta.ad_click_id_type === "ctwa_clid" && typeof meta.ad_click_id === "string" && meta.ad_click_id;
+  const isCtwa =
+    (meta.ad_click_id_type === "ctwa_clid" && typeof meta.ad_click_id === "string" && meta.ad_click_id) ||
+    (input.atribuicao?.clickIdType === "ctwa_clid" && !!input.atribuicao.clickId);
   let whatsappBusinessAccountId: string | null = null;
   if (isCtwa) {
     const { data: wabaRow } = await admin
@@ -95,5 +106,42 @@ export async function sendMetaCapiEvent(
     return { status: "failed", error: `http_${res.status}: ${text.slice(0, 2000)}` };
   } catch (err) {
     return { status: "failed", error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * O ponto de contato mais recente que serve para casar a conversão na Meta: o que
+ * tem clique, `fbc` ou `fbp`. Leitura que falha não derruba o envio — o evento sai
+ * com o que `source_metadata` tiver, como antes da Fase 1.
+ */
+export async function atribuicaoParaCapi(
+  admin: SupabaseClient,
+  organizationId: string,
+  leadId: string,
+): Promise<(AtribuicaoParaCapi & { adId: string | null }) | null> {
+  try {
+    const { data, error } = await admin
+      .from("lead_touchpoints")
+      .select("click_id_type, click_id, fbc, fbp, client_user_agent, landing_url, ad_id, occurred_at")
+      .eq("organization_id", organizationId)
+      .eq("lead_id", leadId)
+      .order("occurred_at", { ascending: false })
+      .limit(10);
+    if (error || !data) return null;
+    const linha = (data as Array<Record<string, string | null>>).find((l) => l.click_id || l.fbc || l.fbp);
+    if (!linha) return null;
+    const ms = linha.occurred_at ? Date.parse(linha.occurred_at) : NaN;
+    return {
+      clickIdType: linha.click_id_type ?? null,
+      clickId: linha.click_id ?? null,
+      fbc: linha.fbc ?? null,
+      fbp: linha.fbp ?? null,
+      clientUserAgent: linha.client_user_agent ?? null,
+      eventSourceUrl: linha.landing_url ?? null,
+      clickTimeMs: Number.isFinite(ms) ? ms : null,
+      adId: linha.ad_id ?? null,
+    };
+  } catch {
+    return null;
   }
 }
