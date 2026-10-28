@@ -107,6 +107,13 @@
     salvar(estado);
   }
 
+  function mesmoAnuncio(a, b) {
+    for (var i = 0; i < PARAMETROS.length; i++) {
+      if ((a[PARAMETROS[i]] || null) !== (b[PARAMETROS[i]] || null)) return false;
+    }
+    return true;
+  }
+
   function dados() {
     var d = {};
     var ultimo = estado.ultimo || {};
@@ -121,7 +128,9 @@
     if (!d.landing_url) d.landing_url = window.location.href.slice(0, 1000);
     d.page_url = window.location.href.slice(0, 1000);
     if (navigator.userAgent) d.client_user_agent = navigator.userAgent.slice(0, 500);
-    if (estado.primeiro && estado.ultimo && estado.primeiro.ts !== estado.ultimo.ts) {
+    // Compara os PARÂMETROS do anúncio, não o horário: duas visitas no mesmo
+    // milissegundo com anúncios diferentes continuam sendo dois toques.
+    if (estado.primeiro && estado.ultimo && !mesmoAnuncio(estado.primeiro, estado.ultimo)) {
       d.dc_primeiro_contato = JSON.stringify(estado.primeiro);
     }
     return d;
