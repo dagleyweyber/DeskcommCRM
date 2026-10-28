@@ -6,6 +6,9 @@ import { useLeadTimeline } from "@/hooks/leads/useLeadTimeline";
 import type { Lead } from "@/lib/types/leads";
 import { ConversaNoDossie } from "./ConversaNoDossie";
 import { OrigemDoAnuncio } from "./OrigemDoAnuncio";
+import { TemperaturaDoLead } from "./TemperaturaDoLead";
+import { ChipDeTag } from "@/components/tags/ChipDeTag";
+import { GRUPO, separaTags } from "@/lib/tags/estruturadas";
 import { LeadFieldsForm } from "./LeadFieldsForm";
 import { ScoreSlot } from "./ScoreSlot";
 import { LeadTimeline } from "./LeadTimeline";
@@ -128,6 +131,14 @@ export function LeadDossier({
             Probabilidade recalculada automaticamente · {new Date(score.at).toLocaleString("pt-BR")}
           </p>
         )}
+
+        {/* Classificação do lead: temperatura (à mão) e origem (automática). */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-border py-2.5 text-xs">
+          <TemperaturaDoLead lead={lead} pipelineId={pipelineId} />
+          {separaTags(lead.tags).porGrupo[GRUPO.ORIGEM].map((v) => (
+            <ChipDeTag key={v} grupo={GRUPO.ORIGEM} valor={v} />
+          ))}
+        </div>
 
         <ConversaNoDossie conversa={lead.conversa} />
 

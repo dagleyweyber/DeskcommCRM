@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Rastreamento de campanha — de qual campanha, conjunto e anúncio o lead veio",
-    "subtitle": "Fase 1: os dois caminhos de entrada (anúncio para WhatsApp e landing page) gravam o mesmo ponto de contato estruturado",
+    "subtitle": "Fases 1 a 3: dois caminhos de entrada gravam o mesmo ponto de contato; a origem vira tag estruturada (grupo:valor) e a temperatura é marcada à mão",
     "output": "rastreamento-de-campanha.html",
     "quality_profile": "standard"
   },
@@ -32,7 +32,12 @@
     { "id": "dashboard", "lane": "consumidor", "col": 5, "type": "backend", "label": "fn_sales_dashboard (receita por anúncio)", "sublabel": "lê source_metadata.ad_id — agora também de landing page" },
     { "id": "rota", "lane": "consumidor", "col": 3, "type": "backend", "label": "GET /api/v1/leads/[id]/attribution", "sublabel": "montaAtribuicao: une pontos + hierarquia da Meta" },
     { "id": "dossie", "lane": "humano", "col": 3, "type": "frontend", "label": "Dossiê do lead → OrigemDoAnuncio", "sublabel": "campanha · conjunto · anúncio · 1º contato" },
-    { "id": "fonte", "lane": "humano", "col": 2, "type": "frontend", "label": "Webhooks → SourceDetail", "sublabel": "script pronto + parâmetros de URL Meta/Google" }
+    { "id": "fonte", "lane": "humano", "col": 2, "type": "frontend", "label": "Webhooks → SourceDetail", "sublabel": "script pronto + parâmetros de URL Meta/Google" },
+    { "id": "tags_catalogo", "lane": "regra", "col": 2, "type": "backend", "label": "lib/tags/estruturadas.ts", "sublabel": "grupos: Temperatura · Origem · Campanha · Anúncio — vocabulário e exclusividade" },
+    { "id": "tags_origem", "lane": "regra", "col": 5, "type": "backend", "label": "lib/atribuicao/tags-de-origem.ts + aplicar-tags.ts", "sublabel": "1º toque ganha · idempotente · não emite lead.tag_added · nunca lança" },
+    { "id": "tags_lead", "lane": "dados", "col": 2, "type": "database", "label": "crm_leads.tags (grupo:valor)", "sublabel": "mesmo text[] de sempre — sem migration; tag comum continua comum" },
+    { "id": "tags_uso", "lane": "consumidor", "col": 2, "type": "backend", "label": "Público de campanha · automações · MCP", "sublabel": "contains(tags) e lead.tag_added já leem este campo" },
+    { "id": "temperatura", "lane": "humano", "col": 4, "type": "frontend", "label": "TemperaturaDoLead · bolinha no card · filtro por grupo", "sublabel": "Quente/Morno/Frio à mão; origem como chip no dossiê" }
   ],
   "edges": [
     { "id": "e1", "from": "anuncio", "to": "lp", "label": "clique com ids na URL" },
@@ -51,7 +56,17 @@
     { "id": "e14", "from": "rota", "to": "dossie", "label": "useAtribuicaoDoLead" },
     { "id": "e15", "from": "source_metadata", "to": "capi", "label": "fbc/fbp/ctwa_clid → conversões" },
     { "id": "e16", "from": "source_metadata", "to": "dashboard", "label": "receita por anúncio" },
-    { "id": "e17", "from": "fonte", "to": "script", "label": "o cliente copia o script e os parâmetros" }
+    { "id": "e17", "from": "fonte", "to": "script", "label": "o cliente copia o script e os parâmetros" },
+    { "id": "e18", "from": "registrar", "to": "tags_origem", "label": "depois de gravar o ponto, aplica as tags" },
+    { "id": "e19", "from": "touchpoints", "to": "tags_origem", "label": "lê o 1º ponto de mídia do lead" },
+    { "id": "e20", "from": "hierarquia", "to": "tags_origem", "label": "nome de campanha/anúncio chega depois (hierarchy-handler)" },
+    { "id": "e21", "from": "tags_catalogo", "to": "tags_origem", "label": "vocabulário e regras do grupo" },
+    { "id": "e22", "from": "tags_origem", "to": "tags_lead", "label": "update de tags (service_role, filtra a organização)" },
+    { "id": "e23", "from": "tags_lead", "to": "temperatura", "label": "chips, bolinha e filtro" },
+    { "id": "e24", "from": "temperatura", "to": "tags_lead", "label": "PATCH /leads/:id — marca à mão" },
+    { "id": "e25", "from": "tags_lead", "to": "tags_uso", "label": "contains(tags) e lead.tag_added" },
+    { "id": "e26", "from": "tags_catalogo", "to": "temperatura", "label": "rótulos, tons e valores aceitos" },
+    { "id": "e27", "from": "tags_uso", "to": "tags_lead", "label": "ação add_tag das automações também escreve" }
   ],
   "cards": [
     {
@@ -76,6 +91,16 @@
       "items": [
         "o id do anúncio do Google vai em `creative`, nunca em `ad_id`: ad_id em source_metadata dispara a resolução pela API da Meta",
         "o identificador do clique não vai para a tela — é dado de envio, não de leitura"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Fase 3 — tags estruturadas",
+      "items": [
+        "origem, campanha e anúncio são automáticas e NÃO emitem lead.tag_added: uma automação já configurada não pode disparar para cada lead que ganha origem (nem no preenchimento dos antigos)",
+        "primeiro toque ganha e nada é sobrescrito — inclusive correção manual; os toques seguintes continuam em lead_touchpoints",
+        "Origem é aditiva: anúncio do Instagram = Meta Ads + Instagram (526 de 620 pontos medidos em produção têm link instagram.com)",
+        "laço de retorno: tag errada se corrige à mão e o sistema respeita; falha ao aplicar vai ao log (atribuicao: falha ao aplicar tags de origem). Sem atividade na timeline de propósito: é classificação derivada de lead_touchpoints, que é o registro"
       ]
     }
   ]

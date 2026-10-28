@@ -565,11 +565,39 @@ describe("POST /api/v1/webhooks/in/[token] (Task 6)", () => {
     // dashboard de receita por anúncio leem.
     expect((lead.source_metadata as Record<string, unknown>).ad_id).toBe("120233");
     expect((lead.source_metadata as Record<string, unknown>).dc_primeiro_contato).toBeUndefined();
+
+    // Primeiro toque (Google) manda na origem: a tag diz de onde o lead VEIO.
+    const tags = rows(`select tags from public.crm_leads where id = '${leadId}'`)[0]!.tags as string[];
+    expect(tags).toEqual(['origem:google-ads']);
+  });
+
+  it("caso 12 — ⭐ origem vira tag (Meta Ads + Instagram, campanha, anúncio) SEM disparar lead.tag_added", async () => {
+    const corpo = new URLSearchParams({
+      nome: "Veio do Insta",
+      telefone: "11922221111",
+      utm_source: "instagram",
+      utm_campaign: "Botox, Curitiba",
+      utm_content: "Vídeo 1",
+      fbclid: "IwAR_insta",
+      external_id: "dc-envio-insta-1",
+    }).toString();
+    const res = await POST(formReq(TOKEN_JSON, corpo), reqCtx(TOKEN_JSON));
+    expect(res.status).toBe(200);
+    const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
+
+    const tags = rows(`select tags from public.crm_leads where id = '${leadId}'`)[0]!.tags as string[];
+    expect(tags).toEqual(['origem:meta-ads', 'origem:instagram', 'campanha:Botox Curitiba', 'anuncio:Vídeo 1']);
+
+    // lead.tag_added aciona automação já configurada; tag automática de origem não pode disparar.
+    expect(
+      rows(`select 1 from public.event_log where event_type = 'lead.tag_added' and entity_id = '${leadId}'`).length,
+    ).toBe(0);
   });
 
   it("caso 11 — lead de formulário sem nenhuma origem não ganha ponto de contato inventado", async () => {
     const res = await POST(jsonReq(TOKEN_JSON, { nome: "Sem Rastro", telefone: "11933332222" }), reqCtx(TOKEN_JSON));
     const leadId = ((await res.json()) as { data: { lead_id: string } }).data.lead_id;
     expect(rows(`select 1 from public.lead_touchpoints where lead_id = '${leadId}'`).length).toBe(0);
+    expect(rows(`select tags from public.crm_leads where id = '${leadId}'`)[0]!.tags).toEqual([]);
   });
 });

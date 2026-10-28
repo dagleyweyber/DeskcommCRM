@@ -26,9 +26,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { EventHandler, EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
 import { resolveMetaAdsReadToken } from "@/lib/meta-ads/credentials";
 import { resolveAdHierarchy } from "@/lib/meta-ads/ad-hierarchy";
+import { aplicarTagsDeOrigem } from "@/lib/atribuicao/aplicar-tags";
 import { logger } from "@/lib/logger";
 
 export const META_ADS_HIERARCHY_CONSUMER_KEY = "meta-ads-resolve-hierarchy";
+
+async function etiquetaOrigem(admin: SupabaseClient, row: EventRow): Promise<void> {
+  if (!row.entity_id) return;
+  await aplicarTagsDeOrigem(admin, { organizationId: row.organization_id, leadId: row.entity_id });
+}
 
 export async function handleLeadCreatedForAdHierarchy(
   admin: SupabaseClient,
@@ -52,6 +58,8 @@ export async function handleLeadCreatedForAdHierarchy(
     .eq("ad_id", adId)
     .maybeSingle();
   if (cached && !cached.last_error) {
+    // Nome já conhecido (outro lead do mesmo anúncio o buscou): só falta virar tag.
+    await etiquetaOrigem(admin, row);
     return { consumer_key: META_ADS_HIERARCHY_CONSUMER_KEY, status: "skipped", detail: "already_cached" };
   }
 
@@ -92,6 +100,10 @@ export async function handleLeadCreatedForAdHierarchy(
       error: result.error,
     });
   }
+
+  // O nome da campanha e do anúncio acabou de chegar: acrescenta `campanha:` e
+  // `anuncio:` no lead (a origem já foi posta quando ele nasceu).
+  await etiquetaOrigem(admin, row);
 
   return { consumer_key: META_ADS_HIERARCHY_CONSUMER_KEY, status: "ok" };
 }

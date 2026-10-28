@@ -14,6 +14,7 @@ import { useUser } from "@/hooks/auth/AuthProvider";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAssignableAgents } from "@/hooks/kanban/useAssignableAgents";
 import { sourceLabel } from "@/lib/leads/lead-form-shared";
+import { rotuloDaTag, secoesDeFiltro } from "@/lib/tags/estruturadas";
 import type { Lead, OwnerKind } from "@/lib/types/leads";
 import { OwnerBadge } from "./OwnerBadge";
 import {
@@ -67,11 +68,9 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
-  const tagOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const l of leads) for (const t of l.tags) set.add(t);
-    return Array.from(set).sort();
-  }, [leads]);
+  // Por grupo (Temperatura, Origem, Campanha, Anúncio, outras) — só o que algum lead do board tem.
+  const tagSections = useMemo(() => secoesDeFiltro(leads.flatMap((l) => l.tags)), [leads]);
+  const hasTags = tagSections.length > 0;
 
   // Mesma lógica do tag: opções vêm de quem REALMENTE aparece neste board, não
   // de uma lista fixa — `source` é vocabulário aberto (o sistema grava
@@ -132,7 +131,7 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
   const statusLabel =
     STATUS_OPTIONS.find((o) => o.value === (filters.status ?? "all"))?.label ?? "Todos";
 
-  const tagLabel = filters.tag ?? "Tag: todas";
+  const tagLabel = filters.tag ? rotuloDaTag(filters.tag) : "Tag: todas";
 
   const sourceLabelText = filters.source ? sourceLabel(filters.source) : "Origem: todas";
 
@@ -252,19 +251,25 @@ export function FilterBar({ filters, onChange, leads }: FilterBarProps) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" disabled={tagOptions.length === 0}>
+          <Button variant="outline" size="sm" disabled={!hasTags}>
             {tagLabel}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
+        <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
           <DropdownMenuItem onClick={() => onChange({ ...filters, tag: undefined })}>
             Todas
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          {tagOptions.map((t) => (
-            <DropdownMenuItem key={t} onClick={() => onChange({ ...filters, tag: t })}>
-              {t}
-            </DropdownMenuItem>
+          {tagSections.map((sec, idx) => (
+            <div key={sec.grupo ?? "livres"}>
+              {idx > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuLabel>{sec.rotulo}</DropdownMenuLabel>
+              {sec.itens.map((it) => (
+                <DropdownMenuItem key={it.tag} onClick={() => onChange({ ...filters, tag: it.tag })}>
+                  {it.rotulo}
+                </DropdownMenuItem>
+              ))}
+            </div>
           ))}
         </DropdownMenuContent>
       </DropdownMenu>

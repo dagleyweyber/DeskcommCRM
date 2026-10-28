@@ -2,6 +2,8 @@
 import { Draggable } from "@hello-pangea/dnd";
 import type { MouseEvent } from "react";
 import { cn } from "@/lib/utils";
+import { CLASSE_DO_PONTO } from "@/components/tags/ChipDeTag";
+import { GRUPO, rotuloDoValor, tomDoValor, valoresDoGrupo } from "@/lib/tags/estruturadas";
 import type { Lead } from "@/lib/types/leads";
 import { resolveCardState, stageAgeLabel, type CardInput } from "@/lib/kanban/card-state";
 import { KanbanCardActions } from "./KanbanCardActions";
@@ -72,6 +74,7 @@ export function KanbanCard({
   const value = formatBRL(card.valueCents, card.currency);
   const state = resolveCardState(card);
   const age = stageAgeLabel(card.hoursInStage);
+  const temperatura = valoresDoGrupo(card.tags, GRUPO.TEMPERATURA)[0] ?? null;
 
   // Clique ABRE o dossiê; ctrl/cmd+clique SELECIONA. "Clicar abre" é a
   // convenção mais forte, e seleção múltipla é recurso de poder, que tolera
@@ -137,6 +140,15 @@ export function KanbanCard({
           {/* ① identidade — altura FIXA de 2 linhas, com ou sem texto longo. */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-start gap-1.5">
+              {temperatura && (
+                // Temperatura marcada à mão: mesma bolinha de 6px da tag canônica, sem altura extra (Lei A).
+                <span
+                  className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", CLASSE_DO_PONTO[tomDoValor(GRUPO.TEMPERATURA, temperatura)])}
+                  title={`Temperatura: ${rotuloDoValor(GRUPO.TEMPERATURA, temperatura)}`}
+                  role="img"
+                  aria-label={`Temperatura: ${rotuloDoValor(GRUPO.TEMPERATURA, temperatura)}`}
+                />
+              )}
               {card.canonicalTag && (
                 <span
                   className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent"

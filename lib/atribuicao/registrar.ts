@@ -9,6 +9,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { logger } from "@/lib/logger";
+import { aplicarTagsDeOrigem } from "./aplicar-tags";
 import type { PontoDeContato } from "./ponto-de-contato";
 
 export function linhaDoPontoDeContato(
@@ -67,5 +68,9 @@ export async function registrarPontosDeContato(
       });
     }
   }
+  // A origem vira tag (`origem:`, `campanha:`, `anuncio:`) junto com o ponto de
+  // contato: quem grava um, grava o outro, e um caminho novo de entrada não esquece.
+  // O nome da campanha de anúncio de WhatsApp só chega depois — ver `hierarchy-handler`.
+  if (gravados > 0) await aplicarTagsDeOrigem(db, { organizationId: ids.organizationId, leadId: ids.leadId });
   return { gravados };
 }

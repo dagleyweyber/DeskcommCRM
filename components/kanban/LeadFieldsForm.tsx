@@ -24,6 +24,7 @@ import type { Lead } from "@/lib/types/leads";
 import { updateLeadSchema, type UpdateLeadInput } from "@/lib/schemas/leads";
 import { LEAD_SOURCES, NO_OWNER, normalizePhoneBR } from "@/lib/leads/lead-form-shared";
 import { parseReaisToCents } from "@/lib/money";
+import { mesclaTagsLivres, separaTags } from "@/lib/tags/estruturadas";
 import { EcoDoValor } from "./EcoDoValor";
 
 interface FormShape {
@@ -142,7 +143,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       title: lead.title,
       description: lead.description ?? "",
       valueReais: centsToReais(lead.value_cents),
-      tagsRaw: (lead.tags ?? []).join(", "),
+      tagsRaw: separaTags(lead.tags ?? []).livres.join(", "),
       expected_close_date: lead.expected_close_date ?? "",
       source: lead.source,
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
@@ -158,7 +159,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
       title: lead.title,
       description: lead.description ?? "",
       valueReais: centsToReais(lead.value_cents),
-      tagsRaw: (lead.tags ?? []).join(", "),
+      tagsRaw: separaTags(lead.tags ?? []).livres.join(", "),
       expected_close_date: lead.expected_close_date ?? "",
       source: lead.source,
       produtoInteresse: produtoInteresseDe(lead.custom_fields),
@@ -184,10 +185,14 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
   }, [lead.id, contact.data]);
 
   async function onSubmit(values: FormShape) {
-    const tags = values.tagsRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    // O campo de texto só tem as tags livres; origem, campanha e temperatura ficam como estão.
+    const tags = mesclaTagsLivres(
+      lead.tags ?? [],
+      values.tagsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
 
     const reais = values.valueReais.trim();
     let valueCents: number | null = null;
@@ -439,7 +444,7 @@ export function LeadFieldsForm({ lead, pipelineId, onSaved, onCancel }: Props) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="tagsRaw">Tags (separadas por vírgula)</Label>
+          <Label htmlFor="tagsRaw">Outras tags (separadas por vírgula)</Label>
           <Input id="tagsRaw" placeholder="vip, recompra" {...form.register("tagsRaw")} />
         </div>
 
