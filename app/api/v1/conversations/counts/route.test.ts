@@ -47,8 +47,10 @@ beforeEach(() => {
       this.filtros.push([c, v]);
       return this;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    then(res: any, rej: any) {
+    then<R1 = unknown, R2 = never>(
+      res?: ((v: unknown) => R1 | PromiseLike<R1>) | null,
+      rej?: ((e: unknown) => R2 | PromiseLike<R2>) | null,
+    ): PromiseLike<R1 | R2> {
       return Promise.resolve({ count: 7, error: null }).then(res, rej);
     }
   }

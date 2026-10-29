@@ -887,7 +887,7 @@ describe("funil de entrada por número (migration 0204)", () => {
   async function criarCanal(id: string, org: string, funil: string | null): Promise<void> {
     await pool.query(
       `insert into channel_sessions (id, organization_id, waha_session_name, status, webhook_secret_encrypted, entry_pipeline_id)
-       values ($1, $2, $3, 'WORKING', '\x00'::bytea, $4) on conflict (id) do nothing`,
+       values ($1, $2, $3, 'WORKING', '\\x00'::bytea, $4) on conflict (id) do nothing`,
       [id, org, `fe-${id.slice(-4)}`, funil],
     );
   }

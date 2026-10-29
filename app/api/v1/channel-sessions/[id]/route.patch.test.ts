@@ -86,8 +86,10 @@ function montarDb() {
     single() {
       return Promise.resolve(this.resolver());
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    then(res: any, rej: any) {
+    then<R1 = unknown, R2 = never>(
+      res?: ((v: unknown) => R1 | PromiseLike<R1>) | null,
+      rej?: ((e: unknown) => R2 | PromiseLike<R2>) | null,
+    ): PromiseLike<R1 | R2> {
       return Promise.resolve(this.resolver()).then(res, rej);
     }
   }

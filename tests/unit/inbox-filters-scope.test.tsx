@@ -59,6 +59,7 @@ function canal(over: Partial<ChannelSession> = {}): ChannelSession {
     last_status_change_at: null,
     daily_message_limit: 250,
     is_warmup_complete: null,
+    entry_pipeline_id: null,
     created_at: "2026-08-01T00:00:00Z",
     ...over,
   };
