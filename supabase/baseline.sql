@@ -16365,8 +16365,23 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 7. Trava no banco: uma sala, um compromisso por vez
 -- ---------------------------------------------------------------------------
+-- VERSÃO FINAL (migration 0205): a trava vale só entre os compromissos marcados
+-- no CRM — o importado de um sistema externo (Belle) entra mesmo com encaixe.
+-- Bloco ÚNICO desta constraint (tests/unit/baseline-constraint-reconstruida.test.ts):
+-- quem atualiza com a versão da 0200 tem a antiga trocada aqui. A coluna usada no
+-- `where` é criada antes, porque o bloco da 0205 vem depois no arquivo.
+alter table public.calendar_appointments add column if not exists external_provider text;
+
 do $$
 begin
+  if exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.calendar_appointments'::regclass
+       and conname = 'calendar_appointments_sala_sem_sobreposicao'
+       and pg_get_constraintdef(oid) not like '%external_provider%'
+  ) then
+    alter table public.calendar_appointments drop constraint calendar_appointments_sala_sem_sobreposicao;
+  end if;
   if not exists (
     select 1 from pg_constraint
      where conrelid = 'public.calendar_appointments'::regclass
@@ -16377,7 +16392,7 @@ begin
       exclude using gist (
         room_id with =,
         tstzrange(starts_at, ends_at, '[)') with &&
-      ) where (status in ('pending', 'confirmed', 'declined', 'completed'));
+      ) where (status in ('pending', 'confirmed', 'declined', 'completed') and external_provider is null);
   end if;
 end $$;
 
@@ -16775,8 +16790,7 @@ notify pgrst, 'reload schema';
 
 -- ---- agenda externa: importação do Belle (migration 0205) ----
 -- Espelho idempotente da migration 0205; racional completo no arquivo da migration.
--- Entra ANTES da VARREDURA anon. A trava de sala é reconstruída a cada aplicação (drop + add):
--- a cláusula nova só afrouxa a regra, então nenhum dado existente a viola.
+-- Entra ANTES da VARREDURA anon.
 
 -- ---------------------------------------------------------------------------
 -- 1. A conexão
@@ -16862,7 +16876,7 @@ alter table public.calendar_appointments add column if not exists external_provi
 alter table public.calendar_appointments add column if not exists external_id text;
 alter table public.calendar_appointments add column if not exists external_status text;
 
-do $
+do $$
 begin
   if not exists (
     select 1 from pg_constraint
@@ -16873,7 +16887,7 @@ begin
       add constraint calendar_appointments_external_provider_check
       check (external_provider is null or external_provider in ('belle'));
   end if;
-end $;
+end $$;
 
 create unique index if not exists uniq_calendar_appointments_external
   on public.calendar_appointments (organization_id, external_provider, external_id)
@@ -16894,20 +16908,8 @@ create unique index if not exists uniq_calendar_rooms_external
   on public.calendar_rooms (organization_id, external_provider, external_id)
   where external_id is not null;
 
--- ---------------------------------------------------------------------------
--- 4. A trava de sala vale entre os compromissos marcados no CRM
--- ---------------------------------------------------------------------------
--- Reconstrução: só a cláusula `where` muda (acrescenta `external_provider is null`).
--- Afrouxa a regra — nenhum dado existente a viola, então não há auto-cura antes.
-alter table public.calendar_appointments
-  drop constraint if exists calendar_appointments_sala_sem_sobreposicao;
-
-alter table public.calendar_appointments
-  add constraint calendar_appointments_sala_sem_sobreposicao
-  exclude using gist (
-    room_id with =,
-    tstzrange(starts_at, ends_at, '[)') with &&
-  ) where (status in ('pending', 'confirmed', 'declined', 'completed') and external_provider is null);
+-- 4. A trava de sala (só entre os marcados no CRM) mora no bloco único da migration 0200,
+--    acima — uma constraint, um bloco.
 
 notify pgrst, 'reload schema';
 
