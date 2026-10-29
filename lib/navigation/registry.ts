@@ -34,6 +34,7 @@ import {
   Signpost,
   Storefront,
   Megaphone,
+  CalendarCheck,
   UserCheck,
   UserCircle,
   Users,
@@ -385,6 +386,17 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     // A página não filtra por papel, mas as Server Actions de conectar e
     // desconectar exigem admin — mostrar a um viewer seria oferecer botão morto.
     minRole: "admin",
+    sidebar: true,
+  },
+  {
+    // Pedido do dono do produto: a integração de agenda mora junto das outras
+    // conexões externas, em Canais. GET é manager+; conectar/sincronizar, admin.
+    href: "/app/integrations/belle",
+    label: "Belle",
+    description: "Traga os agendamentos do Belle Software para a Agenda: horário, sala, serviço e paciente.",
+    icon: CalendarCheck,
+    group: "canais",
+    minRole: "manager",
     sidebar: true,
   },
   {

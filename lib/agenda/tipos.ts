@@ -90,6 +90,10 @@ export interface Compromisso {
   /** Quando o CLIENTE respondeu à confirmação automática (migration 0201). */
   client_responded_at?: string | null;
   revision: number;
+  /** Sistema de onde veio (migration 0205). Preenchido = somente leitura no CRM. */
+  external_provider?: string | null;
+  /** Status como o sistema de origem o nomeia ("Em Andamento"…). */
+  external_status?: string | null;
 }
 
 /** Uma janela semanal de funcionamento — mesmo formato de `attendant_availability.schedule`. */

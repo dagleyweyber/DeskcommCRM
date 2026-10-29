@@ -236,6 +236,11 @@ export function GradeDaAgenda({
                           {RÓTULO_DO_STATUS[c.status]}
                           {c.client_responded_at && (c.status === "confirmed" || c.status === "declined") ? " · pelo cliente" : ""}
                         </span>
+                        {c.external_provider && (
+                          <span className="ml-1 mt-0.5 inline-block rounded border border-current/30 px-1.5 py-px text-[10px] font-medium opacity-80">
+                            Belle
+                          </span>
+                        )}
                         <span className="block truncate opacity-90">
                           {c.calendar_event_types?.name ?? c.title}
                           {profissional ? ` · ${profissional}` : ""}

@@ -27,7 +27,24 @@ import type {
   MarcarAgendamentoInput,
 } from "@/lib/schemas/agenda";
 
-const COLUNAS = "id, organization_id, event_type_id, room_id, title, description, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, cancelled_at, cancellation_reason, rescheduled_from_id, revision";
+const COLUNAS = "id, organization_id, event_type_id, room_id, title, description, starts_at, ends_at, time_zone, status, owner_user_id, contact_id, conversation_id, location_kind, location_detail, notes, cancelled_at, cancellation_reason, rescheduled_from_id, revision, external_provider";
+
+/**
+ * Compromisso importado de um sistema externo (Belle) é somente leitura aqui:
+ * o sistema de origem é a fonte da verdade e a próxima sincronização
+ * desfaria a edição. 422 com instrução, não 409 — tentar de novo não resolve.
+ */
+function recusaSeImportado(ctx: HandlerCtx, compromisso: Compromisso): void {
+  if (compromisso.external_provider) {
+    throw new ApiError(
+      422,
+      "unprocessable_entity",
+      undefined,
+      ctx.requestId,
+      "Este agendamento vem do Belle. Remarque, cancele ou mude o status por lá — a Agenda atualiza sozinha em alguns minutos.",
+    );
+  }
+}
 
 /**
  * Resolve o negócio ABERTO deste contato (mesma função que o resto do CRM
@@ -42,7 +59,7 @@ const COLUNAS = "id, organization_id, event_type_id, room_id, title, description
  * raciocínio de `moverLeadParaEtapaDeAgendamento` no upstream: a timeline é
  * enriquecimento, a marcação em si já está segura em `calendar_appointments`.
  */
-async function fecharOLaco(
+export async function fecharOLacoDoCompromisso(
   admin: SupabaseClient,
   ctx: HandlerCtx,
   compromisso: Compromisso,
@@ -339,7 +356,7 @@ export async function marcarAgendamentoHandler(
     requestId: ctx.requestId,
   });
 
-  await fecharOLaco(admin, ctx, compromisso, { tipo: "meeting_scheduled" });
+  await fecharOLacoDoCompromisso(admin, ctx, compromisso, { tipo: "meeting_scheduled" });
 
   return compromisso;
 }
@@ -370,6 +387,7 @@ export async function alterarAgendamentoHandler(
   if (buscaErr) throw new ApiError(500, "internal_error", undefined, ctx.requestId, buscaErr.message);
   if (!atual) throw new ApiError(404, "not_found", undefined, ctx.requestId, "Compromisso não encontrado.");
   const compromissoAtual = atual as unknown as Compromisso;
+  recusaSeImportado(ctx, compromissoAtual);
 
   if (compromissoAtual.status === "cancelled") {
     throw new ApiError(422, "unprocessable_entity", undefined, ctx.requestId, "Compromisso já cancelado.");
@@ -467,7 +485,7 @@ export async function alterarAgendamentoHandler(
     });
 
     const novoCompromisso = criado as unknown as Compromisso;
-    await fecharOLaco(admin, ctx, novoCompromisso, { tipo: "meeting_scheduled" });
+    await fecharOLacoDoCompromisso(admin, ctx, novoCompromisso, { tipo: "meeting_scheduled" });
     return novoCompromisso;
   }
 
@@ -519,7 +537,7 @@ export async function alterarAgendamentoHandler(
   });
 
   if (input.status && input.status !== compromissoAtual.status && (input.status === "completed" || input.status === "no_show")) {
-    await fecharOLaco(admin, ctx, compromisso, { tipo: "meeting_outcome", outcome: input.status === "completed" ? "attended" : "no_show" });
+    await fecharOLacoDoCompromisso(admin, ctx, compromisso, { tipo: "meeting_outcome", outcome: input.status === "completed" ? "attended" : "no_show" });
   }
 
   return compromisso;
@@ -540,6 +558,7 @@ export async function cancelarAgendamentoHandler(
   if (buscaErr) throw new ApiError(500, "internal_error", undefined, ctx.requestId, buscaErr.message);
   if (!atual) throw new ApiError(404, "not_found", undefined, ctx.requestId, "Compromisso não encontrado.");
   const compromissoAtual = atual as unknown as Compromisso;
+  recusaSeImportado(ctx, compromissoAtual);
 
   // Idempotente: cancelar um já-cancelado devolve sucesso, não erro — mesmo
   // padrão do cancelamento de follow-up e de campanha neste repo.

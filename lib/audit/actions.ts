@@ -296,4 +296,9 @@ export type AuditAction =
   | "calendar_block.deleted"
   // Confirmação automática (migration 0201): o CLIENTE respondeu ao botão do
   // modelo e o status do compromisso mudou sozinho — sem ator humano.
-  | "calendar_appointment.client_responded";
+  | "calendar_appointment.client_responded"
+  // Agenda externa (migration 0205): conexão com o Belle e a sincronização
+  // pedida à mão pela tela (a automática, do scheduler, não tem ator).
+  | "calendar_integration.connected"
+  | "calendar_integration.disconnected"
+  | "calendar_integration.sync_requested";

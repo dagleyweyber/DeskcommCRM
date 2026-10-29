@@ -121,4 +121,6 @@ export {
   UserCheck,
   // integração de anúncios (Meta Ads)
   Megaphone,
+  // agenda externa (Belle)
+  CalendarCheck,
 } from "@phosphor-icons/react/dist/ssr";

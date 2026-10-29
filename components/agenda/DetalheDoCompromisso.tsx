@@ -52,7 +52,9 @@ export function DetalheDoCompromisso({
 
   if (!compromisso) return null;
   const c = compromisso;
-  const encerrado = c.status === "cancelled";
+  // Importado do Belle: lá é a fonte da verdade, aqui só se vê (a API também recusa).
+  const importado = Boolean(c.external_provider);
+  const encerrado = c.status === "cancelled" || importado;
 
   async function mudarStatus(status: StatusDoCompromisso) {
     if (status === c.status) return;
@@ -116,6 +118,14 @@ export function DetalheDoCompromisso({
               </span>
             )}
           </dd>
+          {importado && (
+            <>
+              <dt className="text-muted-foreground">Origem</dt>
+              <dd>
+                Belle{c.external_status ? ` · “${c.external_status}” lá` : ""}
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Serviço</dt>
           <dd>{c.calendar_event_types?.name ?? c.title}</dd>
           <dt className="text-muted-foreground">Sala</dt>
@@ -135,6 +145,13 @@ export function DetalheDoCompromisso({
             </>
           )}
         </dl>
+
+        {importado && (
+          <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            Este agendamento vem do Belle. Para remarcar, cancelar ou mudar o status, faça no Belle — a Agenda atualiza
+            sozinha em até 10 minutos.
+          </p>
+        )}
 
         {!encerrado && !cancelando && (
           <div className="space-y-2">
