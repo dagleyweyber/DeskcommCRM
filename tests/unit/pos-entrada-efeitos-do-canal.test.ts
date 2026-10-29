@@ -181,6 +181,18 @@ describe("opt-out", () => {
   });
 });
 
+describe("funil de entrada por número", () => {
+  it("⭐ o número por onde a conversa entrou chega ao nascimento do lead — é ele que escolhe o funil", async () => {
+    // Sem esta passagem o número com funil próprio (migration 0204) seria
+    // ignorado em silêncio: o lead nasceria no padrão e nada falharia.
+    await rodar({});
+    expect(garantirLeadDaConversa).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ channelSessionId: "sessao-1" }),
+    );
+  });
+});
+
 describe("despacho do agente", () => {
   it("emite com o payload que o consumidor lê, campo a campo", async () => {
     // O consumidor é UM só. Um payload por canal faria o worker adivinhar de

@@ -857,3 +857,120 @@ describe("adReferral — atribuição de anúncio (Fase A do Meta Ads)", () => {
     expect(rows[0]!.source_metadata).toEqual({ ad_id: "999" });
   });
 });
+
+describe("funil de entrada por número (migration 0204)", () => {
+  const ORG_OUTRA = "1ead7e00-0000-4000-8000-000000000005";
+  const CANAL_COM_FUNIL = "1ead7e00-0000-4000-8000-00000000ca01";
+  const CANAL_SEM_FUNIL = "1ead7e00-0000-4000-8000-00000000ca02";
+  const CANAL_FUNIL_ARQUIVADO = "1ead7e00-0000-4000-8000-00000000ca03";
+  const CANAL_FUNIL_ALHEIO = "1ead7e00-0000-4000-8000-00000000ca04";
+  let funilDoNumero: string;
+  let primeiraEtapaDoNumero: string;
+  let funilArquivado: string;
+  let funilAlheio: string;
+
+  async function criarFunil(org: string, slug: string, arquivado = false): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into crm_pipelines (organization_id, name, slug, is_default, is_archived, position)
+       values ($1, $2, $2, false, $3, 5000) returning id`,
+      [org, slug, arquivado],
+    );
+    await pool.query(
+      `insert into crm_stages (organization_id, pipeline_id, name, slug, position, is_won, is_lost)
+       values ($1, $2, 'Primeiro contato', $3, 10, false, false),
+              ($1, $2, 'Ganho', $4, 20, true, false)`,
+      [org, rows[0]!.id, `pc-${slug}`, `g-${slug}`],
+    );
+    return rows[0]!.id;
+  }
+
+  async function criarCanal(id: string, org: string, funil: string | null): Promise<void> {
+    await pool.query(
+      `insert into channel_sessions (id, organization_id, waha_session_name, status, webhook_secret_encrypted, entry_pipeline_id)
+       values ($1, $2, $3, 'WORKING', '\x00'::bytea, $4) on conflict (id) do nothing`,
+      [id, org, `fe-${id.slice(-4)}`, funil],
+    );
+  }
+
+  beforeAll(async () => {
+    await criarOrg(ORG_OUTRA, "org-nascimento-outra");
+    funilDoNumero = await criarFunil(ORG_VIVA, "funil-do-numero");
+    funilArquivado = await criarFunil(ORG_VIVA, "funil-arquivado", true);
+    funilAlheio = await criarFunil(ORG_OUTRA, "funil-alheio");
+    const { rows } = await pool.query<{ id: string }>(
+      "select id from crm_stages where pipeline_id = $1 and name = 'Primeiro contato'",
+      [funilDoNumero],
+    );
+    primeiraEtapaDoNumero = rows[0]!.id;
+
+    await criarCanal(CANAL_COM_FUNIL, ORG_VIVA, funilDoNumero);
+    await criarCanal(CANAL_SEM_FUNIL, ORG_VIVA, null);
+    await criarCanal(CANAL_FUNIL_ARQUIVADO, ORG_VIVA, funilArquivado);
+    // A FK aceita o funil de outra organização — só a regra de entrada barra.
+    await criarCanal(CANAL_FUNIL_ALHEIO, ORG_VIVA, funilAlheio);
+  });
+
+  afterAll(async () => {
+    await pool.query("delete from channel_sessions where id = any($1)", [
+      [CANAL_COM_FUNIL, CANAL_SEM_FUNIL, CANAL_FUNIL_ARQUIVADO, CANAL_FUNIL_ALHEIO],
+    ]);
+    await pool.query("delete from organizations where id = $1", [ORG_OUTRA]);
+  });
+
+  async function padrao() {
+    const d = await funilDeEntrada(db, ORG_VIVA);
+    if ("erro" in d) throw new Error(`org viva sem funil padrão: ${d.erro}`);
+    return d;
+  }
+
+  it("⭐ número com funil próprio: o lead nasce na primeira etapa DELE, não do padrão", async () => {
+    const d = await funilDeEntrada(db, ORG_VIVA, CANAL_COM_FUNIL);
+    expect(d).toEqual({ pipelineId: funilDoNumero, stageId: primeiraEtapaDoNumero });
+    expect(d).not.toEqual(await padrao());
+  });
+
+  it("⭐ ponta a ponta: garantirLeadDaConversa grava o lead no funil do número", async () => {
+    const contato = await criarContato(ORG_VIVA, "Contato do Segundo Número");
+    const r = await garantirLeadDaConversa(db, {
+      organizationId: ORG_VIVA,
+      contactId: contato,
+      conversationId: CONVERSA,
+      nomeDoContato: "Contato do Segundo Número",
+      channelSessionId: CANAL_COM_FUNIL,
+    });
+    expect(r.criado, JSON.stringify(r)).toBe(true);
+    if (!r.criado) return;
+    expect(r.pipelineId).toBe(funilDoNumero);
+    const { rows } = await pool.query<{ pipeline_id: string; stage_id: string }>(
+      "select pipeline_id, stage_id from crm_leads where id = $1",
+      [r.leadId],
+    );
+    expect(rows[0]).toEqual({ pipeline_id: funilDoNumero, stage_id: primeiraEtapaDoNumero });
+  });
+
+  it("número SEM funil próprio segue o padrão — quem não configura não muda", async () => {
+    expect(await funilDeEntrada(db, ORG_VIVA, CANAL_SEM_FUNIL)).toEqual(await padrao());
+  });
+
+  it("sem informar o número, segue o padrão (chamadas antigas continuam valendo)", async () => {
+    expect(await funilDeEntrada(db, ORG_VIVA)).toEqual(await padrao());
+    expect(await funilDeEntrada(db, ORG_VIVA, null)).toEqual(await padrao());
+  });
+
+  it("funil escolhido que foi ARQUIVADO cai no padrão — o contato não fica sem card", async () => {
+    expect(await funilDeEntrada(db, ORG_VIVA, CANAL_FUNIL_ARQUIVADO)).toEqual(await padrao());
+  });
+
+  it("⭐ funil de OUTRA organização nunca recebe lead: cai no padrão", async () => {
+    const d = await funilDeEntrada(db, ORG_VIVA, CANAL_FUNIL_ALHEIO);
+    expect(d).toEqual(await padrao());
+    expect(d).not.toHaveProperty("pipelineId", funilAlheio);
+  });
+
+  it("canal de OUTRA organização não é lido: o id vem da conversa, mas o filtro é da org", async () => {
+    expect(await funilDeEntrada(db, ORG_OUTRA, CANAL_COM_FUNIL)).not.toEqual({
+      pipelineId: funilDoNumero,
+      stageId: primeiraEtapaDoNumero,
+    });
+  });
+});

@@ -16763,6 +16763,16 @@ revoke all on public.rastreio_cliques from anon;
 
 notify pgrst, 'reload schema';
 
+-- ---- funil de entrada por número conectado (migration 0204) ----
+-- Espelho idempotente da migration 0204; racional completo no arquivo da migration.
+-- Coluna opcional: NULL = funil padrão da organização. Entra ANTES da VARREDURA anon.
+
+alter table public.channel_sessions
+  add column if not exists entry_pipeline_id uuid
+    references public.crm_pipelines(id) on delete set null;
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

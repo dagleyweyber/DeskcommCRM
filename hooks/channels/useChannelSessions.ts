@@ -20,6 +20,8 @@ export interface ChannelSession {
   last_status_change_at: string | null;
   daily_message_limit: number;
   is_warmup_complete: boolean | null;
+  /** Funil onde nascem os leads deste número. NULL = funil padrão da organização. */
+  entry_pipeline_id: string | null;
   created_at: string;
 }
 

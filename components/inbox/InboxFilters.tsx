@@ -58,7 +58,10 @@ export function InboxFilters({ value, onChange }: Props) {
   const { data: channels } = useChannelSessions({ refetchInterval: 30_000 });
   const { activeOrg } = useAuth();
   const { data: tagVocabulary } = useConversationTagVocabulary(activeOrg?.orgId ?? null);
-  const { data: counts } = useConversationCounts(activeOrg?.orgId ?? null);
+  const { data: counts } = useConversationCounts(
+    activeOrg?.orgId ?? null,
+    value.channel_session_id,
+  );
 
   const tabs = activeOrg
     ? visibleInboxTabs(activeOrg.role, activeOrg.visibility_mode)

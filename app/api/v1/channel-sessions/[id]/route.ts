@@ -25,7 +25,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
-import { isChannelStatus } from "@/lib/schemas/channels";
+import { isChannelStatus, updateChannelSchema } from "@/lib/schemas/channels";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
@@ -68,6 +68,102 @@ type DependentTable =
   | "ai_routers"
   | "channel_knobs"
   | "before_send_traces";
+
+/**
+ * PATCH /api/v1/channel-sessions/[id] — renomeia o número e/ou define o funil onde
+ * nascem os leads das conversas que entram por ele.
+ *
+ * `entry_pipeline_id` precisa ser um funil ATIVO desta organização: a FK sozinha só
+ * garante que ele existe, e aceitar o de outra organização mandaria lead de um
+ * cliente para o quadro de outro. `null` volta ao funil padrão.
+ *
+ * Serve a qualquer canal da org (QR e oficial) — nada aqui toca o transporte.
+ * Admin only. organization_id vem da sessão — nunca do path/body.
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const requestId = randomUUID();
+  const { id } = await params;
+
+  const authz = await requireRole("admin", {
+    requestId,
+    resource: "channel_sessions",
+    allowPlatformAdmin: true,
+  });
+  if (!authz.ok) return authz.response;
+  const { user, org: activeOrg } = authz;
+
+  let raw: unknown = {};
+  try {
+    raw = await req.json();
+  } catch {
+    raw = {};
+  }
+  const parsed = updateChannelSchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    return fail("validation_failed", "Dados inválidos.", 422, {
+      requestId,
+      details: parsed.error.flatten().fieldErrors as Record<string, unknown>,
+    });
+  }
+
+  const supabase = await createClient();
+  const { data: session } = await supabase
+    .from("channel_sessions")
+    .select("id, display_name, entry_pipeline_id")
+    .eq("organization_id", activeOrg.orgId)
+    .eq("id", id)
+    .maybeSingle();
+  if (!session) return fail("not_found", "Canal não encontrado.", 404, { requestId });
+
+  const patch: Record<string, unknown> = {};
+  if (parsed.data.display_name !== undefined) patch.display_name = parsed.data.display_name;
+  if (parsed.data.entry_pipeline_id !== undefined) {
+    if (parsed.data.entry_pipeline_id !== null) {
+      const { data: funil } = await supabase
+        .from("crm_pipelines")
+        .select("id")
+        .eq("organization_id", activeOrg.orgId)
+        .eq("id", parsed.data.entry_pipeline_id)
+        .eq("is_archived", false)
+        .maybeSingle();
+      if (!funil) {
+        return fail("validation_failed", "Funil não encontrado nesta organização.", 422, {
+          requestId,
+        });
+      }
+    }
+    patch.entry_pipeline_id = parsed.data.entry_pipeline_id;
+  }
+
+  const { data: atualizado, error } = await supabase
+    .from("channel_sessions")
+    .update(patch)
+    .eq("organization_id", activeOrg.orgId)
+    .eq("id", id)
+    .select("id, display_name, entry_pipeline_id")
+    .single();
+  if (error || !atualizado) {
+    return fail("internal_error", error?.message ?? "channel_update_failed", 500, { requestId });
+  }
+
+  void audit({
+    action: "channel.settings_changed",
+    actorUserId: user.id,
+    organizationId: activeOrg.orgId,
+    resourceType: "channel_session",
+    resourceId: id,
+    requestId,
+    metadata: {
+      display_name: { de: session.display_name, para: atualizado.display_name },
+      entry_pipeline_id: { de: session.entry_pipeline_id, para: atualizado.entry_pipeline_id },
+    },
+  });
+
+  return ok(atualizado, { requestId });
+}
 
 /**
  * Conta tudo que está pendurado no canal, com o CLIENTE ADMIN e filtro explícito

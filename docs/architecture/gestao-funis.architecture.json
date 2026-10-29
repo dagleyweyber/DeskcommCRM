@@ -35,6 +35,7 @@
     { "id": "audit", "lane": "dados", "col": 4, "type": "database", "label": "api_audit_log", "sublabel": "pipeline.created/updated/archived/deleted" },
     { "id": "trigger", "lane": "dados", "col": 1, "type": "service", "label": "trg_seed_default_pipeline_for_org", "sublabel": "semeia 'Pedidos' e-commerce em toda org nova" },
 
+    { "id": "numeros", "lane": "dependente", "col": 1, "type": "database", "label": "channel_sessions", "sublabel": "entry_pipeline_id · FK ON DELETE SET NULL (0204)" },
     { "id": "leads", "lane": "dependente", "col": 2, "type": "database", "label": "crm_leads", "sublabel": "FK ON DELETE RESTRICT" },
     { "id": "sources", "lane": "dependente", "col": 3, "type": "database", "label": "webhook_sources", "sublabel": "FK ON DELETE **CASCADE** — o perigo" },
     { "id": "rules", "lane": "dependente", "col": 4, "type": "database", "label": "automation_rules", "sublabel": "pipeline_id dentro de jsonb — SEM FK" }
@@ -60,6 +61,8 @@
     { "id": "e18", "from": "delete", "to": "regras", "label": "validarArquivamento · podeExcluirDeVez" },
     { "id": "e19", "from": "regras", "to": "slug", "label": "reusa a chave de nome e a conta de slug — sem segunda cópia" },
     { "id": "e20", "from": "patch", "to": "padrao", "label": "dois UPDATEs, em sequência" },
+    { "id": "e90", "from": "numeros", "to": "pipelines", "label": "Conexões escolhe o funil do número (PATCH /channel-sessions/[id]) — arquivado ou de outra org: cai no padrão" },
+    { "id": "e91", "from": "numeros", "to": "leads", "label": "funilDeEntrada(canal): o lead da conversa nasce no funil do número que a recebeu" },
     { "id": "e21", "from": "padrao", "to": "pipelines", "label": "uniq_..._org_default é IMEDIATO" },
     { "id": "e22", "from": "post", "to": "pipelines", "label": "insert do funil" },
     { "id": "e23", "from": "post", "to": "stages", "label": "insert das 4 etapas — e delete do funil se falhar" },

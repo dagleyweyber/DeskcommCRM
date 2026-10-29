@@ -8,6 +8,8 @@
  */
 import { randomUUID } from "node:crypto";
 
+import { z } from "zod";
+
 import { fail, ok } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { CONVERSATION_TERMINAL_STATUSES } from "@/lib/schemas";
@@ -15,7 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   const requestId = randomUUID();
   const supabase = await createClient();
 
@@ -33,12 +35,23 @@ export async function GET(): Promise<Response> {
     return fail("no_active_org", "No active organization.", 403, { requestId });
   }
 
+  // Com um número selecionado no inbox, os badges das abas contam só as conversas
+  // dele — a lista já filtrava (`channel_session_id` em /api/v1/conversations) e os
+  // badges não, então "Todas 987" aparecia sobre uma lista de 152. Badge que não
+  // bate com a lista que ele rotula manda o atendente atrás de trabalho inexistente.
+  const canalParam = new URL(req.url).searchParams.get("channel_session_id");
+  if (canalParam !== null && !z.string().uuid().safeParse(canalParam).success) {
+    return fail("validation_failed", "channel_session_id inválido.", 422, { requestId });
+  }
+
   const org = activeOrg.orgId;
-  const countExact = () =>
-    supabase
+  const countExact = () => {
+    const q = supabase
       .from("conversations")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", org);
+    return canalParam ? q.eq("channel_session_id", canalParam) : q;
+  };
 
   // Espelha tabToFilter (InboxLayout): unassigned = fila aberta sem dono;
   // mine = atribuídas a mim e ainda ABERTAS; all = tudo que o usuário VÊ.

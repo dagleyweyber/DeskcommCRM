@@ -190,6 +190,7 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
       contactId: entrada.contactId,
       conversationId: entrada.conversationId,
       nomeDoContato: entrada.nomeDoContato,
+      channelSessionId: entrada.channelSessionId,
       adReferral: entrada.adReferral,
     });
 

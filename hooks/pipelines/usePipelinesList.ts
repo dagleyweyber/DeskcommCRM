@@ -5,6 +5,8 @@ import { apiClient } from "@/lib/api/client";
 export interface PipelineListItem {
   id: string;
   name: string;
+  /** Funil padrão da organização — onde entra quem chega por um número sem funil próprio. */
+  is_default?: boolean;
 }
 
 /** GET /api/v1/pipelines é manager+ (spec de settings) — gateie `enabled` do mesmo jeito que useTeamMembers. */

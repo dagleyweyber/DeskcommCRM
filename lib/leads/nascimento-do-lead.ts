@@ -81,6 +81,11 @@ export interface DadosDoNascimento {
   /** nome do contato, para o título do card. */
   nomeDoContato: string | null;
   /**
+   * O número (canal) por onde a conversa entrou — decide o funil quando o número
+   * tem funil de entrada próprio. Ausente = funil padrão da organização.
+   */
+  channelSessionId?: string | null;
+  /**
    * O clique em anúncio que originou a conversa, quando houver — genérico
    * de propósito (ver o comentário em `lib/channels/pos-entrada.ts`). Vira
    * `crm_leads.source_metadata`; é a peça que faz o dashboard e o futuro
@@ -106,14 +111,44 @@ export interface DadosDoNascimento {
 export async function funilDeEntrada(
   db: SupabaseClient,
   organizationId: string,
+  channelSessionId?: string | null,
 ): Promise<{ pipelineId: string; stageId: string } | { erro: MotivoSemLead }> {
-  const { data: funil } = await db
-    .from("crm_pipelines")
-    .select("id")
-    .eq("organization_id", organizationId)
-    .eq("is_default", true)
-    .eq("is_archived", false)
-    .maybeSingle();
+  // O número por onde a conversa entrou pode ter funil próprio
+  // (`channel_sessions.entry_pipeline_id`). A escolha só vale se o funil ainda
+  // existe, é DESTA organização e não está arquivado — senão cai no padrão. Cair
+  // no padrão em vez de recusar é de propósito: lead sem funil é demanda perdida,
+  // e um funil arquivado por engano não pode derrubar a entrada de contatos.
+  let funil: { id: string } | null = null;
+  if (channelSessionId) {
+    const { data: sessao } = await db
+      .from("channel_sessions")
+      .select("entry_pipeline_id")
+      .eq("organization_id", organizationId)
+      .eq("id", channelSessionId)
+      .maybeSingle();
+    const escolhido = (sessao as { entry_pipeline_id: string | null } | null)?.entry_pipeline_id;
+    if (escolhido) {
+      const { data: proprio } = await db
+        .from("crm_pipelines")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("id", escolhido)
+        .eq("is_archived", false)
+        .maybeSingle();
+      funil = (proprio as { id: string } | null) ?? null;
+    }
+  }
+
+  if (!funil) {
+    const { data: padrao } = await db
+      .from("crm_pipelines")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("is_default", true)
+      .eq("is_archived", false)
+      .maybeSingle();
+    funil = (padrao as { id: string } | null) ?? null;
+  }
 
   if (!funil) return { erro: "sem_funil_de_entrada" };
 
@@ -156,7 +191,7 @@ async function reabreLead(
 ): Promise<NascimentoDoLead> {
   const { organizationId, contactId, conversationId } = dados;
 
-  const destino = await funilDeEntrada(db, organizationId);
+  const destino = await funilDeEntrada(db, organizationId, dados.channelSessionId);
   if ("erro" in destino) return { criado: false, motivo: destino.erro };
 
   // Atribuição fresca se ESTE reengajamento veio de um clique de anúncio novo
@@ -363,7 +398,7 @@ export async function garantirLeadDaConversa(
   }
 
   // 3 · onde entra
-  const destino = await funilDeEntrada(db, organizationId);
+  const destino = await funilDeEntrada(db, organizationId, dados.channelSessionId);
   if ("erro" in destino) return { criado: false, motivo: destino.erro };
 
   // 4 · o card.

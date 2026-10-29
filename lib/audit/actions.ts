@@ -166,6 +166,9 @@ export type AuditAction =
   // `lib/channels/reactivate.ts` — o único caminho de volta, e é o que faz a
   // frase acima valer para os DOIS casos em vez de para o que lembraram.
   | "channel.reactivated"
+  // Renomear o número ou trocar o funil onde os contatos dele nascem. O segundo
+  // muda para onde vão os leads novos — por isso o antes e o depois vão no metadata.
+  | "channel.settings_changed"
   | "authz.denied"
   | "team.role_changed"
   | "leads.bulk_assigned"

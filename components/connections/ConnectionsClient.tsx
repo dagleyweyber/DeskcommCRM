@@ -12,10 +12,20 @@ import {
   type ChannelSession,
 } from "@/hooks/channels/useChannelSessions";
 import { usePacingKnobs } from "@/hooks/channels/usePacingKnobs";
+import { usePipelinesList, type PipelineListItem } from "@/hooks/pipelines/usePipelinesList";
 import { AntiBanSheet } from "./AntiBanSheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +37,7 @@ import {
   ArrowsClockwise,
   CheckCircle,
   CircleNotch,
+  PencilSimple,
   Phone,
   Plus,
   ShieldCheck,
@@ -101,7 +112,9 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
   const [qr, setQr] = useState<{ sessionId: string; title: string } | null>(null);
   const [antiBanId, setAntiBanId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<ChannelSession | null>(null);
+  const [toEdit, setToEdit] = useState<ChannelSession | null>(null);
   const pacingItems = usePacingKnobs().data?.items ?? [];
+  const pipelines: PipelineListItem[] = usePipelinesList().data?.data ?? [];
 
   const invalidate = useCallback(
     () => qc.invalidateQueries({ queryKey: ["channel-sessions"] }),
@@ -298,6 +311,14 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     <div className="flex items-center gap-2">
                       <Phone size={16} className="text-muted-foreground" aria-hidden />
                       <span className="truncate text-sm font-medium">{channelLabel(c)}</span>
+                      <button
+                        type="button"
+                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label={`Renomear ou escolher o funil de ${channelLabel(c)}`}
+                        onClick={() => setToEdit(c)}
+                      >
+                        <PencilSimple size={14} aria-hidden />
+                      </button>
                     </div>
                     {c.phone_number && c.display_name && (
                       <p className="mt-0.5 font-mono text-xs text-muted-foreground">
@@ -312,6 +333,17 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     ? `Verificado ${new Date(c.last_health_check_at).toLocaleString("pt-BR")}`
                     : "Ainda não verificado"}
                 </p>
+                {/* Só aparece quando o número tem funil próprio — sem isso o lead entra
+                    no padrão, que é o comportamento de sempre e não precisa de aviso. */}
+                {c.entry_pipeline_id && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Contatos novos entram em:{" "}
+                    <span className="font-medium text-foreground">
+                      {pipelines.find((p) => p.id === c.entry_pipeline_id)?.name ??
+                        "funil indisponível (usa o padrão)"}
+                    </span>
+                  </p>
+                )}
                 <div className="mt-auto flex gap-2">
                   {/* Some no canal oficial em vez de aparecer desabilitado: não é
                       indisponibilidade passageira (como o Excluir sem o serviço no
@@ -362,6 +394,18 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
         onClose={() => setAntiBanId(null)}
       />
 
+      {toEdit && (
+        <EditarCanalDialog
+          canal={toEdit}
+          funis={pipelines}
+          onCancel={() => setToEdit(null)}
+          onSaved={() => {
+            setToEdit(null);
+            invalidate();
+          }}
+        />
+      )}
+
       {toDelete && (
         <ExcluirCanalDialog
           canal={toDelete}
@@ -381,6 +425,113 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
         />
       )}
     </div>
+  );
+}
+
+const FUNIL_PADRAO = "padrao";
+
+/**
+ * Nome do número e funil onde nascem os contatos que chegam por ele.
+ *
+ * Um PATCH só, com os dois campos. "Funil padrão" grava `null` — o número volta a
+ * seguir o funil que a organização marcou como padrão, inclusive se ele mudar.
+ * Vale só para contatos NOVOS: quem já tem card continua onde está.
+ */
+function EditarCanalDialog({
+  canal,
+  funis,
+  onCancel,
+  onSaved,
+}: {
+  canal: ChannelSession;
+  funis: PipelineListItem[];
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [nome, setNome] = useState(canal.display_name ?? "");
+  const [funilId, setFunilId] = useState<string>(canal.entry_pipeline_id ?? FUNIL_PADRAO);
+  const [salvando, setSalvando] = useState(false);
+  const padrao = funis.find((f) => f.is_default);
+  // Funil guardado que sumiu da lista (arquivado): mostra como indisponível em vez
+  // de um seletor em branco — salvar sem mexer o preserva.
+  const funilSumiu =
+    canal.entry_pipeline_id != null && !funis.some((f) => f.id === canal.entry_pipeline_id);
+
+  const salvar = async () => {
+    setSalvando(true);
+    try {
+      await apiClient.patch(`/api/v1/channel-sessions/${canal.id}`, {
+        display_name: nome.trim() === "" ? null : nome.trim(),
+        entry_pipeline_id: funilId === FUNIL_PADRAO ? null : funilId,
+      });
+      toast.success("Número atualizado.");
+      onSaved();
+    } catch (err) {
+      toast.error(errMsg(err, "Não foi possível salvar."));
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !salvando && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Editar {channelLabel(canal)}</DialogTitle>
+          <DialogDescription>
+            O nome aparece no inbox, nos filtros e nas campanhas. O funil vale para os contatos
+            novos que chegarem por este número — quem já tem card continua onde está.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`canal-nome-${canal.id}`}>Nome do número</Label>
+            <Input
+              id={`canal-nome-${canal.id}`}
+              value={nome}
+              maxLength={80}
+              placeholder={canal.phone_number ?? "Ex.: Comercial"}
+              onChange={(e) => setNome(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Deixe em branco para voltar a mostrar o número.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`canal-funil-${canal.id}`}>Funil de entrada</Label>
+            <Select value={funilId} onValueChange={setFunilId}>
+              <SelectTrigger id={`canal-funil-${canal.id}`} aria-label="Funil de entrada">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={FUNIL_PADRAO}>
+                  Funil padrão{padrao ? ` (${padrao.name})` : ""}
+                </SelectItem>
+                {funilSumiu && canal.entry_pipeline_id && (
+                  <SelectItem value={canal.entry_pipeline_id}>
+                    Funil indisponível (usa o padrão)
+                  </SelectItem>
+                )}
+                {funis.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>
+                    {f.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" disabled={salvando} onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button disabled={salvando} onClick={salvar}>
+            {salvando && <CircleNotch size={14} className="animate-spin" aria-hidden />}
+            Salvar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
