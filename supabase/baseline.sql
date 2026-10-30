@@ -17033,6 +17033,58 @@ create index if not exists idx_conversations_org_assignee_last_msg
 notify pgrst, 'reload schema';
 
 
+-- ---- Kanban e contagens do inbox sem função por linha (migration 0208) ----
+-- Espelho idempotente da migration 0208; racional completo no arquivo da migration.
+-- Depende de fn_user_conv_scopes() (0207), definida no bloco acima. Entra ANTES da VARREDURA anon.
+
+drop policy if exists "crm_leads_select" on public.crm_leads;
+create policy "crm_leads_select" on public.crm_leads
+  for select using (
+    (select public.fn_is_platform_admin())
+    or organization_id in (
+      select s.organization_id from public.fn_user_conv_scopes() s
+       where s.role in ('viewer', 'manager', 'admin') or s.visibility = 'all'
+    )
+    or (
+      owner_user_id = (select auth.uid())
+      and organization_id in (select s.organization_id from public.fn_user_conv_scopes() s)
+    )
+    or (
+      owner_user_id is null
+      and organization_id in (
+        select s.organization_id from public.fn_user_conv_scopes() s
+         where s.visibility = 'own_and_unassigned'
+      )
+    )
+  );
+
+create or replace function public.fn_conversation_counts(
+  p_org uuid,
+  p_channel_session_id uuid,
+  p_terminal_statuses text[]
+)
+returns table (unassigned bigint, mine bigint, total bigint)
+language sql
+stable
+security invoker
+set search_path to 'public'
+as $$
+  select
+    count(*) filter (where c.assigned_to_user_id is null and c.status = 'open'),
+    count(*) filter (where c.assigned_to_user_id = auth.uid()
+                       and not (c.status = any (p_terminal_statuses))),
+    count(*)
+  from public.conversations c
+  where c.organization_id = p_org
+    and (p_channel_session_id is null or c.channel_session_id = p_channel_session_id);
+$$;
+
+revoke execute on function public.fn_conversation_counts(uuid, uuid, text[]) from public, anon;
+grant  execute on function public.fn_conversation_counts(uuid, uuid, text[]) to authenticated, service_role;
+
+notify pgrst, 'reload schema';
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

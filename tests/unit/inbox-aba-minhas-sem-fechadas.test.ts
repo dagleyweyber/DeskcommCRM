@@ -226,7 +226,9 @@ describe("contador de Minhas", () => {
     const fonte = readFileSync("app/api/v1/conversations/counts/route.ts", "utf8");
 
     expect(fonte).toContain("CONVERSATION_TERMINAL_STATUSES");
-    expect(fonte).toMatch(/assigned_to_user_id[\s\S]{0,200}not\(\s*"status"\s*,\s*"in"/);
+    // Desde a 0208 a contagem é uma função SQL; a lista de terminais sai da constante
+    // e viaja por parâmetro, então a rota é quem tem de passá-la.
+    expect(fonte).toMatch(/p_terminal_statuses:\s*\[\.\.\.CONVERSATION_TERMINAL_STATUSES\]/);
   });
 });
 

@@ -63,6 +63,16 @@ beforeAll(() => {
         ('abababab-4444-4000-8000-1${n.slice(1)}', '${org}', 'abababab-3333-4000-8000-1${n.slice(1)}', 'abababab-2222-4000-8000-${n}', 'open', '${GOV_AGENT_A}'),
         ('abababab-4444-4000-8000-2${n.slice(1)}', '${org}', 'abababab-3333-4000-8000-2${n.slice(1)}', 'abababab-2222-4000-8000-${n}', 'open', '${GOV_AGENT_B}')
         on conflict do nothing;
+      insert into public.crm_pipelines (id, organization_id, name, slug)
+        values ('abababab-5555-4000-8000-${n}', '${org}', 'eq', 'eq') on conflict do nothing;
+      insert into public.crm_stages (id, organization_id, pipeline_id, name, slug, position)
+        values ('abababab-5566-4000-8000-${n}', '${org}', 'abababab-5555-4000-8000-${n}', 'Novo', 'novo', 1000)
+        on conflict do nothing;
+      insert into public.crm_leads (id, organization_id, pipeline_id, stage_id, title, owner_user_id) values
+        ('abababab-6666-4000-8000-${n}', '${org}', 'abababab-5555-4000-8000-${n}', 'abababab-5566-4000-8000-${n}', 'l1', null),
+        ('abababab-6666-4000-8000-1${n.slice(1)}', '${org}', 'abababab-5555-4000-8000-${n}', 'abababab-5566-4000-8000-${n}', 'l2', '${GOV_AGENT_A}'),
+        ('abababab-6666-4000-8000-2${n.slice(1)}', '${org}', 'abababab-5555-4000-8000-${n}', 'abababab-5566-4000-8000-${n}', 'l3', '${GOV_AGENT_B}')
+        on conflict do nothing;
     `);
   }
 });
@@ -118,6 +128,79 @@ describe("conversations_select — a regra não mudou", () => {
     expect(
       countAs(GOV_AGENT_A, `select count(*) from public.conversations where organization_id = '${ORG_PADRAO}';`),
     ).toBe(2);
+  });
+});
+
+/** Leads que a função ANTIGA (fn_can_view_lead) liberaria, sem RLS, com as claims do usuário. */
+function leadsPelaFuncaoAntiga(userId: string): number {
+  const out = sql(`
+    select set_config('request.jwt.claims', '{"sub":"${userId}"}', false);
+    select count(*) from public.crm_leads l
+     where l.organization_id in ('${ORG_ALL}', '${ORG_OWN}', '${ORG_PADRAO}')
+       and public.fn_can_view_lead(l.organization_id, l.owner_user_id);
+  `);
+  return Number(lastLine(out));
+}
+
+const leadsPelaPolicy = (userId: string): number =>
+  countAs(
+    userId,
+    `select count(*) from public.crm_leads
+      where organization_id in ('${ORG_ALL}', '${ORG_OWN}', '${ORG_PADRAO}');`,
+  );
+
+describe("crm_leads_select — a regra não mudou (0208)", () => {
+  it.each([
+    ["agent A", GOV_AGENT_A],
+    ["agent B", GOV_AGENT_B],
+    ["manager", GOV_MANAGER],
+    ["viewer", GOV_VIEWER],
+    ["quem não é membro de nada", SEM_ORG],
+  ])("⭐ %s vê exatamente os leads que a função antiga liberaria", (_nome, usuario) => {
+    expect(leadsPelaPolicy(usuario)).toBe(leadsPelaFuncaoAntiga(usuario));
+  });
+
+  it("controle positivo: agent enxerga leads e não todos", () => {
+    const n = leadsPelaPolicy(GOV_AGENT_A);
+    expect(n).toBeGreaterThan(0);
+    expect(n).toBeLessThan(9);
+  });
+});
+
+describe("fn_conversation_counts — uma leitura, mesmos números das três antigas (0208)", () => {
+  const umaLeitura = (userId: string, org: string, canal = "null") => {
+    const out = sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${userId}"}', false);
+      select unassigned || ',' || mine || ',' || total
+        from public.fn_conversation_counts('${org}', ${canal}, array['closed','archived']);
+    `);
+    return lastLine(out).split(",").map(Number);
+  };
+  const tresLeituras = (userId: string, org: string) => [
+    countAs(userId, `select count(*) from public.conversations where organization_id = '${org}' and assigned_to_user_id is null and status = 'open';`),
+    countAs(userId, `select count(*) from public.conversations where organization_id = '${org}' and assigned_to_user_id = '${userId}' and status not in ('closed','archived');`),
+    countAs(userId, `select count(*) from public.conversations where organization_id = '${org}';`),
+  ];
+
+  it.each([
+    ["agent A", GOV_AGENT_A],
+    ["agent B", GOV_AGENT_B],
+    ["manager", GOV_MANAGER],
+  ])("⭐ %s: a função única bate com as três contagens, em todos os modos", (_n, usuario) => {
+    for (const org of [ORG_ALL, ORG_OWN, ORG_PADRAO]) {
+      expect(umaLeitura(usuario, org)).toEqual(tresLeituras(usuario, org));
+    }
+  });
+
+  it("respeita a RLS do chamador: agent em modo 'own' NÃO recebe o total da organização", () => {
+    const [, , total] = umaLeitura(GOV_AGENT_A, ORG_OWN);
+    expect(total).toBe(1); // só a atribuída a ele; a fila e a do colega ficam de fora
+  });
+
+  it("filtra por número quando pedido", () => {
+    const [, , total] = umaLeitura(GOV_MANAGER, ORG_ALL, `'abababab-2222-4000-8000-0000000000aa'`);
+    expect(total).toBe(0);
   });
 });
 

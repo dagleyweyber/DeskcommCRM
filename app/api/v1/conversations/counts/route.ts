@@ -4,7 +4,7 @@
  * Usa o client user-scoped (cookie session) → toda contagem HERDA a RLS de
  * SELECT de `conversations` (fn_can_view_conversation, migration 0035). Um agent
  * em modo own* recebe a contagem do SEU escopo, NUNCA o total da org — a mesma
- * garantia do listing. Head count (count:'exact', head:true) não devolve linhas.
+ * garantia do listing. Uma única chamada (fn_conversation_counts, security invoker) devolve as três contagens.
  */
 import { randomUUID } from "node:crypto";
 
@@ -44,39 +44,37 @@ export async function GET(req: Request): Promise<Response> {
     return fail("validation_failed", "channel_session_id inválido.", 422, { requestId });
   }
 
-  const org = activeOrg.orgId;
-  const countExact = () => {
-    const q = supabase
-      .from("conversations")
-      .select("id", { count: "exact", head: true })
-      .eq("organization_id", org);
-    return canalParam ? q.eq("channel_session_id", canalParam) : q;
-  };
-
-  // Espelha tabToFilter (InboxLayout): unassigned = fila aberta sem dono;
-  // mine = atribuídas a mim e ainda ABERTAS; all = tudo que o usuário VÊ.
+  // UMA leitura (fn_conversation_counts, migration 0208) no lugar de três count(*):
+  // cada um varria a organização inteira sob RLS, a cada 30 s por aba aberta, e
+  // esgotava o pool do PostgREST. Espelha tabToFilter (InboxLayout): fila = abertas
+  // sem dono; minhas = atribuídas a mim e ainda ABERTAS; todas = tudo que o usuário VÊ.
   //
-  // O `not in (terminais)` do `mine` espelha o `exclude_finished` da aba, e o
-  // espelhamento é o ponto: um badge que conta o que a aba não mostra é pior
-  // que badge nenhum — manda o atendente procurar um trabalho que não existe.
-  const [unassigned, mine, all] = await Promise.all([
-    countExact().is("assigned_to_user_id", null).eq("status", "open"),
-    countExact()
-      .eq("assigned_to_user_id", user.id)
-      .not("status", "in", `(${CONVERSATION_TERMINAL_STATUSES.join(",")})`),
-    countExact(),
-  ]);
-
-  const firstErr = unassigned.error ?? mine.error ?? all.error;
-  if (firstErr) {
-    return fail("internal_error", firstErr.message, 500, { requestId });
+  // Os estados terminais saem de CONVERSATION_TERMINAL_STATUSES — a MESMA constante
+  // do `exclude_finished` da aba — e viajam por parâmetro: o SQL não guarda uma
+  // segunda lista que pudesse divergir. Badge que conta o que a aba não mostra é
+  // pior que badge nenhum — manda o atendente atrás de um trabalho que não existe.
+  const { data, error } = await supabase.rpc(
+    "fn_conversation_counts" as never,
+    {
+      p_org: activeOrg.orgId,
+      p_channel_session_id: canalParam,
+      p_terminal_statuses: [...CONVERSATION_TERMINAL_STATUSES],
+    } as never,
+  );
+  if (error) {
+    return fail("internal_error", error.message, 500, { requestId });
   }
+
+  const linha = (Array.isArray(data) ? data[0] : data) as
+    | { unassigned: number | string | null; mine: number | string | null; total: number | string | null }
+    | null
+    | undefined;
 
   return ok(
     {
-      unassigned: unassigned.count ?? 0,
-      mine: mine.count ?? 0,
-      all: all.count ?? 0,
+      unassigned: Number(linha?.unassigned ?? 0),
+      mine: Number(linha?.mine ?? 0),
+      all: Number(linha?.total ?? 0),
     },
     { requestId },
   );
