@@ -302,7 +302,10 @@ describe("G4-04 — métricas por responsável (números exatos)", () => {
   it("EXPLAIN conversas atendidas usa índice sob agent E manager (sem seq scan)", () => {
     for (const actor of [AGENT_A, MANAGER]) {
       const plan = explainAs(actor, Q_CONV);
-      expect(plan).toMatch(/idx_conversations_org_assignee_assigned/);
+      // Dois índices servem esta consulta (org, assignee, ...): o da 0207 também
+      // começa por (organization_id, assigned_to_user_id). O que se guarda é "usa
+      // índice, sem seq scan"; qual dos dois o planner escolhe é detalhe.
+      expect(plan).toMatch(/idx_conversations_org_assignee_(assigned|last_msg)/);
       expect(plan).not.toMatch(BIG);
     }
   });
