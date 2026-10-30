@@ -186,8 +186,9 @@ describe("⭐ tipo de serviço (decide o modelo da confirmação)", () => {
     { codServico: "55530347", nome: "Criolipólise", tipo: "4360 - Estética" },
   ]);
 
-  it("tipo do catálogo: código estável + nome", () => {
-    expect(tipoDoCatalogo("4359 - Depilação")).toEqual({ chave: "tipo:4359", rotulo: "Depilação" });
+  it("⭐ tipo do catálogo pelo NOME: o mesmo nome com códigos diferentes (rede × unidade) é um tipo só", () => {
+    expect(tipoDoCatalogo("4359 - Depilação")).toEqual({ chave: "tipo:depilacao", rotulo: "Depilação" });
+    expect(tipoDoCatalogo("6014 - Depilação")?.chave).toBe("tipo:depilacao");
     expect(tipoDoCatalogo("")).toBeNull();
   });
 
@@ -202,7 +203,7 @@ describe("⭐ tipo de serviço (decide o modelo da confirmação)", () => {
 
   it("a junção já entrega o tipo de cada agendamento — inclusive só pelo relatório", () => {
     const [a] = juntarAgendamentos([linha()], [lista()], TZ, catalogo);
-    expect(a!.tipo?.chave).toBe("tipo:4359");
+    expect(a!.tipo?.chave).toBe("tipo:depilacao");
     const [b] = juntarAgendamentos([linha({ codigoServico: "55530347" })], [], TZ, catalogo);
     expect(b!.tipo?.rotulo).toBe("Estética");
   });

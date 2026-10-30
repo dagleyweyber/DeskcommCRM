@@ -12,17 +12,24 @@ import type { AgendamentoDaLista, LinhaDoRelatorio, ServicoDoCatalogo } from "./
 
 /** Tipo de serviço do Belle, como a tela de ligação mostra. */
 export interface TipoDeServico {
-  /** Estável: "tipo:4359" (tipo do catálogo) ou "agendamento:avaliacao" (sem serviço). */
+  /** Estável: "tipo:depilacao" (tipo do catálogo) ou "agendamento:avaliacao" (sem serviço). */
   chave: string;
   rotulo: string;
 }
 
-/** "4359 - Depilação" → { chave: "tipo:4359", rotulo: "Depilação" }. */
+/**
+ * "4359 - Depilação" → { chave: "tipo:depilacao", rotulo: "Depilação" }.
+ *
+ * A chave é o NOME, não o código: medido na B'Laser Parnamirim, o Belle tem
+ * "Depilação" duas vezes (4359 e 6014), e o mesmo para "Corporal" e "Facial" —
+ * cadastro da rede e da unidade. Por código, a tela pediria para ligar duas
+ * "Depilação", e a esquecida mandaria a paciente para o modelo errado.
+ */
 export function tipoDoCatalogo(tipo: string): TipoDeServico | null {
-  const m = /^\s*(\d+)\s*-\s*(.+?)\s*$/.exec(tipo);
-  if (m) return { chave: `tipo:${m[1]}`, rotulo: m[2]! };
-  const t = tipo.trim();
-  return t ? { chave: `tipo:${chaveDoNome(t)}`, rotulo: t } : null;
+  const m = /^\s*\d+\s*-\s*(.+?)\s*$/.exec(tipo);
+  const rotulo = (m ? m[1]! : tipo).trim();
+  const chave = chaveDoNome(rotulo);
+  return chave ? { chave: `tipo:${chave}`, rotulo } : null;
 }
 
 /** Código do serviço (sem os espaços que o Belle às vezes põe) → tipo dele. */
