@@ -8,7 +8,50 @@
 import { instanteDoMomentoLocal } from "@/lib/agenda/fuso";
 import type { StatusDoCompromisso } from "@/lib/agenda/tipos";
 
-import type { AgendamentoDaLista, LinhaDoRelatorio } from "./api";
+import type { AgendamentoDaLista, LinhaDoRelatorio, ServicoDoCatalogo } from "./api";
+
+/** Tipo de serviço do Belle, como a tela de ligação mostra. */
+export interface TipoDeServico {
+  /** Estável: "tipo:4359" (tipo do catálogo) ou "agendamento:avaliacao" (sem serviço). */
+  chave: string;
+  rotulo: string;
+}
+
+/** "4359 - Depilação" → { chave: "tipo:4359", rotulo: "Depilação" }. */
+export function tipoDoCatalogo(tipo: string): TipoDeServico | null {
+  const m = /^\s*(\d+)\s*-\s*(.+?)\s*$/.exec(tipo);
+  if (m) return { chave: `tipo:${m[1]}`, rotulo: m[2]! };
+  const t = tipo.trim();
+  return t ? { chave: `tipo:${chaveDoNome(t)}`, rotulo: t } : null;
+}
+
+/** Código do serviço (sem os espaços que o Belle às vezes põe) → tipo dele. */
+export function catalogoPorCodigo(servicos: ServicoDoCatalogo[]): Map<string, TipoDeServico> {
+  const mapa = new Map<string, TipoDeServico>();
+  for (const s of servicos) {
+    const tipo = tipoDoCatalogo(s.tipo);
+    if (s.codServico.trim() && tipo) mapa.set(s.codServico.trim(), tipo);
+  }
+  return mapa;
+}
+
+/**
+ * O tipo de UM agendamento: o do primeiro serviço que o catálogo conhece (a
+ * paciente recebe UMA mensagem, mesmo com depilação + estética no mesmo horário).
+ * Sem serviço — a avaliação, por exemplo — vale o tipo do agendamento.
+ */
+export function tipoDoAgendamento(
+  codigosDosServicos: string[],
+  tipoDoAgendamentoBelle: string,
+  catalogo: Map<string, TipoDeServico>,
+): TipoDeServico | null {
+  for (const cod of codigosDosServicos) {
+    const tipo = catalogo.get(cod.trim());
+    if (tipo) return tipo;
+  }
+  const t = tipoDoAgendamentoBelle.trim();
+  return t ? { chave: `agendamento:${chaveDoNome(t)}`, rotulo: t } : null;
+}
 
 /** Duração quando o Belle não informa (não aconteceu nas medições, mas não há garantia). */
 export const DURACAO_PADRAO_MIN = 30;
@@ -89,6 +132,8 @@ export interface AgendamentoImportado {
   titulo: string;
   notas: string | null;
   cliente: { codigo: string; nome: string; celular: string };
+  /** Tipo de serviço (ligado a um serviço da Agenda na tela do Belle). */
+  tipo: TipoDeServico | null;
 }
 
 function tituloDe(lista: AgendamentoDaLista | undefined, linha: LinhaDoRelatorio | undefined): string {
@@ -108,6 +153,7 @@ export function juntarAgendamentos(
   relatorio: LinhaDoRelatorio[],
   listas: AgendamentoDaLista[],
   timezone: string,
+  catalogo: Map<string, TipoDeServico> = new Map(),
 ): AgendamentoImportado[] {
   const porCodigo = new Map<string, AgendamentoDaLista>();
   for (const l of listas) if (l.codConsulta) porCodigo.set(l.codConsulta, l);
@@ -137,6 +183,11 @@ export function juntarAgendamentos(
         nome: (lista?.cliente?.nome || linha?.nomeCliente || "").trim(),
         celular: (lista?.cliente?.celular || "").trim(),
       },
+      tipo: tipoDoAgendamento(
+        [...(lista?.servicos ?? []).map((s) => s.cod ?? ""), linha?.codigoServico ?? ""],
+        linha?.tipoAgendamento || lista?.tipo || "",
+        catalogo,
+      ),
     });
   };
 
@@ -160,4 +211,24 @@ export function chaveDoNome(nome: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+export interface ServicoDaAgenda {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+/** "Depilação" → "Depilação a Laser"; "Avaliação" → "Avaliação". Nome contido, sem acento nem caixa. */
+export function sugerirServico(rotulo: string, servicos: ServicoDaAgenda[]): string | null {
+  const alvo = chaveDoNome(rotulo);
+  if (!alvo) return null;
+  const ativos = servicos.filter((s) => s.is_active);
+  const exato = ativos.find((s) => chaveDoNome(s.name) === alvo);
+  if (exato) return exato.id;
+  const contidos = ativos.filter((s) => {
+    const nome = chaveDoNome(s.name);
+    return nome.includes(alvo) || alvo.includes(nome);
+  });
+  return contidos.length === 1 ? contidos[0]!.id : null;
 }

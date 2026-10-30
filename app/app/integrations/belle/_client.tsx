@@ -23,6 +23,8 @@ import { apiClient } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
 import { CalendarCheck } from "@/lib/ui/icons";
 
+import { LigacaoDeServicos } from "./_components/LigacaoDeServicos";
+
 export interface ConexaoBelle {
   id: string;
   credential_last4: string;
@@ -221,6 +223,8 @@ export function BelleClient({ initialData, canWrite }: { initialData: ConexaoBel
 
         {trocandoToken && canWrite && formulario}
       </Card>
+
+      <LigacaoDeServicos canWrite={canWrite} />
 
       <Card className="flex flex-col gap-2 p-6 text-sm">
         <h2 className="font-medium">Como funciona</h2>

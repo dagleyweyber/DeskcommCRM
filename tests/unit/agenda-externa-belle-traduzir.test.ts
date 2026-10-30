@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import type { AgendamentoDaLista, LinhaDoRelatorio } from "@/lib/agenda-externa/belle/api";
 import {
+  catalogoPorCodigo,
   chaveDoNome,
+  sugerirServico,
+  tipoDoAgendamento,
+  tipoDoCatalogo,
   dddDoTelefone,
   juntarAgendamentos,
   statusDoBelle,
@@ -26,6 +30,7 @@ function linha(over: Partial<LinhaDoRelatorio> = {}): LinhaDoRelatorio {
     codigoCliente: "8606065",
     nomeCliente: "PACIENTE TESTE",
     salaAgendamento: "Laser 01",
+    codigoServico: "33452277",
     nomeServico: "F. Glúteos Médios",
     tipoAgendamento: "Serviço",
     statusAgendamento: "Atendido",
@@ -172,5 +177,47 @@ describe("nome de sala", () => {
   it("espaços e acentos não separam a mesma sala", () => {
     expect(chaveDoNome(" Avaliação ")).toBe(chaveDoNome("avaliacao"));
     expect(chaveDoNome("Estético 03 - Criofrequência ")).toBe("estetico 03 - criofrequencia");
+  });
+});
+
+describe("⭐ tipo de serviço (decide o modelo da confirmação)", () => {
+  const catalogo = catalogoPorCodigo([
+    { codServico: "33452277", nome: "F. Glúteos Médios", tipo: "4359 - Depilação" },
+    { codServico: "55530347", nome: "Criolipólise", tipo: "4360 - Estética" },
+  ]);
+
+  it("tipo do catálogo: código estável + nome", () => {
+    expect(tipoDoCatalogo("4359 - Depilação")).toEqual({ chave: "tipo:4359", rotulo: "Depilação" });
+    expect(tipoDoCatalogo("")).toBeNull();
+  });
+
+  it("o agendamento segue o PRIMEIRO serviço conhecido (uma mensagem só)", () => {
+    expect(tipoDoAgendamento([" 55530347", "33452277"], "Serviço", catalogo)?.rotulo).toBe("Estética");
+    expect(tipoDoAgendamento(["999", "33452277"], "Serviço", catalogo)?.rotulo).toBe("Depilação");
+  });
+
+  it("sem serviço (avaliação) vale o tipo do agendamento", () => {
+    expect(tipoDoAgendamento([""], "Avaliação", catalogo)).toEqual({ chave: "agendamento:avaliacao", rotulo: "Avaliação" });
+  });
+
+  it("a junção já entrega o tipo de cada agendamento — inclusive só pelo relatório", () => {
+    const [a] = juntarAgendamentos([linha()], [lista()], TZ, catalogo);
+    expect(a!.tipo?.chave).toBe("tipo:4359");
+    const [b] = juntarAgendamentos([linha({ codigoServico: "55530347" })], [], TZ, catalogo);
+    expect(b!.tipo?.rotulo).toBe("Estética");
+  });
+
+  it("sugestão pelo nome: só quando há UM candidato claro", () => {
+    const servicos = [
+      { id: "a", name: "Avaliação", is_active: true },
+      { id: "d", name: "Depilação a Laser", is_active: true },
+      { id: "e", name: "Estética Corporal", is_active: true },
+      { id: "x", name: "Estética Facial", is_active: true },
+      { id: "z", name: "Depilação antiga", is_active: false },
+    ];
+    expect(sugerirServico("Avaliação", servicos)).toBe("a");
+    expect(sugerirServico("Depilação", servicos)).toBe("d");
+    expect(sugerirServico("Estética", servicos)).toBeNull(); // duas estéticas: quem configura escolhe
+    expect(sugerirServico("Massagem", servicos)).toBeNull();
   });
 });

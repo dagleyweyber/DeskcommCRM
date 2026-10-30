@@ -34,10 +34,12 @@ import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { criarClienteBelle, FalhaNoBelle, TokenBelleInvalido, type ClienteBelle } from "./belle/api";
 import {
   chaveDoNome,
+  catalogoPorCodigo,
   juntarAgendamentos,
   telefoneDoBelle,
   variantesDoTelefone,
   type AgendamentoImportado,
+  type TipoDeServico,
 } from "./belle/traduzir";
 
 export const PROVEDOR = "belle" as const;
@@ -86,7 +88,7 @@ const ZERO: Contagem = {
 };
 
 const COLUNAS_EXISTENTE =
-  "id, external_id, status, external_status, client_responded_at, starts_at, ends_at, room_id, title, notes, contact_id, revision, time_zone, cancelled_at";
+  "id, external_id, status, external_status, client_responded_at, starts_at, ends_at, room_id, title, notes, contact_id, revision, time_zone, cancelled_at, event_type_id, external_service_key";
 
 interface Existente {
   id: string;
@@ -103,6 +105,8 @@ interface Existente {
   revision: number;
   time_zone: string;
   cancelled_at: string | null;
+  event_type_id: string | null;
+  external_service_key: string | null;
 }
 
 function emLotes<T>(itens: T[], tamanho: number): T[][] {
@@ -295,6 +299,43 @@ async function resolverContatos(
   return contatoDoItem;
 }
 
+/**
+ * Tipos de serviço vistos nesta janela: o que é novo ganha linha "não ligada" (a
+ * tela mostra para ligar), o que já existe só renova o nome e o `last_seen_at`.
+ * A ligação (`event_type_id`) NUNCA é tocada aqui — é escolha de quem configura.
+ * Devolve chave do tipo → serviço da Agenda (só os ligados).
+ */
+async function registrarTipos(
+  admin: SupabaseClient,
+  integ: Integracao,
+  itens: AgendamentoImportado[],
+  agora: Date,
+): Promise<Map<string, string>> {
+  const vistos = new Map<string, TipoDeServico>();
+  for (const i of itens) if (i.tipo) vistos.set(i.tipo.chave, i.tipo);
+  if (vistos.size > 0) {
+    await admin.from("calendar_integration_service_links").upsert(
+      [...vistos.values()].map((t) => ({
+        organization_id: integ.organization_id,
+        integration_id: integ.id,
+        external_key: t.chave,
+        external_label: t.rotulo.slice(0, 120),
+        last_seen_at: agora.toISOString(),
+      })),
+      { onConflict: "integration_id,external_key" },
+    );
+  }
+  const { data } = await admin
+    .from("calendar_integration_service_links")
+    .select("external_key, event_type_id")
+    .eq("organization_id", integ.organization_id)
+    .eq("integration_id", integ.id)
+    .not("event_type_id", "is", null);
+  const mapa = new Map<string, string>();
+  for (const l of (data ?? []) as { external_key: string; event_type_id: string }[]) mapa.set(l.external_key, l.event_type_id);
+  return mapa;
+}
+
 function ctxDoSistema(integ: Integracao) {
   return {
     organization_id: integ.organization_id,
@@ -339,6 +380,7 @@ export async function aplicarJanela(
     .lt("starts_at", fimJanela);
 
   const salas = await resolverSalas(admin, orgId, itens, contagem);
+  const servicoDoTipo = await registrarTipos(admin, integ, itens, opcoes.agora);
   // Contato só para quem ainda não está no CRM — o resto já tem `contact_id`.
   const contatos = await resolverContatos(
     admin,
@@ -351,6 +393,8 @@ export async function aplicarJanela(
   for (const item of itens) {
     const atual = existentes.get(item.externalId) ?? null;
     const roomId = salaDoItem(salas, item);
+    const chaveDoTipo = item.tipo?.chave ?? null;
+    const eventTypeId = chaveDoTipo ? (servicoDoTipo.get(chaveDoTipo) ?? null) : null;
     const status = statusFinal(item.status, atual);
 
     if (!atual) {
@@ -375,6 +419,8 @@ export async function aplicarJanela(
         external_provider: PROVEDOR,
         external_id: item.externalId,
         external_status: item.statusExterno,
+        external_service_key: chaveDoTipo,
+        event_type_id: eventTypeId,
       });
       continue;
     }
@@ -386,6 +432,8 @@ export async function aplicarJanela(
     if (atual.title !== item.titulo) patch.title = item.titulo;
     if ((atual.notes ?? null) !== item.notas) patch.notes = item.notas;
     if (atual.external_status !== item.statusExterno) patch.external_status = item.statusExterno;
+    if (atual.external_service_key !== chaveDoTipo) patch.external_service_key = chaveDoTipo;
+    if (atual.event_type_id !== eventTypeId) patch.event_type_id = eventTypeId;
     if (atual.status !== status) {
       patch.status = status;
       if (status === "cancelled") {
@@ -486,6 +534,8 @@ export async function sincronizarIntegracao(
     }
     const timezone = await fusoDaClinica(admin, integ.organization_id);
     const hoje = dataLocalDe(agora, timezone);
+    // Catálogo uma vez por rodada: é dele que sai o tipo (depilação, estética…) de cada serviço.
+    const catalogo = catalogoPorCodigo(await cliente.servicos());
     const silencioso = !integ.initial_sync_done_at;
     const indice = ((integ.far_window_index % FATIAS_LONGE.length) + FATIAS_LONGE.length) % FATIAS_LONGE.length;
     const [ini, fim] = FATIAS_LONGE[indice]!;
@@ -496,7 +546,7 @@ export async function sincronizarIntegracao(
     ];
     for (const j of janelas) {
       const { relatorio, listas } = await lerJanela(cliente, integ.external_account_id, j.de, j.ate, j.comFinalizados);
-      const itens = juntarAgendamentos(relatorio, listas, timezone);
+      const itens = juntarAgendamentos(relatorio, listas, timezone, catalogo);
       await aplicarJanela(admin, integ, itens, { de: j.de, ate: j.ate, timezone }, { silencioso, agora, contagem });
     }
 

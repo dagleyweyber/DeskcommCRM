@@ -38,6 +38,14 @@ export const estabelecimentoSchema = z.object({
 });
 export type EstabelecimentoBelle = z.infer<typeof estabelecimentoSchema>;
 
+/** Serviço do catálogo: `tipo` vem como "4359 - Depilação" (código - nome). */
+export const servicoDoCatalogoSchema = z.object({
+  codServico: texto,
+  nome: texto,
+  tipo: texto,
+});
+export type ServicoDoCatalogo = z.infer<typeof servicoDoCatalogoSchema>;
+
 export const agendamentoDaListaSchema = z.object({
   codConsulta: texto,
   dtAgenda: texto,
@@ -59,6 +67,7 @@ export const linhaDoRelatorioSchema = z.object({
   codigoCliente: texto,
   nomeCliente: texto,
   salaAgendamento: texto,
+  codigoServico: texto,
   nomeServico: texto,
   tipoAgendamento: texto,
   statusAgendamento: texto,
@@ -114,6 +123,8 @@ export function criarClienteBelle({ token, fetchImpl = fetch, timeoutMs = 50_000
 
   return {
     estabelecimentos: () => get("estabelecimento", estabelecimentoSchema),
+    /** Catálogo de serviços — é dele que sai o TIPO de cada serviço (~330 na B'Laser, 1 chamada). */
+    servicos: () => get("servico/listar", servicoDoCatalogoSchema),
     /** Agendamentos em aberto (Marcado, Confirmado, Em Andamento…), com celular. */
     agendamentosEmAberto: (codEstab: string, de: string, ate: string) =>
       get(

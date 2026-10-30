@@ -131,4 +131,39 @@ describe("agenda externa (0205)", () => {
     );
     expect(rows[0]).toEqual({ t: false, v: false });
   });
+
+  it("⭐ 0206: apagar o serviço desliga o tipo — a ligação e o tipo continuam", async () => {
+    const { rows: integ } = await pool.query<{ id: string }>(
+      "select id from calendar_integrations where organization_id = $1",
+      [ORG],
+    );
+    const { rows: tipo } = await pool.query<{ id: string }>(
+      "insert into calendar_event_types (organization_id, name, slug) values ($1, 'Depilação a Laser', 'depilacao-a-laser') returning id",
+      [ORG],
+    );
+    await pool.query(
+      "insert into calendar_integration_service_links (organization_id, integration_id, external_key, external_label, event_type_id) values ($1, $2, 'tipo:4359', 'Depilação', $3)",
+      [ORG, integ[0]!.id, tipo[0]!.id],
+    );
+    expect(
+      await codigoDoErro(
+        pool.query(
+          "insert into calendar_integration_service_links (organization_id, integration_id, external_key, external_label) values ($1, $2, 'tipo:4359', 'Depilação')",
+          [ORG, integ[0]!.id],
+        ),
+      ),
+    ).toBe("23505");
+
+    await pool.query("delete from calendar_event_types where id = $1", [tipo[0]!.id]);
+    const { rows } = await pool.query<{ event_type_id: string | null }>(
+      "select event_type_id from calendar_integration_service_links where organization_id = $1 and external_key = 'tipo:4359'",
+      [ORG],
+    );
+    expect(rows).toEqual([{ event_type_id: null }]);
+
+    const { rows: anon } = await pool.query<{ ok: boolean }>(
+      "select has_table_privilege('anon', 'public.calendar_integration_service_links', 'select') as ok",
+    );
+    expect(anon[0]!.ok).toBe(false);
+  });
 });
