@@ -145,8 +145,26 @@ export async function listConversationsHandler(
   }
 
   if (q.search) {
+    // Busca por nome/telefone do contato OU texto da última mensagem. Antes só
+    // olhava a prévia, então procurar por nome de paciente nunca achava nada.
     const s = q.search.trim().replace(/[%_]/g, (m) => `\\${m}`);
-    query = query.ilike("last_message_preview", `%${s}%`);
+    // `,` `(` `)` quebram a sintaxe do `.or()` do PostgREST — viram espaço.
+    const sOr = s.replace(/[,()"]/g, " ");
+    const digitos = q.search.replace(/\D/g, "");
+    const filtrosContato = [`display_name.ilike.%${sOr}%`, `name.ilike.%${sOr}%`];
+    if (digitos.length >= 3) filtrosContato.push(`phone_number.ilike.%${digitos}%`);
+    const { data: contatos, error: contatosErr } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("organization_id", ctx.organization_id)
+      .or(filtrosContato.join(","))
+      .limit(500);
+    if (contatosErr) {
+      throw new ApiError(500, "internal_error", undefined, ctx.requestId, contatosErr.message);
+    }
+    const idsContato = ((contatos ?? []) as Array<{ id: string }>).map((c) => c.id);
+    const porPrevia = `last_message_preview.ilike.%${sOr}%`;
+    query = idsContato.length > 0 ? query.or(`${porPrevia},contact_id.in.(${idsContato.join(",")})`) : query.or(porPrevia);
   }
 
   if (q.cursor) {
