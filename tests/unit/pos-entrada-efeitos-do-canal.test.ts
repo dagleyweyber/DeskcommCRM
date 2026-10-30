@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { EntradaDeMensagem } from "@/lib/channels/pos-entrada";
+import { pedeParaSair, type EntradaDeMensagem } from "@/lib/channels/pos-entrada";
 
 /**
  * OS EFEITOS QUE TRANSFORMAM UMA MENSAGEM EM TRABALHO.
@@ -158,6 +158,40 @@ describe("opt-out", () => {
     );
   });
 
+  it("⭐ NÃO bloqueia paciente que só usou 'sair' ou 'parar' numa frase comum", async () => {
+    // Mensagens reais que bloquearam clientes em produção (2026-10).
+    for (const texto of [
+      "Tive que sair porque to atrasada, mas queria já deixar marcada a próxima, por favor",
+      "Vou sair agora",
+      "Porque no caso preciso sair antes do meio dia",
+      "Hj não consigo sair do trabalho",
+      "Mas a dermatologista mandou eu parar",
+      "Estou no trabalho assim que eu sair entro em contato com vc tá",
+    ]) {
+      expect(pedeParaSair(texto), texto).toBe(false);
+    }
+  });
+
+  it("bloqueia pedidos claros de descadastro", () => {
+    for (const texto of [
+      "PARAR",
+      "sair.",
+      "Stop!",
+      "quero PARAR de receber",
+      "pode parar de me mandar mensagem",
+      "me tira da lista",
+      "não quero mais receber",
+      "sair da lista por favor",
+      "unsubscribe",
+    ]) {
+      expect(pedeParaSair(texto), texto).toBe(true);
+    }
+  });
+
+  it("'não quero receber ligação' é troca de canal, não opt-out", () => {
+    expect(pedeParaSair("não quero receber ligação, só whatsapp")).toBe(false);
+  });
+
   it("mensagem sem texto não bloqueia ninguém", async () => {
     await rodar({ texto: null });
     expect(sequencia).not.toContain("update:contacts");
@@ -277,6 +311,6 @@ describe("os dois canais usam o mesmo passo", () => {
 
   it("o vocabulário do opt-out vive num lugar só", () => {
     const compartilhado = readFileSync("lib/channels/pos-entrada.ts", "utf8");
-    expect(compartilhado).toMatch(/export const STOP_RX/);
+    expect(compartilhado).toMatch(/export function pedeParaSair/);
   });
 });

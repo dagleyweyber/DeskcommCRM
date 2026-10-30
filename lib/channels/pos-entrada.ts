@@ -47,31 +47,64 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 type Admin = ReturnType<typeof createAdminClient>;
 
 /**
- * As palavras que significam "não me escreva mais".
+ * Quando uma mensagem é um pedido de "não me escreva mais".
  *
  * Mora aqui, e não em cada ingest, porque o vocabulário do opt-out é regra de
  * negócio (e de LGPD) do produto inteiro — não característica de um transporte.
  * Uma cópia por canal diverge na primeira vez que alguém acrescentar um termo.
  *
- * ─── Por que NÃO é `\b`, que é o que estava aqui antes ─────────────────────
+ * ─── Por que NÃO basta a palavra aparecer na mensagem ──────────────────────
  *
- * Porque em JavaScript `\b` é ASCII: a fronteira de palavra é `[A-Za-z0-9_]`, e
- * qualquer letra acentuada conta como NÃO-palavra. O efeito, na língua em que
- * os clientes escrevem:
- *
- *   "amanhã ele sairá"      → `\bSAIR\b` CASA, porque o "á" vira fronteira
- *   "pararão as obras"      → `\bPARAR\b` CASA, pelo mesmo motivo
- *
- * Ou seja, a versão anterior bloqueava em silêncio quem nunca pediu para sair —
- * e o contato deixava de receber sem que ninguém soubesse por quê. O falso
- * positivo é o pior dos dois erros possíveis aqui: quem pede para sair e não é
+ * A versão anterior bloqueava o contato se STOP/PARAR/SAIR aparecesse em
+ * QUALQUER ponto do texto. Em produção isso bloqueou paciente que só estava
+ * conversando: "tive que SAIR porque to atrasada", "vou SAIR agora", "preciso
+ * SAIR antes do meio dia", "a dermatologista mandou eu PARAR". O contato
+ * bloqueado deixa de receber confirmação, lembrete e campanha — e ninguém vê.
+ * O falso positivo é o pior dos dois erros: quem pede para sair e não é
  * atendido reclama de novo; quem é bloqueado sem pedir simplesmente some.
  *
- * As lookarounds com `\p{L}\p{N}` fazem a fronteira ser Unicode: "PARAR" solto
- * casa, "pararão" não. Foi um teste deste arquivo que pegou isso — o defeito
- * vinha do canal por QR e ia ser copiado para o canal oficial.
+ * Por isso só conta como pedido:
+ *   1. a palavra-chave SOZINHA na mensagem ("PARAR", "sair.", "Stop!");
+ *   2. uma frase inequívoca de descadastro ("parar de receber", "sair da
+ *      lista", "não quero mais receber", "me tira da lista"...).
+ * "Sair" ou "parar" dentro de uma frase qualquer é assunto, não opt-out.
+ *
+ * Em dúvida a mensagem segue para o inbox e a equipe decide — é o caminho
+ * reversível; o bloqueio automático não é.
  */
-export const STOP_RX = /(?<![\p{L}\p{N}])(STOP|PARAR|SAIR|UNSUBSCRIBE)(?![\p{L}\p{N}])/iu;
+const PALAVRAS_DE_SAIDA: ReadonlySet<string> = new Set([
+  "stop",
+  "parar",
+  "pare",
+  "sair",
+  "cancelar",
+  "descadastrar",
+  "remover",
+  "unsubscribe",
+]);
+
+/** Rodam sobre o texto normalizado (minúsculo, sem acento). */
+const FRASES_DE_SAIDA: readonly RegExp[] = [
+  /\bunsubscribe\b/,
+  /\bpar(?:ar|e|em)\s+de\s+(?:me\s+)?(?:receber|mandar|enviar|perturbar|encher)\b/,
+  /\bpode\s+parar\b(?!\s+(?:o|a|os|as|um|uma)\b)/,
+  /\bsair\s+d[ao]\s+(?:lista|grupo|transmissao)\b/,
+  /\bnao\s+(?:quero|desejo|gostaria)\s+(?:de\s+)?(?:mais\s+)?receber\b(?!\s+(?:ligacao|ligacoes|chamada|chamadas|telefonema|telefonemas|telefone)\b)/,
+  /\bnao\s+me\s+(?:mande|manda|mandem|envie|envia|enviem)\s+mais\b/,
+  /\bme\s+(?:tira|tire|tirem|remove|remova|removam|retira|retire|exclui|exclua)\s+d[ao]s?\s+(?:sua\s+)?lista\b/,
+  /\bcancelar?\s+(?:a\s+)?inscricao\b/,
+  /\bme\s+descadastr\w*\b/,
+];
+
+const semAcento = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+export function pedeParaSair(texto: string): boolean {
+  const normalizado = semAcento(texto).trim();
+  if (normalizado === "") return false;
+  // Palavra-chave isolada: só letras, para "STOP." / "SAIR!" contarem.
+  if (PALAVRAS_DE_SAIDA.has(normalizado.replace(/[^a-z]/g, ""))) return true;
+  return FRASES_DE_SAIDA.some((re) => re.test(normalizado));
+}
 
 export interface EntradaDeMensagem {
   organizationId: string;
@@ -137,7 +170,7 @@ export async function aplicarEfeitosPosEntrada(
  * é justamente o que prova, depois, que o pedido chegou e foi respeitado.
  */
 async function aplicarOptOut(admin: Admin, entrada: EntradaDeMensagem): Promise<void> {
-  if (!entrada.texto || !STOP_RX.test(entrada.texto)) return;
+  if (!entrada.texto || !pedeParaSair(entrada.texto)) return;
 
   try {
     const agora = new Date().toISOString();
