@@ -4,11 +4,12 @@ import { listConversationsHandler } from "@/app/api/v1/conversations/_handler";
 
 /** Supabase falso que só registra os filtros aplicados em cada tabela. */
 function supabaseFalso(contatos: Array<{ id: string }>) {
-  const chamadas: Record<string, Array<[string, ...unknown[]]>> = { conversations: [], contacts: [] };
+  type Chamada = [string, ...unknown[]];
+  const chamadas: { conversations: Chamada[]; contacts: Chamada[] } = { conversations: [], contacts: [] };
   const construtor = (tabela: string) => {
     const q: Record<string, unknown> = {};
     const registra = (nome: string) => (...a: unknown[]) => {
-      chamadas[tabela].push([nome, ...a]);
+      chamadas[tabela as "conversations" | "contacts"].push([nome, ...a]);
       return q;
     };
     for (const m of ["select", "eq", "order", "limit", "not", "contains", "is", "in", "or", "ilike", "gt", "lt"]) q[m] = registra(m);
