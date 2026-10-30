@@ -16982,6 +16982,57 @@ create index if not exists idx_calendar_appointments_external_service_key
 
 notify pgrst, 'reload schema';
 
+-- ---- inbox: leitura de conversas sem função por linha (migration 0207) ----
+-- Espelho idempotente da migration 0207; racional completo no arquivo da migration.
+-- Entra ANTES da VARREDURA anon.
+
+create or replace function public.fn_user_conv_scopes()
+returns table (organization_id uuid, role text, visibility text)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select uo.organization_id,
+         uo.role,
+         coalesce(o.settings->>'visibility_mode', 'own_and_unassigned')
+    from public.user_organizations uo
+    join public.organizations o on o.id = uo.organization_id
+   where uo.user_id = auth.uid()
+     and uo.revoked_at is null;
+$$;
+
+revoke execute on function public.fn_user_conv_scopes() from public, anon;
+grant  execute on function public.fn_user_conv_scopes() to authenticated, service_role;
+
+drop policy if exists "conversations_select" on public.conversations;
+create policy "conversations_select" on public.conversations
+  for select using (
+    (select public.fn_is_platform_admin())
+    or organization_id in (
+      select s.organization_id from public.fn_user_conv_scopes() s
+       where s.role in ('viewer', 'manager', 'admin') or s.visibility = 'all'
+    )
+    or (
+      assigned_to_user_id = (select auth.uid())
+      and organization_id in (select s.organization_id from public.fn_user_conv_scopes() s)
+    )
+    or (
+      assigned_to_user_id is null
+      and organization_id in (
+        select s.organization_id from public.fn_user_conv_scopes() s
+         where s.visibility = 'own_and_unassigned'
+      )
+    )
+  );
+
+create index if not exists idx_conversations_org_assignee_last_msg
+  on public.conversations (organization_id, assigned_to_user_id, last_message_at desc nulls last)
+  where assigned_to_user_id is not null;
+
+notify pgrst, 'reload schema';
+
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES
