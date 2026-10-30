@@ -32,6 +32,8 @@ import { logger } from "@/lib/logger";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 
 import { criarClienteBelle, FalhaNoBelle, TokenBelleInvalido, type ClienteBelle } from "./belle/api";
+import { devolverConfirmacoes } from "./devolver-confirmacao";
+import { PROVEDOR } from "./provedor";
 import {
   chaveDoNome,
   catalogoPorCodigo,
@@ -42,7 +44,7 @@ import {
   type TipoDeServico,
 } from "./belle/traduzir";
 
-export const PROVEDOR = "belle" as const;
+export { PROVEDOR };
 
 /** Fatias da janela longa, em dias a partir de hoje. Uma por rodada. */
 export const FATIAS_LONGE: readonly [number, number][] = [
@@ -69,6 +71,10 @@ export interface Contagem {
   contatos_criados: number;
   sem_telefone: number;
   salas_criadas: number;
+  /** Confirmações do cliente (WhatsApp) gravadas de volta no Belle nesta rodada. */
+  confirmacoes_devolvidas: number;
+  /** Confirmações que o Belle recusou (ex.: a recepção já mudou o status lá). */
+  confirmacoes_recusadas: number;
 }
 
 export interface ResultadoDaRodada {
@@ -85,6 +91,8 @@ const ZERO: Contagem = {
   contatos_criados: 0,
   sem_telefone: 0,
   salas_criadas: 0,
+  confirmacoes_devolvidas: 0,
+  confirmacoes_recusadas: 0,
 };
 
 const COLUNAS_EXISTENTE =
@@ -532,6 +540,12 @@ export async function sincronizarIntegracao(
       if (!token) throw new FalhaNoBelle("Não foi possível decifrar o token guardado (chave de criptografia do servidor).");
       cliente = criarClienteBelle({ token });
     }
+    // Antes de ler: devolve ao Belle o que o cliente confirmou pelo WhatsApp, para
+    // a leitura logo abaixo já trazer "Confirmado" e não desfazer a confirmação.
+    const devolucao = await devolverConfirmacoes(admin, integ.organization_id, cliente, { agora });
+    contagem.confirmacoes_devolvidas = devolucao.devolvidas;
+    contagem.confirmacoes_recusadas = devolucao.recusadas;
+
     const timezone = await fusoDaClinica(admin, integ.organization_id);
     const hoje = dataLocalDe(agora, timezone);
     // Catálogo uma vez por rodada: é dele que sai o tipo (depilação, estética…) de cada serviço.

@@ -20,6 +20,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { devolverConfirmacaoDoCompromisso } from "@/lib/agenda-externa/devolver-confirmacao";
 import { audit } from "@/lib/audit";
 import { logger } from "@/lib/logger";
 
@@ -124,6 +125,9 @@ export async function registrarRespostaDeConfirmacao(
     });
 
     if (decisao === "declined") await avisaEquipe(admin, p.organizationId, c);
+    // Compromisso do Belle: a recepção olha a agenda de lá, então a confirmação volta
+    // para o Belle. "Preciso remarcar" não volta — não libera a vaga (ver cabeçalho).
+    if (decisao === "confirmed") await devolverConfirmacaoDoCompromisso(admin, p.organizationId, c.id);
 
     return { resultado: "atualizado", appointmentId: c.id, status: decisao };
   } catch (err) {

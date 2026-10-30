@@ -98,7 +98,8 @@
     { "id": "e45", "from": "belle", "to": "syncagenda", "label": "relatório (duração) + listas (celular), relidos por janela" },
     { "id": "e46", "from": "syncagenda", "to": "agenda", "label": "calendar_appointments com external_id — idempotente" },
     { "id": "e47", "from": "syncagenda", "to": "atividades", "label": "agendou/compareceu/faltou na timeline, após a 1ª importação" },
-    { "id": "e48", "from": "syncagenda", "to": "leads", "label": "negócio aberto anda para a etapa de agendamento" }
+    { "id": "e48", "from": "syncagenda", "to": "leads", "label": "negócio aberto anda para a etapa de agendamento" },
+    { "id": "e49", "from": "syncagenda", "to": "belle", "label": "confirmação do cliente (botão do WhatsApp) volta como \"Confirmado\" — na hora e a cada rodada" }
   ],
   "cards": [
     {

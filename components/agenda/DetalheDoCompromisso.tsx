@@ -123,6 +123,11 @@ export function DetalheDoCompromisso({
               <dt className="text-muted-foreground">Origem</dt>
               <dd>
                 Belle{c.external_status ? ` · “${c.external_status}” lá` : ""}
+                {c.status === "confirmed" && c.client_responded_at && c.external_status === "Marcado" && (
+                  <span className="block text-xs text-muted-foreground">
+                    A confirmação do cliente ainda não chegou ao Belle — o CRM tenta de novo a cada 10 minutos.
+                  </span>
+                )}
               </dd>
             </>
           )}

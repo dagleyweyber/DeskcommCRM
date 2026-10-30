@@ -2,7 +2,8 @@
  * Cliente HTTP da API de Integração Externa do Belle Software.
  *
  * Documentação: https://app.bellesoftware.com.br/api.php (Postman). Tudo aqui é
- * LEITURA — a Fase 1 da integração não escreve nada no Belle.
+ * LEITURA, menos `alterarStatus`: a única escrita é devolver ao Belle a
+ * confirmação que o cliente deu pelo WhatsApp (Fase 2).
  *
  * Fatos medidos com um token real (B'Laser Parnamirim, 2026-10-29), não lidos da
  * documentação:
@@ -87,6 +88,15 @@ export function dataParaBelle(iso: string): string {
   return `${d}/${m}/${a}`;
 }
 
+/** O único status que o CRM escreve no Belle: a confirmação dada pelo cliente. */
+export type StatusEscritoNoBelle = "Confirmado";
+
+export interface ResultadoDaEscrita {
+  sucesso: boolean;
+  /** Motivo da recusa, como o Belle escreveu ("Agendamento com data inferior a data atual."). */
+  msg: string;
+}
+
 export function criarClienteBelle({ token, fetchImpl = fetch, timeoutMs = 50_000 }: ClienteBelleOpcoes) {
   async function get<T>(caminho: string, schema: z.ZodType<T, unknown>): Promise<T[]> {
     let res: Response;
@@ -121,7 +131,39 @@ export function criarClienteBelle({ token, fetchImpl = fetch, timeoutMs = 50_000
     return saida;
   }
 
+  /**
+   * `PUT agenda/status`. O Belle só aceita mudar agendamento ainda em aberto e
+   * de data futura; recusa responde 200 com `sucesso: false` e o motivo em `msg`.
+   */
+  async function alterarStatus(codConsulta: string, novoStatus: StatusEscritoNoBelle): Promise<ResultadoDaEscrita> {
+    const cod = Number(codConsulta);
+    if (!Number.isInteger(cod) || cod <= 0) return { sucesso: false, msg: "Código do agendamento inválido." };
+    let res: Response;
+    try {
+      res = await fetchImpl(`${BASE}/agenda/status`, {
+        method: "PUT",
+        headers: { Authorization: token, Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ codConsulta: cod, novoStatus }),
+        signal: AbortSignal.timeout(timeoutMs),
+        cache: "no-store",
+      });
+    } catch (err) {
+      throw new FalhaNoBelle(`Sem resposta do Belle (${err instanceof Error ? err.name : "erro"}).`);
+    }
+    if (res.status === 401 || res.status === 403) throw new TokenBelleInvalido();
+    if (!res.ok) throw new FalhaNoBelle(`O Belle respondeu ${res.status}.`);
+    let corpo: unknown;
+    try {
+      corpo = await res.json();
+    } catch {
+      throw new FalhaNoBelle("O Belle respondeu em formato inesperado.");
+    }
+    const r = (corpo ?? {}) as { sucesso?: unknown; msg?: unknown };
+    return { sucesso: r.sucesso === true, msg: typeof r.msg === "string" ? r.msg : "" };
+  }
+
   return {
+    alterarStatus,
     estabelecimentos: () => get("estabelecimento", estabelecimentoSchema),
     /** Catálogo de serviços — é dele que sai o TIPO de cada serviço (~330 na B'Laser, 1 chamada). */
     servicos: () => get("servico/listar", servicoDoCatalogoSchema),

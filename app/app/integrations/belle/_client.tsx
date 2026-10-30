@@ -34,7 +34,7 @@ export interface ConexaoBelle {
   status: "healthy" | "invalid" | "error";
   last_error: string | null;
   last_sync_at: string | null;
-  last_sync_stats: Partial<Record<"criados" | "atualizados" | "cancelados_por_remocao" | "contatos_criados" | "sem_telefone" | "salas_criadas", number>>;
+  last_sync_stats: Partial<Record<"criados" | "atualizados" | "cancelados_por_remocao" | "contatos_criados" | "sem_telefone" | "salas_criadas" | "confirmacoes_devolvidas" | "confirmacoes_recusadas", number>>;
   initial_sync_done_at: string | null;
 }
 
@@ -217,6 +217,8 @@ export function BelleClient({ initialData, canWrite }: { initialData: ConexaoBel
           <Numero rotulo="Removidos no Belle" valor={s.cancelados_por_remocao} />
           <Numero rotulo="Contatos criados" valor={s.contatos_criados} />
           <Numero rotulo="Salas criadas" valor={s.salas_criadas} />
+          <Numero rotulo="Confirmações enviadas ao Belle" valor={s.confirmacoes_devolvidas} />
+          <Numero rotulo="Recusadas pelo Belle" valor={s.confirmacoes_recusadas} destaque={(s.confirmacoes_recusadas ?? 0) > 0} />
           <Numero rotulo="Sem celular válido" valor={s.sem_telefone} destaque={(s.sem_telefone ?? 0) > 0} />
         </dl>
         <p className="text-xs text-muted-foreground">Números da última rodada.</p>
