@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAlturaDoQuadro } from "@/hooks/kanban/useAlturaDoQuadro";
+import { useBarraDeRolagemFixa } from "@/hooks/kanban/useBarraDeRolagemFixa";
 import { useBoard } from "@/hooks/kanban/useBoard";
 import { useMoveCard } from "@/hooks/kanban/useMoveCard";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
@@ -80,7 +80,8 @@ export function KanbanBoard({
   const useExternal = stagesProp !== undefined && leadsProp !== undefined;
   const queryResult = useBoard(useExternal ? null : pipelineId);
   const moveCard = useMoveCard(pipelineId);
-  const { aoMontar: montarQuadro, altura: alturaDoQuadro } = useAlturaDoQuadro<HTMLDivElement>();
+  const stagesCount = (useExternal ? stagesProp : queryResult.data?.stages)?.length ?? 0;
+  const { aoMontarQuadro, aoMontarBarra, geo: barraGeo } = useBarraDeRolagemFixa<HTMLDivElement>(stagesCount);
   const { data: members } = useAssignableMembers(true);
   const ownerNames = useMemo(
     () => new Map((members ?? []).map((m) => [m.user_id, m.full_name])),
@@ -281,13 +282,10 @@ export function KanbanBoard({
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
       <div
-        ref={montarQuadro}
-        // Altura presa à JANELA: a barra horizontal fica sempre visível, no pé do
-        // quadro, e cada coluna rola por dentro. Sem isto o quadro crescia com a
-        // coluna mais longa e a barra ficava no fim da página — a atendente rolava
-        // tudo para baixo só para achá-la. `items-start`: coluna curta não estica.
-        className="flex items-start gap-3 overflow-x-auto overflow-y-hidden p-4"
-        style={alturaDoQuadro ? { height: alturaDoQuadro } : undefined}
+        ref={aoMontarQuadro}
+        // A barra nativa fica escondida: no fim do quadro ela ficava abaixo da dobra.
+        // Quem rola na horizontal agora é a barra espelho, presa ao pé da janela (abaixo).
+        className="flex h-full gap-3 overflow-x-auto p-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {data.stages.map((stage) => (
           <StageColumn
@@ -307,6 +305,20 @@ export function KanbanBoard({
           />
         ))}
       </div>
+      {barraGeo && (
+        // Barra ESPELHO do quadro: `fixed` no pé da janela, alinhada a ele, rolando junto
+        // (ver useBarraDeRolagemFixa). Decorativa para leitor de tela — o quadro continua
+        // sendo o elemento rolável real. z-30: acima da página, abaixo de diálogos e painéis.
+        <div
+          ref={aoMontarBarra}
+          aria-hidden
+          data-testid="kanban-barra-rolagem-fixa"
+          className="fixed bottom-0 z-30 h-4 overflow-x-auto overflow-y-hidden bg-background/90"
+          style={{ left: barraGeo.left, width: barraGeo.width }}
+        >
+          <div style={{ width: barraGeo.conteudo, height: 1 }} />
+        </div>
+      )}
       {leadDoDossie && (
         <LeadDossier
           open
