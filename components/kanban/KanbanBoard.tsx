@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAlturaDoQuadro } from "@/hooks/kanban/useAlturaDoQuadro";
 import { useBoard } from "@/hooks/kanban/useBoard";
 import { useMoveCard } from "@/hooks/kanban/useMoveCard";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
@@ -79,6 +80,7 @@ export function KanbanBoard({
   const useExternal = stagesProp !== undefined && leadsProp !== undefined;
   const queryResult = useBoard(useExternal ? null : pipelineId);
   const moveCard = useMoveCard(pipelineId);
+  const { aoMontar: montarQuadro, altura: alturaDoQuadro } = useAlturaDoQuadro<HTMLDivElement>();
   const { data: members } = useAssignableMembers(true);
   const ownerNames = useMemo(
     () => new Map((members ?? []).map((m) => [m.user_id, m.full_name])),
@@ -278,7 +280,15 @@ export function KanbanBoard({
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-3 overflow-x-auto p-4">
+      <div
+        ref={montarQuadro}
+        // Altura presa à JANELA: a barra horizontal fica sempre visível, no pé do
+        // quadro, e cada coluna rola por dentro. Sem isto o quadro crescia com a
+        // coluna mais longa e a barra ficava no fim da página — a atendente rolava
+        // tudo para baixo só para achá-la. `items-start`: coluna curta não estica.
+        className="flex items-start gap-3 overflow-x-auto overflow-y-hidden p-4"
+        style={alturaDoQuadro ? { height: alturaDoQuadro } : undefined}
+      >
         {data.stages.map((stage) => (
           <StageColumn
             key={stage.id}

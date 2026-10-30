@@ -1,17 +1,20 @@
 "use client";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { FileText, ImageSquare, Plus } from "@/lib/ui/icons";
+import { ChatCircleText, FileText, ImageSquare, Plus } from "@/lib/ui/icons";
 
 interface Props {
   disabled?: boolean;
   onPick: (file: File) => void;
+  /** Abre a lista de respostas rápidas (scripts salvos). Sem isto, o item não aparece. */
+  onRespostasRapidas?: () => void;
 }
 
-/** Menu "+" do composer (padrão WhatsApp): Fotos e vídeos / Documento. */
-export function AttachMenu({ disabled, onPick }: Props) {
+/** Menu "+" do composer (padrão WhatsApp): Respostas rápidas / Fotos e vídeos / Documento. */
+export function AttachMenu({ disabled, onPick, onRespostasRapidas }: Props) {
+  const [aberto, setAberto] = useState(false);
   const mediaRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
 
@@ -23,7 +26,7 @@ export function AttachMenu({ disabled, onPick }: Props) {
 
   return (
     <>
-      <Popover>
+      <Popover open={aberto} onOpenChange={setAberto}>
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -36,7 +39,20 @@ export function AttachMenu({ disabled, onPick }: Props) {
             <Plus size={18} weight="regular" aria-hidden />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" side="top" className="w-52 p-1">
+        <PopoverContent align="start" side="top" className="w-56 p-1">
+          {onRespostasRapidas && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted"
+              onClick={() => {
+                setAberto(false);
+                onRespostasRapidas();
+              }}
+            >
+              <ChatCircleText size={18} weight="duotone" className="text-primary" aria-hidden />
+              Respostas rápidas
+            </button>
+          )}
           <button
             type="button"
             className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted"

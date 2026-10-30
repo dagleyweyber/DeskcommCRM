@@ -85,6 +85,7 @@ export {
   MusicNote,
   Note,
   FileText,
+  ChatCircleText,
   Lock,
   Receipt,
   Tag,

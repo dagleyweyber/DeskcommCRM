@@ -15,6 +15,7 @@ import { AttachmentPreviewDialog } from "@/components/inbox/composer/AttachmentP
 import { AudioRecorder } from "@/components/inbox/composer/AudioRecorder";
 import { DraftReplyButton } from "@/components/inbox/composer/DraftReplyButton";
 import { EmojiButton } from "@/components/inbox/composer/EmojiButton";
+import { RespostasRapidasDialog } from "@/components/inbox/composer/RespostasRapidasDialog";
 import { resolveSlash, TemplateMenu } from "@/components/inbox/composer/TemplateMenu";
 import { useCreateNote } from "@/hooks/inbox/useCreateNote";
 import { useMessageTemplates, type MessageTemplate } from "@/hooks/inbox/useMessageTemplates";
@@ -55,6 +56,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [mode, setMode] = useState<"reply" | "note">("reply");
+  const [respostasAbertas, setRespostasAbertas] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const send = useSendMessage();
   const upload = useUploadMedia();
@@ -178,6 +180,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           mode === "note" && "border-warning/40 bg-warning-bg",
         )}
       >
+        <RespostasRapidasDialog
+          open={respostasAbertas}
+          onOpenChange={setRespostasAbertas}
+          templates={templates.data ?? []}
+          carregando={templates.isLoading}
+          onPick={(t) => {
+            applyTemplate(t);
+            setRespostasAbertas(false);
+          }}
+          onFechar={() => taRef.current?.focus()}
+        />
         <TemplateMenu
           open={menuOpen}
           query={slash.query}
@@ -212,7 +225,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>
         </div>
         <div className="flex items-end gap-2">
-          {mode === "reply" && <AttachMenu disabled={respostaBarrada} onPick={setPendingFile} />}
+          {mode === "reply" && (
+            <AttachMenu
+              disabled={respostaBarrada}
+              onPick={setPendingFile}
+              onRespostasRapidas={() => setRespostasAbertas(true)}
+            />
+          )}
           {mode === "reply" && (
             <DraftReplyButton conversationId={conversationId} disabled={isDisabled} onDraft={applyDraft} />
           )}
