@@ -246,18 +246,14 @@ async function resolverContatos(
   }
 
   const contatoDaVariante = new Map<string, string>();
-  const jaExistiam = new Map<string, ContatoParaNome>(); // contato que já estava no CRM, com o que tem de nome
   for (const lote of emLotes([...todas], 200)) {
     const { data } = await admin
       .from("contacts")
-      .select("id, phone_number, display_name, name, is_anonymized")
+      .select("id, phone_number")
       .eq("organization_id", orgId)
       .is("is_merged_into", null)
       .in("phone_number", lote);
-    for (const c of (data ?? []) as ({ id: string } & ContatoParaNome & { phone_number: string })[]) {
-      contatoDaVariante.set(c.phone_number, c.id);
-      jaExistiam.set(c.id, c);
-    }
+    for (const c of (data ?? []) as { id: string; phone_number: string }[]) contatoDaVariante.set(c.phone_number, c.id);
   }
 
   const acha = (e164: string) => variantesDoTelefone(e164).map((v) => contatoDaVariante.get(v)).find(Boolean);
@@ -310,13 +306,44 @@ async function resolverContatos(
     if (id) contatoDoItem.set(item.externalId, id);
   }
 
-  // Contato que já existia (conversa de WhatsApp) e está sem nome: o Belle sabe quem é.
-  // Só preenche vazio — ver `nomes.ts`. Falha aqui não derruba a sincronização.
-  const pares = itens.flatMap((item) => {
-    const id = contatoDoItem.get(item.externalId);
-    return id && item.cliente.nome ? [[id, item.cliente.nome] as const] : [];
-  });
-  for (const n of nomesParaPreencher(jaExistiam, pares)) {
+  return contatoDoItem;
+}
+
+/**
+ * Preenche o nome do paciente em contato que está SEM nome, para todo agendamento da
+ * janela lida — novo ou já importado. (Antes só rodava para agendamento novo: os 569
+ * contatos sem nome já tinham o agendamento importado e nunca eram revisitados.)
+ *
+ * A consulta traz só contatos com `display_name` vazio, então em regime normal volta
+ * zero linhas. Só preenche vazio, nunca sobrescreve — regras em `nomes.ts`. Falha
+ * aqui não derruba a sincronização.
+ */
+async function preencherNomesDosContatos(
+  admin: SupabaseClient,
+  orgId: string,
+  pares: Array<readonly [string, string]>,
+): Promise<void> {
+  const nomeDoContato = new Map<string, string>();
+  for (const [id, nome] of pares) if (nome.trim() && !nomeDoContato.has(id)) nomeDoContato.set(id, nome);
+  if (nomeDoContato.size === 0) return;
+
+  const semNome = new Map<string, ContatoParaNome>();
+  for (const lote of emLotes([...nomeDoContato.keys()], 200)) {
+    const { data, error } = await admin
+      .from("contacts")
+      .select("id, phone_number, display_name, name, is_anonymized")
+      .eq("organization_id", orgId)
+      .in("id", lote)
+      .or("display_name.is.null,display_name.eq.");
+    if (error) {
+      logger.warn("[agenda-externa] leitura de contatos sem nome falhou", { organization_id: orgId, erro: error.message });
+      return;
+    }
+    for (const c of (data ?? []) as ({ id: string } & ContatoParaNome)[]) semNome.set(c.id, c);
+  }
+  if (semNome.size === 0) return;
+
+  for (const n of nomesParaPreencher(semNome, nomeDoContato)) {
     const { error } = await admin
       .from("contacts")
       .update(n.name ? { display_name: n.display_name, name: n.name } : { display_name: n.display_name })
@@ -327,7 +354,6 @@ async function resolverContatos(
       logger.warn("[agenda-externa] nome do contato não preenchido", { organization_id: orgId, contact_id: n.id, erro: error.message });
     }
   }
-  return contatoDoItem;
 }
 
 /**
@@ -418,6 +444,15 @@ export async function aplicarJanela(
     integ,
     itens.filter((i) => !existentes.has(i.externalId) && i.status !== "cancelled"),
     contagem,
+  );
+  // Nome do Belle em contato sem nome — vale para agendamento novo e para o já importado.
+  await preencherNomesDosContatos(
+    admin,
+    orgId,
+    itens.flatMap((i) => {
+      const id = existentes.get(i.externalId)?.contact_id ?? contatos.get(i.externalId);
+      return id && i.status !== "cancelled" && i.cliente.nome ? [[id, i.cliente.nome] as const] : [];
+    }),
   );
 
   const novos: Record<string, unknown>[] = [];
