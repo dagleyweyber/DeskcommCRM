@@ -129,11 +129,12 @@ describe("público por TAG", () => {
 
   it("⭐ base importada MAIOR que o teto do PostgREST sai inteira, não só as 1.000 primeiras", async () => {
     // 1.205 = uma página cheia + uma parcial. Sem paginar, o público parava em
-    // 1.000 em silêncio (o adaptador corta como o PostgREST real).
+    // 1.000 em silêncio (o adaptador corta como o PostgREST real). DDD 31: os
+    // contatos avulsos deste arquivo são +55119…, e a faixa gerada cobria eles.
     const total = MAX_ROWS_DO_POSTGREST + 205;
     await pool.query(
       `insert into contacts (organization_id, display_name, phone_number, source, tags)
-       select $1, 'Importado ' || g, '+55119' || lpad(g::text, 8, '0'), 'import', array['base-grande']
+       select $1, 'Importado ' || g, '+55319' || lpad(g::text, 8, '0'), 'import', array['base-grande']
          from generate_series(1, $2::int) g`,
       [ORG_A, total],
     );

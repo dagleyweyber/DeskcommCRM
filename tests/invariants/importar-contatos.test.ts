@@ -100,7 +100,7 @@ beforeAll(async () => {
     [ORG_OUTRA, "org-importa-outra"],
   ]) {
     await pool.query(
-      `insert into organizations (id, slug, legal_name, display_name) values ($1, $2, $2, $2) on conflict do nothing`,
+      `insert into organizations (id, slug, legal_name, display_name) values ($1, $2::text, $2::text, $2::text) on conflict do nothing`,
       [id, slug],
     );
   }
