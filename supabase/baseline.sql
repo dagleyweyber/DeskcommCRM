@@ -17130,7 +17130,7 @@ returns table (linha int, resultado text, motivo text, contact_id uuid)
 language plpgsql
 security invoker
 set search_path = public, pg_temp
-as $
+as $$
 declare
   r jsonb;
   v_agora timestamptz := now();
@@ -17242,7 +17242,7 @@ begin
     return next;
   end loop;
 end;
-$;
+$$;
 
 revoke execute on function public.fn_importar_contatos(uuid, jsonb, text[], boolean, jsonb) from public, anon;
 grant  execute on function public.fn_importar_contatos(uuid, jsonb, text[], boolean, jsonb) to authenticated, service_role;
@@ -17258,7 +17258,7 @@ language sql
 stable
 security invoker
 set search_path = public, pg_temp
-as $
+as $$
   select t as tag, count(*) as total
     from public.contacts c
     cross join lateral unnest(c.tags) as t
@@ -17266,7 +17266,7 @@ as $
      and c.is_merged_into is null
    group by t
    order by count(*) desc, t;
-$;
+$$;
 
 revoke execute on function public.fn_tags_dos_contatos(uuid) from public, anon;
 grant  execute on function public.fn_tags_dos_contatos(uuid) to authenticated, service_role;
