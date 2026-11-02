@@ -63,11 +63,17 @@ export interface PedidoDeDefinicao {
  * vazio (sync nunca rodou) barraria todo envio de modelo numa instalação que
  * está com tudo certo do lado da plataforma. Recusar o que não se sabe é pior
  * que deixar o provedor responder — ele é a autoridade, não este espelho.
+ *
+ * Devolve os `components` da definição que APROVOU — é o que o envio grava na
+ * mensagem para o inbox mostrar cabeçalho, rodapé e botões como o cliente viu.
+ * Sai desta mesma leitura de propósito: uma segunda consulta poderia achar outra
+ * versão. `undefined` quando não havia o que conferir (não espelhada, falha de
+ * leitura).
  */
 export async function conferirDefinicao(
   db: SupabaseClient,
   pedido: PedidoDeDefinicao,
-): Promise<void> {
+): Promise<unknown> {
   if (!pedido.name || !pedido.language) {
     throw new Error("template_incompleto: nome e idioma são obrigatórios em type=template");
   }
@@ -137,4 +143,6 @@ export async function conferirDefinicao(
       `template_missing_values: "${pedido.name}" espera ${faltando.length} valor(es) — falta: ${nomes}`,
     );
   }
+
+  return linha.components;
 }

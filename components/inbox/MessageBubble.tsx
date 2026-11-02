@@ -8,6 +8,8 @@ import type { Message } from "@/lib/types/messaging";
 import { motivoParaTela } from "@/lib/messaging/motivo-da-falha";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
+import { BotoesDoModelo } from "@/components/inbox/BotoesDoModelo";
+import { lerRetratoDoModelo } from "@/lib/messaging/retrato-do-modelo";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -44,6 +46,8 @@ export function MessageBubble({ message, debugCitations }: Props) {
   // para tirar do ar.
   const apagada = Boolean(message.revoked_at);
   const editada = Boolean(message.edited_at) && !apagada;
+  // Cabeçalho, rodapé e botões de mensagem de modelo, gravados no envio.
+  const modelo = message.type === "template" ? lerRetratoDoModelo(message.metadata) : null;
   const aiGenerated = isAiGeneratedMessage(message.metadata);
   const citations = extractCitations(message.metadata);
   const showCitationButton =
@@ -94,8 +98,23 @@ export function MessageBubble({ message, debugCitations }: Props) {
               </div>
             )}
 
+            {modelo?.header && (
+              <p className="mb-1 whitespace-pre-wrap break-words font-semibold leading-snug">{modelo.header}</p>
+            )}
+
             {message.body && (
               <p className="whitespace-pre-wrap break-words leading-snug">{message.body}</p>
+            )}
+
+            {modelo?.footer && (
+              <p
+                className={cn(
+                  "mt-1 whitespace-pre-wrap break-words text-xs leading-snug",
+                  isOutbound ? "text-primary-foreground/70" : "text-muted-foreground",
+                )}
+              >
+                {modelo.footer}
+              </p>
             )}
           </>
         )}
@@ -137,6 +156,9 @@ export function MessageBubble({ message, debugCitations }: Props) {
             </TooltipProvider>
           )}
         </div>
+
+        {/* Depois da hora, como o WhatsApp desenha: os botões são o rodapé da bolha. */}
+        {modelo && !apagada && <BotoesDoModelo botoes={modelo.buttons} isOutbound={isOutbound} />}
       </div>
     </div>
   );

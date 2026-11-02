@@ -124,4 +124,7 @@ export {
   Megaphone,
   // agenda externa (Belle)
   CalendarCheck,
+  // botões de mensagem de modelo no inbox
+  ArrowSquareOut,
+  ArrowBendUpLeft,
 } from "@phosphor-icons/react/dist/ssr";

@@ -217,7 +217,8 @@ describe("o pré-voo da definição", () => {
     // A chave do corpo NÃO tem prefixo — `slotKey` só prefixa header, botão e
     // card. Errar isto do lado de quem envia faz o pré-voo recusar um envio
     // completo, então o formato exato importa e está fixado aqui.
-    await expect(conferir({ "1": "Marcela" })).resolves.toBeUndefined();
+    // Aprovado devolve a definição lida — é o que o envio grava para o inbox.
+    await expect(conferir({ "1": "Marcela" })).resolves.toEqual([{ type: "BODY", text: "Olá {{1}}." }]);
   });
 
   it("definição NÃO espelhada passa — o provedor é a autoridade, não o espelho", async () => {

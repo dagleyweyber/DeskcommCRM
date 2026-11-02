@@ -20,6 +20,7 @@ import {
 } from "@/lib/channels";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { conferirDefinicao } from "@/lib/channels/conferir-definicao";
+import { retratoDoModelo, type RetratoDoModelo } from "@/lib/messaging/retrato-do-modelo";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
 import { resolveHeaderMediaStorage } from "@/lib/messaging/header-media-storage";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
@@ -444,6 +445,10 @@ export async function sendMessageHandler(
       // enviado (achado ao vivo: campanha com imagem "enviava certo" e a
       // conversa nunca mostrava nada de volta, só o texto).
       let headerMedia: { kind: "image" | "video" | "document"; url: string } | null = null;
+      // Cabeçalho de texto, rodapé e botões como o cliente viu — sem isto o
+      // inbox mostrava só o corpo e a equipe recebia "Confirmar" sem saber que
+      // opções tinham sido oferecidas. Ver `lib/messaging/retrato-do-modelo.ts`.
+      let retrato: RetratoDoModelo | null = null;
       if (input.type === "template") {
         // Template é caminho próprio: não passa pelo `adapter.send` (que fala em
         // texto/mídia) porque o payload da plataforma é outro — e porque o envio
@@ -463,7 +468,7 @@ export async function sendMessageHandler(
         // característica do transporte. O caminho de baixo já conferia; o
         // adapter postava direto, e um parâmetro a mais virava `400` cru em vez
         // de "falta o valor {{2}}".
-        await conferirDefinicao(supabase, {
+        const definicao = await conferirDefinicao(supabase, {
           organizationId: ctx.organization_id,
           // A conexão dona da definição: dois números têm modelos diferentes, e
           // conferir a do número errado aprovaria um envio que a plataforma
@@ -473,6 +478,7 @@ export async function sendMessageHandler(
           language: input.template_language ?? "",
           values: input.template_values ?? {},
         });
+        retrato = retratoDoModelo(definicao, input.template_values ?? {});
 
         if (adapter.sendTemplate) {
           const resultado = await adapter.sendTemplate({
@@ -555,6 +561,7 @@ export async function sendMessageHandler(
           ...(mediaDoTemplate
             ? { media_storage_path: mediaDoTemplate.storagePath, media_mime: mediaDoTemplate.mime }
             : {}),
+          ...(retrato ? { metadata: { ...(message.metadata ?? {}), template: retrato } } : {}),
         })
         .eq("id", message.id)
         .select(MSG_COLS)
