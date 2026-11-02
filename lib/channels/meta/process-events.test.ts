@@ -15,7 +15,7 @@ vi.mock("./coexistence-ingest", () => ({
   registrarHistoricoRecusado: vi.fn(),
 }));
 
-import { tratarAccountUpdate } from "./process-events";
+import { processarEventosMeta, tratarAccountUpdate } from "./process-events";
 
 const session: MetaWebhookSession = {
   id: "sess-1",
@@ -136,5 +136,71 @@ describe("tratarAccountUpdate", () => {
     expect(await tratarAccountUpdate(admin, session, ev({ event: "PARTNER_ADDED" }))).toBe("ignorado");
     expect(sincronizar).not.toHaveBeenCalled();
     expect(registrar).not.toHaveBeenCalled();
+  });
+});
+
+describe("processarEventosMeta — categoria do template no espelho", () => {
+  const status = {
+    kind: "template_status" as const,
+    wabaId: "W1",
+    templateName: "campanha_11_11",
+    templateLanguage: "pt_BR",
+    event: "APPROVED",
+    reason: null,
+  };
+
+  it("⭐ aprovação com categoria trocada pela Meta grava a categoria decidida", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({
+      admin,
+      session,
+      eventos: [{ ...status, category: "MARKETING" }],
+      requestId: "r",
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      tabela: "meta_templates",
+      arg: { status: "APPROVED", category: "MARKETING" },
+    });
+  });
+
+  it("aviso sem categoria NÃO apaga a que já estava gravada", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({ admin, session, eventos: [{ ...status, category: null }], requestId: "r" });
+    expect(updates[0]!.arg).not.toHaveProperty("category");
+  });
+
+  it("⭐ troca de categoria concluída atualiza o espelho e aparece no desfecho", async () => {
+    const { admin, updates } = adminFalso();
+    const desfechos = await processarEventosMeta({
+      admin,
+      session,
+      eventos: [
+        {
+          kind: "template_category",
+          wabaId: "W1",
+          templateName: "campanha_11_11",
+          templateLanguage: "pt_BR",
+          previousCategory: "UTILITY",
+          newCategory: "MARKETING",
+        },
+      ],
+      requestId: "r",
+    });
+    expect(updates).toEqual([
+      { tabela: "meta_templates", arg: expect.objectContaining({ category: "MARKETING" }) },
+    ]);
+    expect(desfechos).toEqual(["template_category:UTILITY->MARKETING"]);
+  });
+
+  it("evento de OUTRA WABA não toca no espelho desta organização", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({
+      admin,
+      session,
+      eventos: [{ ...status, wabaId: "OUTRA", category: "MARKETING" }],
+      requestId: "r",
+    });
+    expect(updates).toEqual([]);
   });
 });

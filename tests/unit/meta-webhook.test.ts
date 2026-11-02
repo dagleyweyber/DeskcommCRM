@@ -112,8 +112,91 @@ describe("parseMetaWebhook", () => {
         templateLanguage: "pt_BR",
         event: "APPROVED",
         reason: null,
+        category: null,
       },
     ]);
+  });
+
+  it("⭐ aprovação traz a categoria com que a Meta DECIDIU — não a pedida na criação", () => {
+    // Achado ao vivo (B'Laser, 2026-11-02): `campanha_11_11` criado como UTILITY,
+    // aprovado como MARKETING; o espelho seguiu UTILITY porque só o status era lido.
+    const [e] = parseMetaWebhook({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "w",
+          changes: [
+            {
+              field: "message_template_status_update",
+              value: {
+                event: "APPROVED",
+                message_template_id: 1689556908129832,
+                message_template_name: "campanha_11_11",
+                message_template_language: "pt_BR",
+                reason: "NONE",
+                message_template_category: "MARKETING",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(e).toMatchObject({ kind: "template_status", event: "APPROVED", category: "MARKETING" });
+  });
+
+  it("⭐ troca de categoria CONCLUÍDA vira evento com a categoria nova", () => {
+    const [e] = parseMetaWebhook({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "w",
+          changes: [
+            {
+              field: "template_category_update",
+              value: {
+                message_template_id: 1,
+                message_template_name: "campanha_11_11",
+                message_template_language: "pt_BR",
+                previous_category: "UTILITY",
+                new_category: "MARKETING",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(e).toEqual({
+      kind: "template_category",
+      wabaId: "w",
+      templateName: "campanha_11_11",
+      templateLanguage: "pt_BR",
+      previousCategory: "UTILITY",
+      newCategory: "MARKETING",
+    });
+  });
+
+  it("troca de categoria só AGENDADA não vira evento — new_category ali é a categoria atual", () => {
+    const eventos = parseMetaWebhook({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "w",
+          changes: [
+            {
+              field: "template_category_update",
+              value: {
+                message_template_name: "welcome_template",
+                message_template_language: "pt_BR",
+                new_category: "UTILITY",
+                correct_category: "MARKETING",
+                category_update_timestamp: 1746169200,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(eventos).toEqual([]);
   });
 
   it("extrai status de entrega, inclusive o erro quando falha", () => {

@@ -105,7 +105,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? {
           callbackUrl: `${base}/api/v1/webhooks/meta/${data.webhook_path_token}`,
           verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? null,
-          fields: ["messages", "message_template_status_update"],
+          fields: ["messages", "message_template_status_update", "template_category_update"],
         }
       : null,
   });

@@ -59,6 +59,28 @@ export interface TemplateStatusEvent {
   templateLanguage: string;
   event: string;
   reason: string | null;
+  /**
+   * `message_template_category` — a categoria com que a Meta DECIDIU. Achado ao
+   * vivo (B'Laser, 2026-11-02): modelo criado como UTILITY foi aprovado como
+   * MARKETING, e o espelho seguiu dizendo UTILITY porque só o status era lido.
+   * Categoria muda preço e regra de envio; a tela não pode mentir sobre ela.
+   */
+  category: string | null;
+}
+
+/**
+ * A Meta trocou a categoria de um template JÁ existente (`template_category_update`).
+ * Só o aviso de mudança CONCLUÍDA vira evento — o de mudança agendada (vem com
+ * `correct_category` e sem `previous_category`) traz em `new_category` a categoria
+ * ATUAL, e gravá-la não mudaria nada; a troca de verdade chega em outro aviso.
+ */
+export interface TemplateCategoryEvent {
+  kind: "template_category";
+  wabaId: string;
+  templateName: string;
+  templateLanguage: string;
+  previousCategory: string;
+  newCategory: string;
 }
 
 /**
@@ -147,6 +169,7 @@ export interface MessageStatusEvent {
 
 export type MetaWebhookEvent =
   | TemplateStatusEvent
+  | TemplateCategoryEvent
   | MessageStatusEvent
   | InboundMessageEvent
   | CoexistenceEvent;
@@ -180,6 +203,12 @@ export function normalizeRejectedReason(v: unknown): string | null {
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
+}
+
+/** MARKETING | UTILITY | AUTHENTICATION, na grafia do sync (que grava o que a Graph devolve). */
+function categoria(v: unknown): string | null {
+  const s = str(v);
+  return s ? s.toUpperCase() : null;
 }
 
 /** `raw.referral`, quando a mensagem veio de um clique em anúncio. */
@@ -237,6 +266,25 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
           templateLanguage: language,
           event: str(v.event) ?? "UNKNOWN",
           reason: normalizeRejectedReason(v.reason),
+          category: categoria(v.message_template_category),
+        });
+        continue;
+      }
+
+      if (change.field === "template_category_update") {
+        const name = str(v.message_template_name);
+        const language = str(v.message_template_language);
+        const anterior = categoria(v.previous_category);
+        const nova = categoria(v.new_category);
+        // Sem `previous_category` é o aviso de mudança AGENDADA — ver TemplateCategoryEvent.
+        if (!name || !language || !anterior || !nova) continue;
+        out.push({
+          kind: "template_category",
+          wabaId,
+          templateName: name,
+          templateLanguage: language,
+          previousCategory: anterior,
+          newCategory: nova,
         });
         continue;
       }

@@ -199,13 +199,28 @@ export async function processarEventosMeta(input: {
     }
 
     if (e.kind === "template_status") {
+      // Categoria só quando veio: aviso antigo/sem o campo não apaga a que o sync gravou.
       await admin
         .from("meta_templates")
-        .update({ status: e.event, rejected_reason: e.reason, updated_at: now })
+        .update({
+          status: e.event,
+          rejected_reason: e.reason,
+          ...(e.category ? { category: e.category } : {}),
+          updated_at: now,
+        })
         .eq("organization_id", session.organizationId)
         .eq("waba_id", e.wabaId)
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
+    } else if (e.kind === "template_category") {
+      await admin
+        .from("meta_templates")
+        .update({ category: e.newCategory, updated_at: now })
+        .eq("organization_id", session.organizationId)
+        .eq("waba_id", e.wabaId)
+        .eq("name", e.templateName)
+        .eq("language", e.templateLanguage);
+      desfechos.push(`template_category:${e.previousCategory}->${e.newCategory}`);
     } else if (e.kind === "message_status") {
       // Achado ao vivo (RevitaFio Mossoró): campanha com TODO envio "failed"
       // e nenhum jeito de saber por quê — o `errorCode`/`errorTitle` que a
