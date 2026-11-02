@@ -213,7 +213,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
             })
           }
         >
-          Pular por enquanto
+          Pular (conecto depois / API Oficial)
         </Button>
         <Button
           type="button"

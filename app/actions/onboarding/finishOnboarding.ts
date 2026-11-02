@@ -29,7 +29,16 @@ export type FinishOnboardingResult =
     }
   | { ok: false; error: "pendencias_criticas"; pendencias: PendenciaCritica[] };
 
-export async function finishOnboarding(): Promise<FinishOnboardingResult> {
+/**
+ * `semCanal`: a pessoa confirmou, na tela, que quer entrar sem WhatsApp agora
+ * (cliente que conecta só a API Oficial depois, em Configurações → Canais). Só
+ * dispensa a pendência de CANAL — a de IA sem credencial continua bloqueando,
+ * porque é o incidente de silêncio provado e não some por vontade de quem clica.
+ * Depois de concluir, "zero canal" segue visível no painel de saúde das clínicas.
+ */
+export async function finishOnboarding(opts?: {
+  semCanal?: boolean;
+}): Promise<FinishOnboardingResult> {
   let ctx;
   try {
     ctx = await requireOnboardingCtx();
@@ -71,7 +80,8 @@ export async function finishOnboarding(): Promise<FinishOnboardingResult> {
     // caso de "sem pendência", é erro genuíno; não deixa passar silencioso.
     if (!sinais) return { ok: false, error: "db_error", details: "organizacao_nao_encontrada" };
 
-    const pendencias = pendenciasParaConcluir(sinais);
+    const semCanal = opts?.semCanal === true;
+    const pendencias = pendenciasParaConcluir(sinais, { semCanal });
     if (pendencias.length > 0) {
       return { ok: false, error: "pendencias_criticas", pendencias };
     }
@@ -93,6 +103,7 @@ export async function finishOnboarding(): Promise<FinishOnboardingResult> {
       action: "onboarding.completed",
       actorUserId: ctx.userId,
       organizationId: ctx.orgId,
+      metadata: { sem_canal: semCanal && sinais.canais_working === 0 },
     });
     await audit({
       action: "tenant.onboarded",

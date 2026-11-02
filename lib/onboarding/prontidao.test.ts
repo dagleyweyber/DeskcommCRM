@@ -39,6 +39,19 @@ describe("pendenciasParaConcluir", () => {
     );
   });
 
+  it("⭐ semCanal dispensa a falta de canal (cliente que conecta só a API Oficial depois)", () => {
+    const r = pendenciasParaConcluir(pronta({ canais_working: 0 }), { semCanal: true });
+    expect(r).toEqual([]);
+  });
+
+  it("⭐ semCanal NÃO dispensa IA publicada sem credencial", () => {
+    const r = pendenciasParaConcluir(
+      pronta({ canais_working: 0, agentes_publicados: 1, credenciais_ia_ativas: 0 }),
+      { semCanal: true },
+    );
+    expect(r.map((p) => p.motivo)).toEqual(["ia_sem_credencial"]);
+  });
+
   it("vários canais no ar e várias credenciais ativas não bloqueiam (não é teto de 1)", () => {
     const r = pendenciasParaConcluir(
       pronta({ canais_working: 3, agentes_publicados: 2, credenciais_ia_ativas: 2 }),

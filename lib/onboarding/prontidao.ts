@@ -56,10 +56,15 @@ export interface PendenciaCritica {
 /**
  * As pendências que impedem concluir o onboarding agora. Lista vazia = pronto.
  */
-export function pendenciasParaConcluir(s: SinaisDeProntidao): PendenciaCritica[] {
+export function pendenciasParaConcluir(
+  s: SinaisDeProntidao,
+  opts: { semCanal?: boolean } = {},
+): PendenciaCritica[] {
   const pendencias: PendenciaCritica[] = [];
 
-  if (s.canais_working === 0) {
+  // `semCanal` = a pessoa confirmou que entra sem WhatsApp agora (conecta a API
+  // Oficial depois). Dispensa SÓ o canal; a IA sem credencial nunca é dispensável.
+  if (s.canais_working === 0 && !opts.semCanal) {
     pendencias.push({
       motivo: "sem_canal_funcionando",
       mensagem: "Nenhum canal de WhatsApp conectado e funcionando.",

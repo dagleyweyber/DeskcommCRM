@@ -38,6 +38,24 @@ const ITEMS: { key: keyof Recap; label: string }[] = [
 export function DoneClient({ recap }: { recap: Recap }) {
   const [pending, startTransition] = useTransition();
   const [pendencias, setPendencias] = useState<PendenciaCritica[] | null>(null);
+  // Só a falta de canal pode ser dispensada pela pessoa; a de IA sem credencial não.
+  const soFaltaCanal =
+    pendencias !== null &&
+    pendencias.length > 0 &&
+    pendencias.every((p) => p.motivo === "sem_canal_funcionando");
+
+  function concluir(semCanal: boolean) {
+    startTransition(async () => {
+      const res = await finishOnboarding({ semCanal });
+      if (res && !res.ok) {
+        if (res.error === "pendencias_criticas") {
+          setPendencias(res.pendencias);
+          return;
+        }
+        toast.error(`Falha: ${res.error}`);
+      }
+    });
+  }
 
   return (
     <div className="space-y-6 rounded-lg border bg-background p-6 text-center">
@@ -46,7 +64,7 @@ export function DoneClient({ recap }: { recap: Recap }) {
       </h2>
       <p className="text-sm text-muted-foreground">
         {pendencias
-          ? "Duas coisas puladas aqui não dá pra deixar pra depois — sem elas, o atendimento fica mudo sem ninguém perceber."
+          ? "Falta algo que deixaria o atendimento mudo sem ninguém perceber."
           : "Sua operação está configurada. Você pode ajustar tudo nas Configurações."}
       </p>
 
@@ -90,24 +108,22 @@ export function DoneClient({ recap }: { recap: Recap }) {
         </ul>
       )}
 
-      <Button
-        type="button"
-        disabled={pending}
-        onClick={() =>
-          startTransition(async () => {
-            const res = await finishOnboarding();
-            if (res && !res.ok) {
-              if (res.error === "pendencias_criticas") {
-                setPendencias(res.pendencias);
-                return;
-              }
-              toast.error(`Falha: ${res.error}`);
-            }
-          })
-        }
-      >
-        {pending ? "Finalizando..." : pendencias ? "Já resolvi, tentar de novo" : "Ir para o Inbox"}
-      </Button>
+      <div className="flex flex-col items-center gap-2">
+        <Button type="button" disabled={pending} onClick={() => concluir(false)}>
+          {pending ? "Finalizando..." : pendencias ? "Já resolvi, tentar de novo" : "Ir para o Inbox"}
+        </Button>
+        {soFaltaCanal && (
+          <>
+            <Button type="button" variant="outline" disabled={pending} onClick={() => concluir(true)}>
+              Entrar sem WhatsApp por enquanto
+            </Button>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              Você conecta depois em <strong>Configurações → Canais</strong> (QR Code ou API Oficial).
+              Enquanto não houver canal, nenhuma mensagem entra nem sai.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }
