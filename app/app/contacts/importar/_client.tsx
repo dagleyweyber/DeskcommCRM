@@ -23,6 +23,7 @@ import {
   type Mapeamento,
 } from "@/lib/contacts/importacao";
 import { ACEITA, ErroDePlanilha, lerPlanilha, type Planilha } from "@/lib/contacts/ler-planilha";
+import { randomId } from "@/lib/random-id";
 import { CaretLeft, CheckCircle, DownloadSimple, Tag, UploadSimple, Warning, X } from "@/lib/ui/icons";
 
 const NENHUMA = "__nenhuma__";
@@ -121,7 +122,7 @@ export function ImportarContatosClient() {
   async function importar(aPartirDe = 0) {
     if (!preparo || !arquivo) return;
     // Retomar usa o MESMO import_id: o audit agrupa os lotes como uma importação só.
-    if (aPartirDe === 0) importId.current = crypto.randomUUID();
+    if (aPartirDe === 0) importId.current = randomId();
     const total = preparo.prontas.length;
     let acumulado = envio.fase === "interrompido" && aPartirDe > 0 ? envio.resultado : VAZIO;
     let feitos = aPartirDe;

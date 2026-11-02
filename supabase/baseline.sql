@@ -17085,75 +17085,6 @@ grant  execute on function public.fn_conversation_counts(uuid, uuid, text[]) to 
 notify pgrst, 'reload schema';
 
 
--- ---- Botões das mensagens de modelo já enviadas (migration 0209) ----
--- Espelho idempotente da migration 0209 (só dados); racional completo no arquivo da
--- migration. Só preenche quem ainda não tem `metadata.template` — reaplicar no
--- update.sh não muda nada; banco novo não tem mensagem e passa direto.
-with alvo as (
-  select m.id, d.components
-    from public.messages m
-    cross join lateral (
-      select t.components
-        from public.meta_templates t
-       where t.organization_id = m.organization_id
-         and t.name = m.template_name
-         and t.language = m.template_language
-         and (t.channel_session_id = m.channel_session_id or t.channel_session_id is null)
-         and jsonb_typeof(t.components) = 'array'
-       order by (t.channel_session_id is not null) desc
-       limit 1
-    ) d
-   where m.type = 'template'
-     and m.direction = 'outbound'
-     and not (coalesce(m.metadata, '{}'::jsonb) ? 'template')
-),
-retrato as (
-  select a.id,
-    (select c->>'text'
-       from jsonb_array_elements(a.components) c
-      where upper(c->>'type') = 'HEADER'
-        and upper(coalesce(c->>'format', 'TEXT')) = 'TEXT'
-        and coalesce(c->>'text', '') <> ''
-        and strpos(c->>'text', '{{') = 0
-      limit 1) as header,
-    (select c->>'text'
-       from jsonb_array_elements(a.components) c
-      where upper(c->>'type') = 'FOOTER'
-        and coalesce(c->>'text', '') <> ''
-      limit 1) as footer,
-    coalesce((
-      select jsonb_agg(
-               jsonb_strip_nulls(jsonb_build_object(
-                 'type', upper(coalesce(b->>'type', '')),
-                 'text', b->>'text',
-                 'url', case when strpos(coalesce(b->>'url', ''), '{{') = 0 then nullif(b->>'url', '') end,
-                 'phone', nullif(b->>'phone_number', '')
-               ))
-               order by c_ord, b_ord)
-        from jsonb_array_elements(a.components) with ordinality as cs(c, c_ord)
-        cross join lateral jsonb_array_elements(
-          case when jsonb_typeof(c->'buttons') = 'array' then c->'buttons' else '[]'::jsonb end
-        ) with ordinality as bs(b, b_ord)
-       where upper(c->>'type') = 'BUTTONS'
-         and coalesce(b->>'text', '') <> ''
-    ), '[]'::jsonb) as buttons
-  from alvo a
-)
-update public.messages m
-   set metadata = coalesce(m.metadata, '{}'::jsonb) || jsonb_build_object(
-         'template',
-         jsonb_strip_nulls(jsonb_build_object(
-           'header', r.header,
-           'footer', r.footer,
-           'buttons', r.buttons,
-           'retroativo', true
-         ))
-       )
-  from retrato r
- where r.id = m.id
-   and (r.header is not null or r.footer is not null or jsonb_array_length(r.buttons) > 0);
-
-
 -- ---- Importação de contatos + tags dos contatos (migration 0210) ----
 -- Espelho idempotente da migration 0210 (create or replace); racional completo no arquivo da migration.
 -- Entra ANTES da VARREDURA anon.
@@ -17679,3 +17610,73 @@ create policy "tenant_isolation_ai_kbv_write" on "public"."ai_knowledge_versions
 
 notify pgrst, 'reload schema';
 
+-- ---- Botões das mensagens de modelo já enviadas (migration 0209) ----
+-- Espelho idempotente da migration 0209 (só dados); racional completo no arquivo da
+-- migration. Só preenche quem ainda não tem `metadata.template` — reaplicar no
+-- update.sh não muda nada; banco novo não tem mensagem e passa direto.
+-- Fica no FIM do arquivo de propósito: lê `meta_templates.channel_session_id`,
+-- que só nasce no bloco da migration 0154, abaixo da VARREDURA anon. Não cria
+-- função, então não precisa ficar antes da varredura.
+with alvo as (
+  select m.id, d.components
+    from public.messages m
+    cross join lateral (
+      select t.components
+        from public.meta_templates t
+       where t.organization_id = m.organization_id
+         and t.name = m.template_name
+         and t.language = m.template_language
+         and (t.channel_session_id = m.channel_session_id or t.channel_session_id is null)
+         and jsonb_typeof(t.components) = 'array'
+       order by (t.channel_session_id is not null) desc
+       limit 1
+    ) d
+   where m.type = 'template'
+     and m.direction = 'outbound'
+     and not (coalesce(m.metadata, '{}'::jsonb) ? 'template')
+),
+retrato as (
+  select a.id,
+    (select c->>'text'
+       from jsonb_array_elements(a.components) c
+      where upper(c->>'type') = 'HEADER'
+        and upper(coalesce(c->>'format', 'TEXT')) = 'TEXT'
+        and coalesce(c->>'text', '') <> ''
+        and strpos(c->>'text', '{{') = 0
+      limit 1) as header,
+    (select c->>'text'
+       from jsonb_array_elements(a.components) c
+      where upper(c->>'type') = 'FOOTER'
+        and coalesce(c->>'text', '') <> ''
+      limit 1) as footer,
+    coalesce((
+      select jsonb_agg(
+               jsonb_strip_nulls(jsonb_build_object(
+                 'type', upper(coalesce(b->>'type', '')),
+                 'text', b->>'text',
+                 'url', case when strpos(coalesce(b->>'url', ''), '{{') = 0 then nullif(b->>'url', '') end,
+                 'phone', nullif(b->>'phone_number', '')
+               ))
+               order by c_ord, b_ord)
+        from jsonb_array_elements(a.components) with ordinality as cs(c, c_ord)
+        cross join lateral jsonb_array_elements(
+          case when jsonb_typeof(c->'buttons') = 'array' then c->'buttons' else '[]'::jsonb end
+        ) with ordinality as bs(b, b_ord)
+       where upper(c->>'type') = 'BUTTONS'
+         and coalesce(b->>'text', '') <> ''
+    ), '[]'::jsonb) as buttons
+  from alvo a
+)
+update public.messages m
+   set metadata = coalesce(m.metadata, '{}'::jsonb) || jsonb_build_object(
+         'template',
+         jsonb_strip_nulls(jsonb_build_object(
+           'header', r.header,
+           'footer', r.footer,
+           'buttons', r.buttons,
+           'retroativo', true
+         ))
+       )
+  from retrato r
+ where r.id = m.id
+   and (r.header is not null or r.footer is not null or jsonb_array_length(r.buttons) > 0);
