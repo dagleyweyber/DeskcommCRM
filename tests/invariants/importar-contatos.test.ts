@@ -196,7 +196,12 @@ describe("fn_importar_contatos — quem já existe", () => {
   });
 
   it("anonimizado (LGPD) é ignorado e não ganha dado", async () => {
-    const id = await criarContato({ phone_number: "+5581977770006", is_anonymized: true, display_name: "Cliente Anonimizado #1" });
+    const id = await criarContato({
+      phone_number: "+5581977770006",
+      is_anonymized: true,
+      anonymized_at: new Date().toISOString(),
+      display_name: "Cliente Anonimizado #1",
+    });
     const [r] = await importar([{ linha: 2, telefone: "+5581977770006", nome: "Nome Real" }], { tags: ["x"] });
     expect(r).toMatchObject({ resultado: "ignorado", motivo: "anonimizado" });
     const c = await contato(id);
