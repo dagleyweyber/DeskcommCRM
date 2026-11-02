@@ -11,6 +11,7 @@ import {
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
 import { useCreateCampaign, usePreviewAudience } from "@/hooks/campaigns/useCampaigns";
 import { useTemplates } from "@/hooks/channels/useTemplates";
+import { useContactTags } from "@/hooks/contacts/useContactTags";
 import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
@@ -20,6 +21,7 @@ type AudienceKind = AudienceFilter["kind"];
 export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const templates = useTemplates();
   const pipelines = usePipelines();
+  const tags = useContactTags();
   const preview = usePreviewAudience();
   const criar = useCreateCampaign();
 
@@ -154,13 +156,25 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         </div>
 
         {audienceKind === "tag" && (
-          <input
-            value={tag}
-            onChange={(e) => setTag(e.target.value)}
-            placeholder="Nome da tag"
-            aria-label="Tag do público"
-            className="h-9 w-64 rounded-md border border-input bg-background px-2 text-sm"
-          />
+          <>
+            {/* Sugere as tags que existem: o público é por igualdade exata, e "VIP" ≠ "vip". */}
+            <input
+              value={tag}
+              onChange={(e) => {
+                setTag(e.target.value);
+                setPreviewTotal(null);
+              }}
+              list="campanha-tags"
+              placeholder="Nome da tag"
+              aria-label="Tag do público"
+              className="h-9 w-64 max-w-full rounded-md border border-input bg-background px-2 text-sm"
+            />
+            <datalist id="campanha-tags">
+              {(tags.data ?? []).map((t) => (
+                <option key={t.tag} value={t.tag}>{`${t.total.toLocaleString("pt-BR")} contatos`}</option>
+              ))}
+            </datalist>
+          </>
         )}
 
         {audienceKind === "pipeline_stage" && (

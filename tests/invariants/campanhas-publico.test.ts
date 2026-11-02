@@ -3,7 +3,7 @@ import pg from "pg";
 
 import { resolveAudience } from "@/lib/campaigns/audience";
 
-import { pgComoSupabase } from "../pg-como-supabase";
+import { MAX_ROWS_DO_POSTGREST, pgComoSupabase } from "../pg-como-supabase";
 
 /**
  * O PÚBLICO da campanha — resolvido contra o schema real, não mockado.
@@ -125,6 +125,32 @@ describe("público por TAG", () => {
   it("tag que ninguém tem devolve público vazio, sem erro", async () => {
     const publico = await resolveAudience(admin, ORG_A, { kind: "tag", tag: "tag-que-ninguem-tem" });
     expect(publico).toEqual([]);
+  });
+
+  it("⭐ base importada MAIOR que o teto do PostgREST sai inteira, não só as 1.000 primeiras", async () => {
+    // 1.205 = uma página cheia + uma parcial. Sem paginar, o público parava em
+    // 1.000 em silêncio (o adaptador corta como o PostgREST real).
+    const total = MAX_ROWS_DO_POSTGREST + 205;
+    await pool.query(
+      `insert into contacts (organization_id, display_name, phone_number, source, tags)
+       select $1, 'Importado ' || g, '+55119' || lpad(g::text, 8, '0'), 'import', array['base-grande']
+         from generate_series(1, $2::int) g`,
+      [ORG_A, total],
+    );
+    const publico = await resolveAudience(admin, ORG_A, { kind: "tag", tag: "base-grande" });
+    expect(publico).toHaveLength(total);
+    expect(new Set(publico.map((p) => p.contactId)).size).toBe(total);
+  });
+
+  it("contato FUNDIDO em outro não entra — o sobrevivente já está no público", async () => {
+    const sobrevivente = await criarContato(ORG_A, "Sobrevivente", "+5511900000091", { tags: ["fusao"] });
+    const fundido = await criarContato(ORG_A, "Fundido", "+5511900000092", { tags: ["fusao"] });
+    await pool.query("update contacts set is_merged_into = $1, merged_at = now() where id = $2", [
+      sobrevivente,
+      fundido,
+    ]);
+    const publico = await resolveAudience(admin, ORG_A, { kind: "tag", tag: "fusao" });
+    expect(publico.map((p) => p.contactId)).toEqual([sobrevivente]);
   });
 });
 

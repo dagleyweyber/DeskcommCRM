@@ -36,6 +36,8 @@ export type AuditAction =
   | "contact.anonymized"
   | "contact.merge_pending"
   | "contact.merged"
+  /** Um por lote de importação por planilha (até 500 linhas) — não um por contato. */
+  | "contacts.imported"
   | "lgpd.anonymize_executed"
   | "member.invited"
   | "member.accepted"

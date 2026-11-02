@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, MagnifyingGlass } from "@/lib/ui/icons";
+import { Plus, MagnifyingGlass, UploadSimple } from "@/lib/ui/icons";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useContactList } from "@/hooks/contacts/useContactList";
+import { useContactTags } from "@/hooks/contacts/useContactTags";
 import { ContactsTable } from "@/components/contacts/ContactsTable";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { EmptyContacts } from "@/components/empty";
@@ -22,13 +24,21 @@ const SOURCE_OPTIONS = [
   { value: undefined, label: "Todas as origens" },
   { value: "manual", label: "Manual" },
   { value: "whatsapp", label: "WhatsApp" },
+  { value: "import", label: "Importação" },
   { value: "nuvemshop", label: "Nuvemshop" },
 ];
 
-export function ContactsListClient() {
+export function ContactsListClient({
+  tagInicial,
+  podeImportar = false,
+}: {
+  /** `?tag=` da URL — é para onde o fim da importação leva. */
+  tagInicial?: string;
+  podeImportar?: boolean;
+}) {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [tag, setTag] = useState<string | undefined>(undefined);
+  const [tag, setTag] = useState<string | undefined>(tagInicial);
   const [source, setSource] = useState<string | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -46,11 +56,10 @@ export function ContactsListClient() {
     [q.data],
   );
 
-  const tagOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of allContacts) for (const t of c.tags) set.add(t);
-    return Array.from(set).sort();
-  }, [allContacts]);
+  // Todas as tags da organização, não só as dos 50 contatos na tela — senão a
+  // tag de uma base importada não aparecia no filtro.
+  const tagsQ = useContactTags();
+  const tagOptions = tagsQ.data ?? [];
 
   return (
     <div className="space-y-4 p-6">
@@ -61,10 +70,20 @@ export function ContactsListClient() {
             Customer 360 — busque, filtre e gerencie contatos.
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={16} weight="bold" aria-hidden />
-          <span>Novo contato</span>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {podeImportar && (
+            <Button asChild variant="outline">
+              <Link href="/app/contacts/importar">
+                <UploadSimple size={16} aria-hidden />
+                <span>Importar</span>
+              </Link>
+            </Button>
+          )}
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus size={16} weight="bold" aria-hidden />
+            <span>Novo contato</span>
+          </Button>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-2">
@@ -94,8 +113,9 @@ export function ContactsListClient() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setTag(undefined)}>Todas</DropdownMenuItem>
             {tagOptions.map((t) => (
-              <DropdownMenuItem key={t} onClick={() => setTag(t)}>
-                {t}
+              <DropdownMenuItem key={t.tag} onClick={() => setTag(t.tag)} className="justify-between gap-4">
+                <span>{t.tag}</span>
+                <span className="tabular-nums text-xs text-muted-foreground">{t.total.toLocaleString("pt-BR")}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

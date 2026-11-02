@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 
-import { pgComoSupabase } from "../pg-como-supabase";
+import { MAX_ROWS_DO_POSTGREST, pgComoSupabase } from "../pg-como-supabase";
 
 /**
  * O INSTRUMENTO, medido antes de medir.
@@ -219,6 +219,36 @@ describe("o adaptador COMPARA — `lt`/`gt`, não só igualdade", () => {
       .contains("tags", ["nao-existe"]);
     expect(nenhum.error).toBeNull();
     expect(nenhum.data).toEqual([]);
+  });
+
+  it("⭐ `range` é inclusivo nas duas pontas e respeita a ordem, como o PostgREST", async () => {
+    const pagina = async (de: number, ate: number) =>
+      ((
+        await db
+          .from("contacts")
+          .select("display_name")
+          .eq("organization_id", ORG)
+          .in("display_name", ["Com VIP", "Sem VIP", "Sem tag"])
+          .order("phone_number", { ascending: true })
+          .range(de, ate)
+      ).data as Array<{ display_name: string }>).map((x) => x.display_name);
+    expect(await pagina(0, 1)).toEqual(["Com VIP", "Sem VIP"]);
+    expect(await pagina(2, 3)).toEqual(["Sem tag"]);
+  });
+
+  it("⭐ sem `range`/`limit`, a leitura é cortada no teto do PostgREST — como no servidor real", async () => {
+    // Sem este corte o adaptador devolvia tudo, e código que lê sem paginar
+    // passava aqui e cortava em produção (público de campanha, 2026-11-02).
+    await pool.query(
+      `insert into contacts (organization_id, display_name, phone_number, source, tags)
+       select $1, 'Teto ' || g, '+55219' || lpad(g::text, 8, '0'), 'import', array['teto']
+         from generate_series(1, $2::int) g
+       on conflict do nothing`,
+      [ORG, MAX_ROWS_DO_POSTGREST + 1],
+    );
+    const { data, error } = await db.from("contacts").select("id").eq("organization_id", ORG).contains("tags", ["teto"]);
+    expect(error).toBeNull();
+    expect((data as unknown[]).length).toBe(MAX_ROWS_DO_POSTGREST);
   });
 
   it("`gt` é o espelho — e os dois convivem com `eq` na mesma consulta", async () => {

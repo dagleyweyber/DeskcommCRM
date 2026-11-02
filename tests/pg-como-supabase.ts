@@ -89,11 +89,21 @@ function colunasSql(colunas: string): string {
     .join(", ");
 }
 
+/**
+ * O teto do PostgREST (`max_rows`, 1000 no Supabase — `supabase/config.toml`).
+ * O servidor real corta TODA leitura nele, sem erro e sem aviso. Este adaptador
+ * devolvia tudo, e por isso `lib/campaigns/audience.ts` lia sem paginar e
+ * passava nos invariantes: uma campanha de 5.000 contatos sairia para 1.000.
+ * Reproduzir o corte é o que faz o teste reprovar esse código.
+ */
+export const MAX_ROWS_DO_POSTGREST = 1000;
+
 class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
   /** [operador, coluna, valor] — o operador entra porque `.lt`/`.gt` existem. */
   private filtros: Array<[string, string, unknown]> = [];
   private ordem: { coluna: string; asc: boolean } | null = null;
   private teto: number | null = null;
+  private deslocamento = 0;
 
   constructor(
     private readonly pool: pg.Pool,
@@ -175,6 +185,16 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
   }
 
   /**
+   * `.range(de, ate)` — inclusivo nas duas pontas, como o PostgREST. Nasceu com a
+   * paginação do público de campanha (`lib/campaigns/audience.ts`).
+   */
+  range(de: number, ate: number): this {
+    this.deslocamento = de;
+    this.teto = ate - de + 1;
+    return this;
+  }
+
+  /**
    * `IN (...)` — nasceu porque `findContactByVariants`
    * (lib/channels/meta/ingest.ts, via `phoneLookupVariants`) chama
    * `.in("phone_number", variantes)` e o adaptador ESTOUROU. Lista vazia vira
@@ -229,7 +249,8 @@ class ConsultaPg<T> implements PromiseLike<RespostaFalsa<T[]>> {
     let texto = `select ${colunasSql(this.colunas)} from public."${this.tabela}"`;
     if (onde.length > 0) texto += ` where ${onde.join(" and ")}`;
     if (this.ordem) texto += ` order by "${this.ordem.coluna}" ${this.ordem.asc ? "asc" : "desc"}`;
-    if (this.teto !== null) texto += ` limit ${this.teto}`;
+    texto += ` limit ${Math.min(this.teto ?? MAX_ROWS_DO_POSTGREST, MAX_ROWS_DO_POSTGREST)}`;
+    if (this.deslocamento > 0) texto += ` offset ${this.deslocamento}`;
     return { texto, valores };
   }
 

@@ -2,6 +2,12 @@
  * Domain types for Contacts (EPIC-05).
  * Mirror the verified `contacts` schema (see CLAUDE.md / Spec 05).
  */
+/** Uma tag usada nos contatos da organização e quantos a têm (GET /api/v1/contacts/tags). */
+export interface TagDosContatos {
+  tag: string;
+  total: number;
+}
+
 export interface Contact {
   id: string;
   organization_id: string;

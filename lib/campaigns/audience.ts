@@ -41,40 +41,66 @@ function comTelefone(c: ContatoBruto): boolean {
   return Boolean(c.phone_number && c.phone_number.trim() !== "");
 }
 
+/**
+ * Página do PostgREST. O servidor corta toda leitura em `max_rows` (1000, o
+ * padrão do Supabase — `supabase/config.toml`) SEM erro: sem paginar, uma
+ * campanha para uma base importada de 5.000 contatos saía para os 1.000
+ * primeiros e o resto sumia em silêncio. Não doía antes só porque a maior
+ * campanha até 2026-11-02 teve 39 destinatários.
+ */
+export const PAGINA_DO_PUBLICO = 1000;
+
+/**
+ * Lê TODOS os contatos que o filtro deixa passar, página a página, em ordem de
+ * `id` (estável entre páginas). Contato fundido em outro (`is_merged_into`) fica
+ * de fora: o sobrevivente da fusão já está no público, e o fundido manteria o
+ * mesmo telefone — mesma pessoa recebendo duas vezes.
+ */
+async function contatosPaginados(
+  admin: SupabaseClient,
+  organizationId: string,
+  tag: string | null,
+): Promise<ContatoBruto[]> {
+  const todos: ContatoBruto[] = [];
+  for (let de = 0; ; de += PAGINA_DO_PUBLICO) {
+    let q = admin
+      .from("contacts")
+      .select("id, display_name, name, phone_number")
+      .eq("organization_id", organizationId)
+      .eq("is_blocked", false)
+      .is("is_merged_into", null);
+    if (tag !== null) q = q.contains("tags", [tag]);
+    const { data, error } = await q.order("id", { ascending: true }).range(de, de + PAGINA_DO_PUBLICO - 1);
+    // Falha no meio não pode virar "público menor": quem cria a campanha precisa
+    // saber, não disparar para metade da base achando que é tudo.
+    if (error) throw new Error(`audience_read_failed: ${error.message}`);
+    const pagina = (data ?? []) as ContatoBruto[];
+    todos.push(...pagina);
+    if (pagina.length < PAGINA_DO_PUBLICO) return todos;
+  }
+}
+
+const paraMembro = (c: ContatoBruto): AudienceMember => ({
+  contactId: c.id,
+  leadId: null,
+  displayName: rotuloDoContato(c),
+});
+
 async function porTag(
   admin: SupabaseClient,
   organizationId: string,
   tag: string,
 ): Promise<AudienceMember[]> {
-  const { data } = await admin
-    .from("contacts")
-    .select("id, display_name, name, phone_number")
-    .eq("organization_id", organizationId)
-    .eq("is_blocked", false)
-    .contains("tags", [tag]);
-
-  return ((data ?? []) as ContatoBruto[]).filter(comTelefone).map((c) => ({
-    contactId: c.id,
-    leadId: null,
-    displayName: rotuloDoContato(c),
-  }));
+  const contatos = await contatosPaginados(admin, organizationId, tag);
+  return contatos.filter(comTelefone).map(paraMembro);
 }
 
 async function todosOsContatos(
   admin: SupabaseClient,
   organizationId: string,
 ): Promise<AudienceMember[]> {
-  const { data } = await admin
-    .from("contacts")
-    .select("id, display_name, name, phone_number")
-    .eq("organization_id", organizationId)
-    .eq("is_blocked", false);
-
-  return ((data ?? []) as ContatoBruto[]).filter(comTelefone).map((c) => ({
-    contactId: c.id,
-    leadId: null,
-    displayName: rotuloDoContato(c),
-  }));
+  const contatos = await contatosPaginados(admin, organizationId, null);
+  return contatos.filter(comTelefone).map(paraMembro);
 }
 
 /**
