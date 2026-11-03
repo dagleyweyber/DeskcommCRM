@@ -32,6 +32,7 @@ export const ACTION_CODES: string[] = [
   "contact.anonymized",
   "contact.merge_pending",
   "contact.merged",
+  "contacts.exported",
   "lgpd.anonymize_executed",
   "member.invited",
   "member.accepted",

@@ -38,6 +38,8 @@ export type AuditAction =
   | "contact.merged"
   /** Um por lote de importação por planilha (até 500 linhas) — não um por contato. */
   | "contacts.imported"
+  /** Um por download de CSV dos contatos de um canal — dado pessoal saindo do CRM. */
+  | "contacts.exported"
   | "lgpd.anonymize_executed"
   | "member.invited"
   | "member.accepted"

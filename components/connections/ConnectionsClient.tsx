@@ -37,6 +37,7 @@ import {
   ArrowsClockwise,
   CheckCircle,
   CircleNotch,
+  DownloadSimple,
   PencilSimple,
   Phone,
   Plus,
@@ -344,7 +345,7 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     </span>
                   </p>
                 )}
-                <div className="mt-auto flex gap-2">
+                <div className="mt-auto flex flex-wrap gap-2">
                   {/* Some no canal oficial em vez de aparecer desabilitado: não é
                       indisponibilidade passageira (como o Excluir sem o serviço no
                       ar), é uma ação que não existe para esse canal — e o clique
@@ -364,6 +365,18 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                       Reconectar
                     </Button>
                   )}
+                  {/* Link comum, não fetch: o navegador baixa o arquivo sozinho e a
+                      rota decide papel e auditoria. Só traz quem TEM CONVERSA neste
+                      número — a agenda do celular não entra no CRM. */}
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href={`/api/v1/channel-sessions/${c.id}/contacts/export`}
+                      title="Baixar em CSV os contatos que têm conversa neste número"
+                    >
+                      <DownloadSimple size={14} aria-hidden />
+                      Exportar contatos
+                    </a>
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setAntiBanId(c.id)}>
                     <ShieldCheck size={14} aria-hidden />
                     Proteção de envio
