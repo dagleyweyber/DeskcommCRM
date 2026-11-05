@@ -6,6 +6,7 @@
 import type { SendMessageInput } from "@/lib/schemas";
 import type { FetchedMedia } from "@/lib/messaging/media/types";
 import type { OutboundMedia } from "@/lib/waha/media-send";
+import type { AgendaDoCanal } from "./agenda";
 
 export type { OutboundMedia };
 
@@ -220,6 +221,23 @@ export interface ChannelAdapter {
    * quem chama testa a presença em vez de perguntar QUAL provider é.
    */
   checkHealth?(input: { sessionRef: string }): Promise<ChannelHealth>;
+
+  /**
+   * A agenda que o próprio canal guarda para o número: quem está salvo no
+   * celular e quem só conversou — independente de o CRM ter visto conversa.
+   *
+   * Existe para a exportação "tudo que o número conhece". O CRM só enxerga o
+   * contato que escreveu depois de conectar; o histórico e a agenda ficam no
+   * transporte, e só ele sabe ler.
+   *
+   * OPCIONAL: o canal oficial não entrega lista de contatos a quem usa a API, e
+   * quem chama testa a presença em vez de perguntar QUAL provider é. Lança
+   * `AgendaIndisponivelError` quando o canal TEM agenda mas este número ainda
+   * não a guarda (estado do número, não falha) — a tela explica o que fazer.
+   *
+   * Nada é gravado: o retorno vive na memória da requisição.
+   */
+  listAddressBook?(input: { sessionRef: string }): Promise<AgendaDoCanal>;
 
   /**
    * Envia uma DEFINIÇÃO APROVADA — o único caminho de volta quando a janela de

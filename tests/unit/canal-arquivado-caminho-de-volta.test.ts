@@ -437,8 +437,28 @@ describe("POST /api/v1/channel-sessions/[id]/reconnect — canal excluído não 
 
     expect(res.status).toBe(200);
     expect(waha.stopSession).toHaveBeenCalledWith(NOME_SESSAO);
-    expect(waha.startSession).toHaveBeenCalledWith(NOME_SESSAO);
+    // Reconexão comum NÃO reaplica a configuração: mexer num número que está no ar
+    // só porque ele caiu mudaria o consumo de memória do transporte sem ninguém pedir.
+    expect(waha.startSession).toHaveBeenCalledWith(NOME_SESSAO, { reaplicarConfig: false });
     expect(db.linhas[0]?.status).toBe("STARTING");
+  });
+
+  it("⭐ reconexão FORÇADA (novo QR) reaplica a configuração — é o pareamento que sincroniza a agenda", async () => {
+    authOk();
+    makeDb({ sessions: [canalQr({ status: "WORKING" })] });
+    const waha = transporteOk();
+    const { POST } = await import("@/app/api/v1/channel-sessions/[id]/reconnect/route");
+    const res = await POST(
+      new NextRequest(`http://localhost/api/v1/channel-sessions/${CANAL}/reconnect`, {
+        method: "POST",
+        body: JSON.stringify({ force: true }),
+      }),
+      ctx(),
+    );
+
+    expect(res.status).toBe(200);
+    expect(waha.logoutSession).toHaveBeenCalledWith(NOME_SESSAO);
+    expect(waha.startSession).toHaveBeenCalledWith(NOME_SESSAO, { reaplicarConfig: true });
   });
 
   it("clone sem a migration 0106: reconectar continua funcionando", async () => {
@@ -449,7 +469,7 @@ describe("POST /api/v1/channel-sessions/[id]/reconnect — canal excluído não 
     const res = await POST(req(), ctx());
 
     expect(res.status).toBe(200);
-    expect(waha.startSession).toHaveBeenCalledWith(NOME_SESSAO);
+    expect(waha.startSession).toHaveBeenCalledWith(NOME_SESSAO, { reaplicarConfig: false });
   });
 
   /**

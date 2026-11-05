@@ -11,6 +11,8 @@ import { wahaSendPlanFor } from "@/lib/waha/media-send";
 import { bareWaMessageId, parseWahaMessageId } from "@/lib/waha/message-id";
 import { resolveWahaChatId } from "@/lib/waha/send";
 import type { FetchedMedia } from "@/lib/messaging/media/types";
+import { carregarAgendaDaSessao } from "../agenda-waha";
+import type { AgendaDoCanal } from "../agenda";
 import type { ChannelAdapter, ChannelHealth, OutboundEnvelope, RecipientInput } from "../types";
 
 export const wahaAdapter: ChannelAdapter = {
@@ -78,6 +80,17 @@ export const wahaAdapter: ChannelAdapter = {
     const client = getWahaClient();
     if (!client) return null;
     return client.resolvePhoneForLid(input.sessionRef, input.identity.slice("lid:".length));
+  },
+
+  /**
+   * A agenda guardada para a sessão. Sem o serviço configurado não há o que ler:
+   * lança em vez de devolver lista vazia, que a exportação confundiria com "o
+   * número não tem contatos".
+   */
+  async listAddressBook(input: { sessionRef: string }): Promise<AgendaDoCanal> {
+    const client = getWahaClient();
+    if (!client) throw new Error("waha_not_configured");
+    return carregarAgendaDaSessao(client, input.sessionRef);
   },
 
   /**

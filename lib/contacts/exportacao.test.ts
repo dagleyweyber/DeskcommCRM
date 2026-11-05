@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import type { ContatoDaAgenda } from "@/lib/channels/agenda";
+
 import {
   celulaCsv,
+  CABECALHO_AGENDA,
   CABECALHO_EXPORTACAO,
   consentimentoDeMarketing,
   montarCsv,
+  montarCsvAgenda,
   nomeDoArquivo,
   type LinhaDoCanal,
 } from "./exportacao";
@@ -90,5 +94,42 @@ describe("nomeDoArquivo", () => {
   });
   it("rótulo vazio cai em 'canal'", () => {
     expect(nomeDoArquivo("***", new Date("2026-11-03T12:00:00Z"))).toBe("contatos-canal-2026-11-03.csv");
+  });
+});
+
+describe("montarCsvAgenda", () => {
+  const pessoa = (over: Partial<ContatoDaAgenda> = {}): ContatoDaAgenda => ({
+    nome: "Maria Silva",
+    telefone: "+5581999990001",
+    salvo: true,
+    nome_no_whatsapp: "Mari",
+    ...over,
+  });
+
+  it("cabeçalho próprio, BOM e uma linha por pessoa com salvo legível", () => {
+    const csv = montarCsvAgenda([pessoa(), pessoa({ nome: null, telefone: "+5581999990002", salvo: false, nome_no_whatsapp: null })]);
+    expect(csv.startsWith("﻿" + CABECALHO_AGENDA.join(","))).toBe(true);
+    const [, a, b] = csv.split("\r\n");
+    expect(a).toBe("Maria Silva,+5581999990001,sim,Mari");
+    expect(b).toBe(",+5581999990002,nao,");
+  });
+
+  it("⭐ nome vindo do WhatsApp com fórmula é neutralizado; o telefone continua intacto", () => {
+    const [, linha] = montarCsvAgenda([pessoa({ nome: '=HYPERLINK("http://x")', nome_no_whatsapp: "+1+1" })]).split("\r\n");
+    expect(linha).toContain("'=HYPERLINK");
+    expect(linha).toContain(",+5581999990001,");
+    expect(linha).toContain("'+1+1");
+  });
+
+  it("lista vazia gera só o cabeçalho", () => {
+    expect(montarCsvAgenda([]).split("\r\n").filter(Boolean)).toHaveLength(1);
+  });
+});
+
+describe("nomeDoArquivo com prefixo", () => {
+  it("a agenda sai com outro prefixo para não confundir com a de conversas", () => {
+    expect(nomeDoArquivo("Ads Company", new Date("2026-11-05T12:00:00Z"), "agenda")).toBe(
+      "agenda-ads-company-2026-11-05.csv",
+    );
   });
 });

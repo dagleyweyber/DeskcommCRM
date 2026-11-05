@@ -128,7 +128,12 @@ export async function POST(
     // Só no modo forçado: descartar a credencial é irreversível — obriga a
     // reescanear o QR mesmo que ela ainda estivesse boa.
     if (force) await waha.logoutSession(nomeSessao);
-    const remote = (await waha.startSession(nomeSessao)) as { status?: string };
+    // Só no modo forçado (re-pareamento): é quando a sincronização completa da
+    // agenda acontece, então é aqui que o armazenamento precisa estar ligado.
+    // Reconexão comum não mexe na configuração de um número que já está no ar.
+    const remote = (await waha.startSession(nomeSessao, { reaplicarConfig: force })) as {
+      status?: string;
+    };
     const nextStatus = remote.status ?? "STARTING";
     await supabase
       .from("channel_sessions")
