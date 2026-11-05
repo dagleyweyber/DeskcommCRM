@@ -29,7 +29,8 @@ function adminFalso() {
     };
     return q;
   };
-  return { from: construtor } as never;
+  // Sem irmãos no dia: o grupo vem vazio e a resposta vale só para o compromisso respondido.
+  return { from: construtor, rpc: () => Promise.resolve({ data: [], error: null }) } as never;
 }
 
 const resposta = (texto: string) => ({ organizationId: ORG, respondeuA: "wamid.X", texto, payload: null });

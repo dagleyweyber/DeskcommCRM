@@ -223,8 +223,10 @@ describe("fn_due_appointment_reminders — só o líder do dia gera mensagem (02
     const amanha = await agendamento(AMANHA_08_20);
     const outra = await agendamento(SP_08_50, { contactId: outroContato });
 
-    const ids = (await devidos(A_TODOS)).map((r) => r.activity_id).sort();
-    expect(ids).toEqual([hoje, amanha, outra].sort());
+    // Hoje às 08:00: cada paciente tem o seu líder; o de amanhã ainda não está na hora (8h do dia dele).
+    expect((await devidos(A_TODOS)).map((r) => r.activity_id).sort()).toEqual([hoje, outra].sort());
+    // Amanhã às 08:00: o de hoje já passou, o de amanhã é um grupo próprio.
+    expect((await devidos(A_TODOS, "2026-03-11T11:00:00.000Z")).map((r) => r.activity_id)).toEqual([amanha]);
   });
 
   it("⭐ serviços misturados: cada automação manda a SUA mensagem (decisão: aceitar 2)", async () => {

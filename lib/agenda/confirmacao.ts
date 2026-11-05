@@ -74,13 +74,17 @@ async function grupoDoAgendamento(
   automationId: string,
   appointmentId: string,
 ): Promise<MembroDoGrupo[]> {
-  const { data, error } = await admin.rpc("fn_grupo_do_agendamento", {
-    p_organization_id: organizationId,
-    p_automation_id: automationId,
-    p_appointment_id: appointmentId,
-  });
-  if (error || !Array.isArray(data)) return [];
-  return data as MembroDoGrupo[];
+  try {
+    const { data, error } = await admin.rpc("fn_grupo_do_agendamento", {
+      p_organization_id: organizationId,
+      p_automation_id: automationId,
+      p_appointment_id: appointmentId,
+    });
+    if (error || !Array.isArray(data)) return [];
+    return data as MembroDoGrupo[];
+  } catch {
+    return [];
+  }
 }
 
 /** Muda o status de UM compromisso com a trava otimista de `revision`. `false` = alguém mexeu junto. */

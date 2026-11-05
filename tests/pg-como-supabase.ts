@@ -556,7 +556,7 @@ class AtualizacaoPg<T> implements PromiseLike<RespostaFalsa<unknown>> {
  * serializado como texto cru (o que `select fn(...) as valor` faria sem
  * este desvio, e o chamador receberia string ilegível em vez de objeto).
  */
-const RPCS_TABULARES = new Set(["fn_due_appointment_reminders"]);
+const RPCS_TABULARES = new Set(["fn_due_appointment_reminders", "fn_grupo_do_agendamento"]);
 
 /**
  * `rpc(nome, args)` — chamada de função por argumentos NOMEADOS, como o
