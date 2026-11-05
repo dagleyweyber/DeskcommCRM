@@ -11,25 +11,14 @@ import { z } from "zod";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { botoesDeRespostaRapida, normalizaTextoDeBotao } from "@/lib/agenda/botoes";
 import { requireRole } from "@/lib/auth/require-role";
-import {
-  fraseDosValoresSemFonte,
-  valoresSemFonte,
-  type Definicao,
-} from "@/lib/channels/valores-sem-fonte";
+import { validarConfiguracao } from "@/lib/automations/configuracao";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export const dynamic = "force-dynamic";
+import { variableSourceSchema } from "./_schema";
 
-const variableSourceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("fixed"), value: z.string().min(1).max(1024) }),
-  z.object({ kind: z.literal("contact_name") }),
-  z.object({ kind: z.literal("contact_first_name") }),
-  z.object({ kind: z.literal("appointment_date") }),
-  z.object({ kind: z.literal("appointment_time") }),
-]);
+export const dynamic = "force-dynamic";
 
 // Só o gatilho de agendamento existe hoje — `TRIGGER_RESOLVERS`
 // (`lib/automations/triggers/index.ts`) é a fonte real; esta lista cresce
@@ -92,76 +81,18 @@ export async function POST(req: NextRequest): Promise<Response> {
   const input = parsed.data;
   const admin = createAdminClient();
 
-  // Mesma validação de Campanhas — o canal precisa ser desta org e estar
-  // de pé, o template precisa estar APROVADO. Automação sem os dois nasce
-  // condenada a nunca mandar nada.
-  const { data: sessao } = await admin
-    .from("channel_sessions")
-    .select("id, status")
-    .eq("id", input.channel_session_id)
-    .eq("organization_id", authz.org.orgId)
-    .maybeSingle();
-  if (!sessao) return fail("invalid_request", "Canal não encontrado nesta organização.", 422, { requestId });
-  if (sessao.status !== "WORKING") {
-    return fail("invalid_request", "O canal escolhido não está conectado.", 422, { requestId });
-  }
-
-  const { data: template } = await admin
-    .from("meta_templates")
-    .select("status, components, parameter_format")
-    .eq("organization_id", authz.org.orgId)
-    .eq("channel_session_id", input.channel_session_id)
-    .eq("name", input.template_name)
-    .eq("language", input.template_language)
-    .maybeSingle();
-  if (!template || template.status !== "APPROVED") {
-    return fail(
-      "invalid_request",
-      "Este modelo não está aprovado para este canal — sincronize em Conexões antes de criar a automação.",
-      422,
-      { requestId },
-    );
-  }
-
-  // O serviço precisa ser desta organização e estar ativo na Agenda: uma automação presa a
-  // um serviço que não existe nunca dispararia, e em silêncio.
-  if (input.event_type_id) {
-    const { data: servico } = await admin
-      .from("calendar_event_types")
-      .select("id, is_active")
-      .eq("id", input.event_type_id)
-      .eq("organization_id", authz.org.orgId)
-      .maybeSingle();
-    if (!servico || servico.is_active === false) {
-      return fail("invalid_request", "Serviço não encontrado na Agenda desta organização.", 422, { requestId });
-    }
-  }
-
-  // Toda variável do modelo precisa de uma origem (mesma regra de Campanhas): sem isso toda
-  // ocorrência falharia com `template_missing_values` no primeiro envio.
-  // O botão escolhido precisa existir no modelo — senão a resposta do cliente
-  // nunca casaria e a confirmação ficaria muda sem ninguém saber por quê.
-  const botoes = botoesDeRespostaRapida(template.components).map(normalizaTextoDeBotao);
-  for (const escolhido of [input.confirm_button_text, input.decline_button_text]) {
-    if (escolhido && !botoes.includes(normalizaTextoDeBotao(escolhido))) {
-      return fail("invalid_request", `O modelo não tem o botão "${escolhido}".`, 422, { requestId });
-    }
-  }
-
-  const faltando = valoresSemFonte(
-    {
-      name: input.template_name,
-      language: input.template_language,
-      parameter_format: template.parameter_format ?? undefined,
-      components: template.components as Definicao["components"],
-    },
-    input.variable_mapping as VariableMapping,
+  // Mesmas conferências da EDIÇÃO (`lib/automations/configuracao.ts`): o canal precisa ser desta
+  // org e estar de pé, o modelo APROVADO, o serviço ativo, os botões existentes e toda variável
+  // com origem. Automação que falha numa delas nasce condenada a nunca mandar nada.
+  const validacao = await validarConfiguracao(
+    admin,
+    authz.org.orgId,
+    input.channel_session_id,
+    { ...input, variable_mapping: input.variable_mapping as VariableMapping },
+    { exigirCanalNoAr: true },
   );
-  if (faltando.length > 0) {
-    return fail("invalid_request", fraseDosValoresSemFonte(faltando), 422, {
-      requestId,
-      details: { variaveis_sem_origem: faltando.map((f) => f.rotulo) },
-    });
+  if (!validacao.ok) {
+    return fail("invalid_request", validacao.mensagem, 422, { requestId, details: validacao.details });
   }
 
   const { data: automacao, error: erroCriar } = await admin

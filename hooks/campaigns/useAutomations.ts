@@ -73,3 +73,58 @@ function useAutomationAction(acao: "activate" | "pause") {
 
 export const useActivateAutomation = () => useAutomationAction("activate");
 export const usePauseAutomation = () => useAutomationAction("pause");
+
+/** O que o formulário de edição precisa: a configuração completa, inclusive o mapeamento das variáveis. */
+export interface AutomationDetail {
+  id: string;
+  name: string;
+  trigger_kind: string;
+  channel_session_id: string;
+  status: "draft" | "active" | "paused";
+  template_name: string;
+  template_language: string;
+  variable_mapping: VariableMapping;
+  event_type_id: string | null;
+  timing_kind: TimingKind;
+  timing_value: number | null;
+  confirm_button_text: string | null;
+  decline_button_text: string | null;
+}
+
+export function useAutomation(id: string) {
+  return useQuery({
+    queryKey: [...QUERY_KEY, id],
+    queryFn: async () =>
+      apiClient.get<{ data: { automation: AutomationDetail } }>(`/api/v1/automations/${id}`),
+  });
+}
+
+/** Só o que mudou importa para a API, mas mandar o estado inteiro é seguro: ela compara e ignora o igual. */
+export type UpdateAutomationInput = Partial<
+  Pick<
+    AutomationDetail,
+    | "name"
+    | "template_name"
+    | "template_language"
+    | "variable_mapping"
+    | "event_type_id"
+    | "timing_kind"
+    | "timing_value"
+    | "confirm_button_text"
+    | "decline_button_text"
+  >
+>;
+
+export function useUpdateAutomation(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateAutomationInput) =>
+      apiClient.patch<{ data: { status: string; campos_alterados: string[] } }>(
+        `/api/v1/automations/${id}`,
+        input,
+      ),
+    onError: showApiError,
+    // Lista E detalhe: o detalhe alimenta o formulário na próxima abertura.
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
+}

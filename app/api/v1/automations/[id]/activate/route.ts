@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { acharConflitoDeAtivacao, fraseDoConflito } from "@/lib/automations/configuracao";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -39,24 +40,15 @@ export async function POST(
   // para o mesmo serviço no mesmo momento mandariam a mensagem em dobro — já "confirmação 1 dia
   // antes" + "lembrete no dia" do mesmo serviço convivem. Confere ANTES, para dizer qual é e o que fazer; o índice único é a
   // trava final contra a corrida entre dois cliques.
-  let consulta = admin
-    .from("whatsapp_template_automations")
-    .select("id, name")
-    .eq("organization_id", authz.org.orgId)
-    .eq("trigger_kind", automacao.trigger_kind as string)
-    .eq("status", "active")
-    .eq("timing_kind", automacao.timing_kind as string)
-    .neq("id", id);
-  consulta = automacao.timing_value === null
-    ? consulta.is("timing_value", null)
-    : consulta.eq("timing_value", automacao.timing_value as number);
-  consulta = automacao.event_type_id
-    ? consulta.eq("event_type_id", automacao.event_type_id as string)
-    : consulta.is("event_type_id", null);
-  const { data: conflito } = await consulta.limit(1).maybeSingle();
-  const frase = (nome: string) =>
-    `Já existe uma automação ativa para ${automacao.event_type_id ? "este serviço" : "todos os serviços"} no mesmo momento de envio: "${nome}". Pause-a antes de ativar esta — duas ativas mandariam a mensagem em dobro.`;
-  if (conflito) return fail("state_conflict", frase(conflito.name as string), 409, { requestId });
+  const frase = (nome: string) => fraseDoConflito(Boolean(automacao.event_type_id), nome);
+  const conflito = await acharConflitoDeAtivacao(admin, authz.org.orgId, {
+    id,
+    trigger_kind: automacao.trigger_kind as string,
+    event_type_id: (automacao.event_type_id as string | null) ?? null,
+    timing_kind: automacao.timing_kind as string,
+    timing_value: (automacao.timing_value as number | null) ?? null,
+  });
+  if (conflito) return fail("state_conflict", frase(conflito.name), 409, { requestId });
 
   const { error } = await admin
     .from("whatsapp_template_automations")

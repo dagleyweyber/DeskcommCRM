@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   useActivateAutomation,
+  useAutomation,
   useAutomations,
   usePauseAutomation,
   type AutomationSummary,
 } from "@/hooks/campaigns/useAutomations";
-import { NovaAutomacaoForm, rotuloDoMomento } from "./NovaAutomacaoForm";
+import { AutomacaoForm, NovaAutomacaoForm, rotuloDoMomento } from "./NovaAutomacaoForm";
 
 const COR_DO_STATUS: Record<AutomationSummary["status"], "default" | "secondary" | "outline"> = {
   draft: "outline",
@@ -60,15 +61,46 @@ function AcoesDaAutomacao({ automacao }: { automacao: AutomationSummary }) {
   );
 }
 
+/**
+ * Carrega a configuração COMPLETA (a lista não traz o mapeamento das variáveis) e abre o
+ * formulário já preenchido. O formulário só monta depois do carregamento: ele lê o estado
+ * inicial uma vez, então montá-lo antes mostraria campos vazios e salvaria por cima.
+ */
+function EditarAutomacao({ id, onFechar }: { id: string; onFechar: () => void }) {
+  const { data, isPending, isError } = useAutomation(id);
+  const automacao = data?.data.automation;
+
+  if (isPending) return <p className="text-sm text-muted-foreground">Carregando automação…</p>;
+  if (isError || !automacao) {
+    return (
+      <Card className="flex items-center justify-between gap-2 p-4">
+        <p className="text-sm text-destructive">Não consegui abrir esta automação para editar.</p>
+        <Button type="button" size="sm" variant="outline" onClick={onFechar}>
+          Fechar
+        </Button>
+      </Card>
+    );
+  }
+  return <AutomacaoForm automacao={automacao} onConcluido={onFechar} onCancelar={onFechar} />;
+}
+
 export function AutomacoesClient() {
   const { data, isPending } = useAutomations();
   const [criando, setCriando] = useState(false);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
   const automacoes = data?.data.automations ?? [];
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
-        <Button type="button" variant={criando ? "outline" : "default"} onClick={() => setCriando((v) => !v)}>
+        <Button
+          type="button"
+          variant={criando ? "outline" : "default"}
+          onClick={() => {
+            setEditandoId(null);
+            setCriando((v) => !v);
+          }}
+        >
           {criando ? "Cancelar" : "Nova automação"}
         </Button>
       </div>
@@ -87,7 +119,10 @@ export function AutomacoesClient() {
         </Card>
       ) : (
         <div className="flex flex-col gap-3">
-          {automacoes.map((a) => (
+          {automacoes.map((a) =>
+            editandoId === a.id ? (
+              <EditarAutomacao key={a.id} id={a.id} onFechar={() => setEditandoId(null)} />
+            ) : (
             <Card key={a.id} className="p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{a.name}</span>
@@ -105,12 +140,24 @@ export function AutomacoesClient() {
                     Confirma pela resposta
                   </Badge>
                 )}
-                <div className="ml-auto">
+                <div className="ml-auto flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setCriando(false);
+                      setEditandoId(a.id);
+                    }}
+                    aria-label={`Editar ${a.name}`}
+                  >
+                    Editar
+                  </Button>
                   <AcoesDaAutomacao automacao={a} />
                 </div>
               </div>
             </Card>
-          ))}
+            ),
+          )}
         </div>
       )}
     </div>

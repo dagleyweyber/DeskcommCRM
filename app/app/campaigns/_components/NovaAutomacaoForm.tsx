@@ -1,10 +1,16 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
-import { useCreateAutomation, type CreateAutomationInput, type TimingKind } from "@/hooks/campaigns/useAutomations";
+import {
+  useCreateAutomation,
+  useUpdateAutomation,
+  type AutomationDetail,
+  type CreateAutomationInput,
+  type TimingKind,
+} from "@/hooks/campaigns/useAutomations";
 import { useEventTypes } from "@/hooks/agenda/useEventTypes";
 import { useTemplates } from "@/hooks/channels/useTemplates";
 import {
@@ -62,19 +68,38 @@ const GATILHOS: Array<{ value: CreateAutomationInput["trigger_kind"]; label: str
   },
 ];
 
-export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
+/** Chave do seletor de momento para um (kind, value) já gravado. */
+function chaveDoMomento(kind: TimingKind, value: number | null): string {
+  return kind === "day_of_8am" ? "day_of_8am" : `${kind}:${value}`;
+}
+
+interface FormProps {
+  /** Presente = EDITAR esta automação; ausente = criar uma nova. */
+  automacao?: AutomationDetail;
+  /** Terminou (criou ou salvou) — o pai fecha o formulário. */
+  onConcluido: () => void;
+  /** Só na edição: desistir sem salvar. */
+  onCancelar?: () => void;
+}
+
+export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps) {
   const templates = useTemplates();
   const criar = useCreateAutomation();
+  const atualizar = useUpdateAutomation(automacao?.id ?? "");
   const servicos = useEventTypes();
+  const editando = Boolean(automacao);
 
-  const [nome, setNome] = useState("");
-  const [templateEscolhido, setTemplateEscolhido] = useState("");
-  const [mapping, setMapping] = useState<VariableMapping>({});
+  const modeloInicial = automacao ? `${automacao.template_name}|${automacao.template_language}` : "";
+  const momentoInicial = automacao ? chaveDoMomento(automacao.timing_kind, automacao.timing_value) : "day_of_8am";
+
+  const [nome, setNome] = useState(automacao?.name ?? "");
+  const [templateEscolhido, setTemplateEscolhido] = useState(modeloInicial);
+  const [mapping, setMapping] = useState<VariableMapping>(automacao?.variable_mapping ?? {});
   // "" = todos os serviços (o comportamento de sempre).
-  const [servicoId, setServicoId] = useState("");
-  const [momento, setMomento] = useState("day_of_8am");
-  const [botaoConfirma, setBotaoConfirma] = useState("");
-  const [botaoDesmarca, setBotaoDesmarca] = useState("");
+  const [servicoId, setServicoId] = useState(automacao?.event_type_id ?? "");
+  const [momento, setMomento] = useState(momentoInicial);
+  const [botaoConfirma, setBotaoConfirma] = useState(automacao?.confirm_button_text ?? "");
+  const [botaoDesmarca, setBotaoDesmarca] = useState(automacao?.decline_button_text ?? "");
 
   const aprovados = useMemo(
     () => (templates.data?.data.templates ?? []).filter((t) => t.status === "APPROVED"),
@@ -83,10 +108,16 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
   const atual = aprovados.find((t) => `${t.name}|${t.language}` === templateEscolhido) ?? null;
   const botoes = useMemo(() => (atual ? botoesDeRespostaRapida(atual.components) : []), [atual]);
 
-  // Trocou de modelo: sugere os botões pelo texto (a pessoa confere).
+  // Trocou de modelo: sugere os botões pelo texto (a pessoa confere). Na EDIÇÃO, enquanto o
+  // modelo for o que já estava salvo, os botões salvos valem — o palpite os apagaria.
+  const primeiraLeitura = useRef(true);
   useEffect(() => {
+    const ehPrimeira = primeiraLeitura.current;
+    primeiraLeitura.current = false;
+    if (editando && templateEscolhido === modeloInicial && (ehPrimeira || botoes.length > 0)) return;
     setBotaoConfirma(palpite(botoes, /confirm|sim|vou/));
     setBotaoDesmarca(palpite(botoes, /remarc|cancel|nao|desmarc/));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reage só à mudança dos botões do modelo
   }, [botoes]);
 
   // Toda variável do modelo precisa de uma origem ANTES de criar (a API confere de novo).
@@ -108,6 +139,33 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
 
   const momentoEscolhido = MOMENTOS.find((m) => m.chave === momento) ?? MOMENTOS[0]!;
 
+  function salvarAlteracoes() {
+    if (!automacao || !nome.trim() || !atual) return;
+    atualizar.mutate(
+      {
+        name: nome.trim(),
+        template_name: atual.name,
+        template_language: atual.language,
+        variable_mapping: mapping,
+        event_type_id: servicoId || null,
+        timing_kind: momentoEscolhido.kind,
+        timing_value: momentoEscolhido.value,
+        confirm_button_text: botaoConfirma || null,
+        decline_button_text: botaoDesmarca || null,
+      },
+      {
+        onSuccess: () => {
+          toast.success(
+            automacao.status === "active"
+              ? "Automação atualizada. As mudanças valem para os próximos envios."
+              : "Automação atualizada.",
+          );
+          onConcluido();
+        },
+      },
+    );
+  }
+
   function criarAutomacao() {
     const channelSessionId = templates.data?.data.channelSessionId;
     if (!nome.trim() || !atual || !channelSessionId) return;
@@ -128,7 +186,7 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
       {
         onSuccess: () => {
           toast.success("Automação criada. Revise e clique em Ativar quando estiver pronta.");
-          onCriada();
+          onConcluido();
         },
       },
     );
@@ -136,6 +194,17 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
 
   return (
     <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+      {editando && automacao?.status === "active" && (
+        <p
+          className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/20 dark:text-amber-100"
+          data-testid="automacao-editando-ativa"
+        >
+          Esta automação está <strong>ativa</strong>. As mudanças valem para os próximos envios; quem já recebeu não
+          recebe de novo.
+          {momento !== momentoInicial &&
+            " Mudar o momento de envio pode mandar a mensagem agora para compromissos que já passaram do novo momento."}
+        </p>
+      )}
       <div className="flex flex-col gap-1">
         <label className="text-sm font-medium" htmlFor="automacao-nome">
           Nome da automação
@@ -273,22 +342,39 @@ export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
         </p>
       )}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {editando && onCancelar && (
+          <Button type="button" variant="outline" onClick={onCancelar} disabled={atualizar.isPending}>
+            Cancelar
+          </Button>
+        )}
         <Button
           type="button"
-          onClick={criarAutomacao}
+          onClick={editando ? salvarAlteracoes : criarAutomacao}
           disabled={
             !nome.trim() ||
             !atual ||
             semFonte.length > 0 ||
             (Boolean(botaoConfirma) && botaoConfirma === botaoDesmarca) ||
             criar.isPending ||
-            !templates.data?.data.channelSessionId
+            atualizar.isPending ||
+            (!editando && !templates.data?.data.channelSessionId)
           }
         >
-          {criar.isPending ? "Criando…" : "Criar automação"}
+          {editando
+            ? atualizar.isPending
+              ? "Salvando…"
+              : "Salvar alterações"
+            : criar.isPending
+              ? "Criando…"
+              : "Criar automação"}
         </Button>
       </div>
     </div>
   );
+}
+
+/** Criar uma automação nova — o nome de sempre, para quem não edita. */
+export function NovaAutomacaoForm({ onCriada }: { onCriada: () => void }) {
+  return <AutomacaoForm onConcluido={onCriada} />;
 }

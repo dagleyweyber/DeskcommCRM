@@ -282,6 +282,8 @@ export type AuditAction =
   // únicas transições depois disso, o despachante (cron) é service role e
   // não passa por rota autenticada, mesma nota de Campanhas acima.
   | "automation.created"
+  /** Edição da configuração de uma automação (metadata.campos = só os nomes dos campos). */
+  | "automation.updated"
   | "automation.activated"
   | "automation.paused"
   // Agenda (núcleo, Fase 1 — sem Google Calendar).
