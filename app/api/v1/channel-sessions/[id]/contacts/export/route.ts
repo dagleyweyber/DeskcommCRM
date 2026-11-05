@@ -43,7 +43,12 @@ export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
 const fonteSchema = z.enum(["agenda", "conversas"]).default("agenda");
 
-function csv(corpo: string, arquivo: string, requestId: string): Response {
+function csv(
+  corpo: string,
+  arquivo: string,
+  requestId: string,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(corpo, {
     status: 200,
     headers: {
@@ -51,6 +56,7 @@ function csv(corpo: string, arquivo: string, requestId: string): Response {
       "Content-Disposition": `attachment; filename="${arquivo}"`,
       "Cache-Control": "no-store",
       "X-Request-Id": requestId,
+      ...extra,
     },
   });
 }
@@ -173,5 +179,11 @@ export async function GET(
     },
   });
 
-  return csv(montarCsvAgenda(agenda.linhas), nomeDoArquivo(rotulo, new Date(), "agenda"), requestId);
+  // A tela avisa quantas pessoas ficaram de fora: sem isso, "exportei tudo" seria
+  // a leitura natural de um arquivo que na verdade não tem quem o canal só
+  // identifica por código.
+  return csv(montarCsvAgenda(agenda.linhas), nomeDoArquivo(rotulo, new Date(), "agenda"), requestId, {
+    "X-Contatos-Exportados": String(agenda.linhas.length),
+    "X-Contatos-Sem-Numero": String(agenda.sem_telefone),
+  });
 }

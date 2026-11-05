@@ -170,3 +170,86 @@ describe("carregarAgendaDaSessao", () => {
     ).rejects.toBeInstanceOf(AgendaGrandeDemaisError);
   });
 });
+
+describe("consolidarAgenda — forma real medida em produção", () => {
+  // O contato com telefone traz `name` e `lid`; o apelido mora no contato por código.
+  const comTelefone = (digitos: string, over: Record<string, unknown> = {}) => ({
+    id: `${digitos}@c.us`,
+    lid: `${digitos}9@lid`,
+    ...over,
+  });
+
+  it("⭐ liga o apelido ao contato com telefone pelo `lid` — a coluna nome_no_whatsapp não sai vazia", () => {
+    const r = consolidarAgenda(
+      [
+        comTelefone("5581999990001", { name: "Maria Silva" }),
+        { id: "55819999900019@lid", pushname: "Mari 🌸" },
+      ],
+      [],
+    );
+    expect(r.linhas).toEqual([
+      { nome: "Maria Silva", telefone: "+5581999990001", salvo: true, nome_no_whatsapp: "Mari 🌸" },
+    ]);
+  });
+
+  it("⭐ quem não está salvo ganha o apelido como nome (era a linha em branco da planilha)", () => {
+    const r = consolidarAgenda(
+      [comTelefone("5581999990002"), { id: "55819999900029@lid", pushname: "Fulano da Silva" }],
+      [],
+    );
+    expect(r.linhas[0]).toMatchObject({ nome: "Fulano da Silva", salvo: false });
+  });
+
+  it("⭐ nome que é só o número mascarado NÃO vira nome, mas o contato continua SALVO", () => {
+    const r = consolidarAgenda([comTelefone("5581999990003", { name: "+55∙∙∙∙∙∙∙∙30" })], []);
+    expect(r.linhas[0]).toMatchObject({ nome: null, salvo: true });
+  });
+
+  it("nome que é só um telefone formatado também não é nome", () => {
+    const r = consolidarAgenda(
+      [
+        comTelefone("5581999990004", { name: "‪(84) 99811‑9200‬" }),
+        comTelefone("5581999990005", { name: "‪084999905628‬" }),
+      ],
+      [],
+    );
+    expect(r.linhas.map((l) => l.nome)).toEqual([null, null]);
+    expect(r.linhas.every((l) => l.salvo)).toBe(true);
+  });
+
+  it("⭐ tira as marcas invisíveis de direção do nome sem mexer no resto", () => {
+    const r = consolidarAgenda(
+      [
+        comTelefone("5581999990006", { name: "‎Gilberto Farmacia Betell" }),
+        comTelefone("5581999990007", { name: "Alex 👨🏽‍🎨 Grafica" }),
+      ],
+      [],
+    );
+    const nomes = r.linhas.map((l) => l.nome);
+    expect(nomes).toContain("Gilberto Farmacia Betell");
+    // O emoji composto usa um junção de largura zero (U+200D) que NÃO pode ser arrancada.
+    expect(nomes).toContain("Alex 👨🏽‍🎨 Grafica");
+  });
+
+  it("nome com dígitos mas com letras continua sendo nome", () => {
+    const r = consolidarAgenda(
+      [comTelefone("5581999990008", { name: "Luzy 10X" }), comTelefone("5581999990009", { name: "P2" })],
+      [],
+    );
+    expect(r.linhas.map((l) => l.nome).sort()).toEqual(["Luzy 10X", "P2"]);
+  });
+
+  it("⭐ sem_telefone NÃO conta o código de quem já saiu com telefone (é a mesma pessoa duas vezes)", () => {
+    const r = consolidarAgenda(
+      [
+        comTelefone("5581999990010", { name: "Ana" }),
+        { id: "55819999900109@lid", pushname: "Ana (código)" },
+        { id: "777@lid", pushname: "Quem só escreveu" },
+        { id: "888@lid" },
+      ],
+      [],
+    );
+    expect(r.linhas).toHaveLength(1);
+    expect(r.sem_telefone).toBe(2);
+  });
+});

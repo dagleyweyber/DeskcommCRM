@@ -47,13 +47,22 @@ export class WahaStoreDesligadoError extends Error {
   }
 }
 
-/** Contato como o WAHA o devolve (campos que o CRM usa; o resto é ignorado). */
+/**
+ * Contato como o WAHA o devolve (campos que o CRM usa; o resto é ignorado).
+ *
+ * Forma medida em produção (sessão com o armazenamento ligado): o contato com
+ * telefone (`@c.us`) traz `name` (nome na agenda) e `lid` (o código interno da
+ * MESMA pessoa), mas nunca `pushname`; o contato por código (`@lid`) traz só o
+ * `pushname` (o apelido que a pessoa usa). `isMyContact` não vem em nenhum.
+ * Ligar os dois pelo `lid` é o único jeito de dar apelido a quem tem telefone.
+ */
 export interface WahaContatoCru {
   id?: string;
   name?: string | null;
   pushname?: string | null;
   isMyContact?: boolean | null;
   isGroup?: boolean | null;
+  lid?: string | null;
 }
 
 /** Item de `/chats/overview`. */

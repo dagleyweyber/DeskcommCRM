@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { ChannelDeletionImpact } from "@/app/api/v1/channel-sessions/[id]/route";
 import { apiClient } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
+import { fraseDaExportacao } from "@/lib/contacts/resumo-exportacao";
 import {
   channelLabel,
   useChannelSessions,
@@ -100,7 +101,16 @@ class ExportacaoRecusada extends Error {
   }
 }
 
-async function baixarContatos(canalId: string, fonte: "agenda" | "conversas"): Promise<void> {
+/** O que a rota contou ao montar o arquivo (só a agenda informa; a de conversas não). */
+interface ResumoDaExportacao {
+  exportados: number | null;
+  semNumero: number;
+}
+
+async function baixarContatos(
+  canalId: string,
+  fonte: "agenda" | "conversas",
+): Promise<ResumoDaExportacao> {
   const res = await fetch(`/api/v1/channel-sessions/${canalId}/contacts/export?fonte=${fonte}`, {
     credentials: "same-origin",
   });
@@ -122,6 +132,12 @@ async function baixarContatos(canalId: string, fonte: "agenda" | "conversas"): P
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+
+  const exportados = res.headers.get("X-Contatos-Exportados");
+  return {
+    exportados: exportados === null ? null : Number(exportados),
+    semNumero: Number(res.headers.get("X-Contatos-Sem-Numero") ?? 0),
+  };
 }
 
 /** "3 conversas" / "1 conversa" — ou nada, quando não há o que contar. */
@@ -237,7 +253,9 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
     async (c: ChannelSession, fonte: "agenda" | "conversas") => {
       setExportandoId(c.id);
       try {
-        await baixarContatos(c.id, fonte);
+        const resumo = await baixarContatos(c.id, fonte);
+        const frase = fraseDaExportacao(resumo.exportados, resumo.semNumero);
+        if (frase) toast.success(frase.titulo, { description: frase.detalhe ?? undefined, duration: 12_000 });
       } catch (err) {
         // Número sem agenda guardada não é falha: a saída é parear de novo, e é
         // isso que o diálogo oferece — um toast só repetiria o problema.

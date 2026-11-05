@@ -134,6 +134,9 @@ describe("GET /channel-sessions/[id]/contacts/export", () => {
       expect(csv.trim().split("\r\n")).toHaveLength(5);
       expect(listAddressBook).toHaveBeenCalledWith({ sessionRef: "ref-da-sessao" });
       expect(contatosDoCanal).not.toHaveBeenCalled();
+      // A tela usa estes dois para avisar quantas pessoas ficaram de fora.
+      expect(res.headers.get("X-Contatos-Exportados")).toBe("4");
+      expect(res.headers.get("X-Contatos-Sem-Numero")).toBe("3");
 
       expect(audit).toHaveBeenCalledTimes(1);
       const evento = vi.mocked(audit).mock.calls[0]![0];
