@@ -117,6 +117,7 @@ export async function PATCH(
     });
   }
   const patch = parsed.data;
+  const automationId = id.data;
   const orgId = authz.org.orgId;
   const admin = createAdminClient();
 
@@ -219,7 +220,7 @@ export async function PATCH(
     actorUserId: authz.user.id,
     organizationId: orgId,
     resourceType: "whatsapp_template_automation",
-    resourceId: id.data,
+    resourceId: automationId,
     requestId,
     // Só os NOMES dos campos: o mapeamento pode carregar valores fixos e não precisa ir para o log.
     metadata: { actor_type: "user", campos: alterados, status: atual.status },
