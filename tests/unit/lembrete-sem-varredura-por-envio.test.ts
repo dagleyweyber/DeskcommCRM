@@ -12,11 +12,16 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const raiz = process.cwd();
-const migration = readFileSync(
-  join(raiz, "supabase/migrations/20261106130000_0212_lembrete_sem_varredura_por_envio.sql"),
-  "utf8",
+/** Sem os comentários `--`: a migration explica o formato proibido, e o texto da explicação não conta. */
+const semComentarios = (sql: string) => sql.replace(/^\s*--.*$/gm, "");
+
+const migration = semComentarios(
+  readFileSync(
+    join(raiz, "supabase/migrations/20261106130000_0212_lembrete_sem_varredura_por_envio.sql"),
+    "utf8",
+  ),
 );
-const baseline = readFileSync(join(raiz, "supabase/baseline.sql"), "utf8");
+const baseline = semComentarios(readFileSync(join(raiz, "supabase/baseline.sql"), "utf8"));
 
 /** A ÚLTIMA definição da função no baseline é a que vale (apêndices são cumulativos). */
 function ultimaDefinicao(sql: string): string {
