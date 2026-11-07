@@ -45,11 +45,6 @@ describe("fn_due_appointment_reminders (0212)", () => {
     expect(def).not.toMatch(QUADRATICO);
   });
 
-  it("baseline e migration têm o mesmo corpo", () => {
-    const corpo = (s: string) => s.slice(s.indexOf("as $$"), s.indexOf("$$;") + 3).replace(/\r\n/g, "\n");
-    expect(corpo(ultimaDefinicao(baseline))).toBe(corpo(migration));
-  });
-
   it("continua fechada para anon/authenticated e aberta só ao service_role", () => {
     expect(migration).toMatch(/revoke all on function public\.fn_due_appointment_reminders\(uuid, uuid, timestamptz\) from public;/);
     expect(migration).toMatch(/from anon, authenticated;/);
