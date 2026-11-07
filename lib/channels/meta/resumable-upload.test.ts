@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { uploadMediaHandle } from "./resumable-upload";
+import { nomeDeArquivoParaMeta, uploadMediaHandle } from "./resumable-upload";
 
 /**
  * Migration 0172 — o bug que motivou este módulo: template com imagem no
@@ -24,6 +24,28 @@ function fetchMock(respostas: Array<{ ok: boolean; status: number; body: unknown
     } as Response;
   });
 }
+
+describe("nomeDeArquivoParaMeta", () => {
+  it("troca os caracteres que a Meta recusa (\\ / < @ %) e nunca devolve vazio", () => {
+    expect(nomeDeArquivoParaMeta("promo 50%@2x.png")).toBe("promo 50__2x.png");
+    expect(nomeDeArquivoParaMeta("a/b\\c<d.jpg")).toBe("a_b_c_d.jpg");
+    expect(nomeDeArquivoParaMeta("foto.jpg")).toBe("foto.jpg");
+    expect(nomeDeArquivoParaMeta("  ")).toBe("arquivo");
+  });
+
+  it("o nome limpo é o que vai na sessão de upload", async () => {
+    const fetchImpl = fetchMock([
+      { ok: true, status: 200, body: { id: "upload:s" } },
+      { ok: true, status: 200, body: { h: "4:x" } },
+    ]);
+    await uploadMediaHandle(
+      { appId: "a", token: "t", fileName: "WhatsApp@Image 100%.jpeg", mime: "image/jpeg", bytes: new Uint8Array([1]) },
+      { fetchImpl },
+    );
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.get("file_name")).toBe("WhatsApp_Image 100_.jpeg");
+  });
+});
 
 describe("uploadMediaHandle", () => {
   it("⭐ dois passos: abre sessão em /{app_id}/uploads, sobe bytes na sessão devolvida, retorna o handle", async () => {

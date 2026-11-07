@@ -59,6 +59,17 @@ interface UploadFinishResponse {
   error?: { message?: string };
 }
 
+/**
+ * A Meta valida `file_name` com `/^[^\\/<@%]+$/` e responde "(#100) Value of param
+ * file_name must match regex pattern" se houver `\`, `/`, `<`, `@` ou `%` — comum em
+ * nome vindo do celular/WhatsApp ("foto@2x.jpg", "promo 50%.png"). O nome só serve
+ * de rótulo no handle, então troca o proibido por `_` e nunca devolve vazio.
+ */
+export function nomeDeArquivoParaMeta(nome: string): string {
+  const limpo = nome.replace(/[\\/<@%\u0000-\u001f]/g, "_").trim();
+  return limpo.length > 0 ? limpo.slice(0, 200) : "arquivo";
+}
+
 export async function uploadMediaHandle(
   input: UploadMediaHandleInput,
   opts: { fetchImpl?: typeof fetch } = {},
@@ -68,7 +79,7 @@ export async function uploadMediaHandle(
 
   try {
     const qs = new URLSearchParams({
-      file_name: input.fileName,
+      file_name: nomeDeArquivoParaMeta(input.fileName),
       file_length: String(input.bytes.byteLength),
       file_type: input.mime,
       access_token: input.token,

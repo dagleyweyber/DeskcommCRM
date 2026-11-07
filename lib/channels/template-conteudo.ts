@@ -173,6 +173,21 @@ export function semSublinhadoNoFim(nome: string): string {
 export const LIMITE_NOME_DO_MODELO = 512;
 
 /**
+ * A Meta recusa o modelo inteiro ("Buttons can't have any variables, newlines,
+ * emojis, or formatting characters") se o texto do botão tiver emoji, quebra de
+ * linha, `{{variável}}` ou formatação (`*`, `_`, `~`, crase). Um emoji colado do
+ * celular basta. Limpa aqui em vez de devolver o erro só depois do envio.
+ */
+export function textoDeBotaoAceitoPelaMeta(texto: string): string {
+  return texto
+    .replace(/\{\{[^}]*\}\}/g, "")
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️⃣]/gu, "")
+    .replace(/[*_~`\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Monta os `components` de uma definição nova, com os exemplos que a revisão
  * exige.
  *
@@ -235,10 +250,11 @@ export function montarComponents(input: {
   // Botões por último, e todos num ÚNICO componente: o contrato pede
   // `{type:"BUTTONS", buttons:[…]}`, não um componente por botão.
   const botoes = (input.botoes ?? [])
-    .filter((b) => b.texto.trim())
+    .map((b) => ({ ...b, texto: textoDeBotaoAceitoPelaMeta(b.texto) }))
+    .filter((b) => b.texto)
     .slice(0, LIMITE_BOTOES)
     .map((b) => {
-      const base: Bruto = { type: b.tipo.toUpperCase(), text: b.texto.trim() };
+      const base: Bruto = { type: b.tipo.toUpperCase(), text: b.texto };
       if (b.tipo === "url") base.url = (b.url ?? "").trim();
       if (b.tipo === "phone_number") base.phone_number = (b.telefone ?? "").trim();
       return base;
