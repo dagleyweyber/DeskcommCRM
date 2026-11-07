@@ -11,6 +11,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { audit } from "@/lib/audit";
 import { fail, ok } from "@/lib/api/wrappers";
@@ -18,6 +19,7 @@ import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { getAdapter } from "@/lib/channels";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
+import { descreverUsos, usosDoModelo } from "@/lib/channels/meta/apagar-modelo";
 import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
 import { metaSessionForOrg } from "@/lib/channels/meta/session";
 import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
@@ -267,4 +269,94 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { requestId },
     );
   }
+}
+
+const apagarSchema = z.object({ name: z.string().trim().min(1).max(512) });
+
+/**
+ * DELETE /api/v1/channels/templates?name=... — apaga o modelo NA META e tira do
+ * espelho. Barrado (409) enquanto alguma automação ou campanha aberta usa o
+ * nome: ver `lib/channels/meta/apagar-modelo.ts`.
+ *
+ * A Meta apaga por nome, então todos os idiomas daquele nome saem juntos — a
+ * tela avisa isso na confirmação.
+ */
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const requestId = randomUUID();
+  const r = await orgOrFail(requestId);
+  if (!r.autorizado) return r.resposta;
+
+  const parsed = apagarSchema.safeParse({ name: req.nextUrl.searchParams.get("name") ?? "" });
+  if (!parsed.success) return fail("invalid_request", "Falta o nome do modelo.", 400, { requestId });
+  const nome = parsed.data.name;
+
+  const sessao = await metaSessionForOrg(r.orgId);
+  if (!sessao?.wabaId || !sessao.phoneNumberId) {
+    return fail("invalid_request", "no_meta_channel", 400, { requestId });
+  }
+
+  const admin = createAdminClient();
+  const { data: existe } = await admin
+    .from("meta_templates")
+    .select("language")
+    .eq("organization_id", r.orgId)
+    .eq("waba_id", sessao.wabaId)
+    .eq("name", nome);
+  const idiomas = ((existe ?? []) as { language: string }[]).map((l) => l.language);
+  if (idiomas.length === 0) return fail("not_found", "Modelo não encontrado.", 404, { requestId });
+
+  const usos = await usosDoModelo(admin, r.orgId, nome);
+  if (usos.length > 0) {
+    return fail("state_conflict", descreverUsos(usos), 409, { requestId, details: { usos } });
+  }
+
+  const adapter = getAdapter(CHANNEL_PROVIDER_META);
+  if (!adapter.templates) {
+    return fail("not_implemented", "Este canal não gerencia definições.", 501, { requestId });
+  }
+
+  try {
+    await adapter.templates.remove({ sessionRef: sessao.phoneNumberId, name: nome });
+  } catch (err) {
+    const mensagem = err instanceof Error ? err.message : "delete_failed";
+    logger.error("channels/templates: apagar falhou", {
+      organization_id: r.orgId,
+      request_id: requestId,
+      error: mensagem,
+    });
+    const recusadaPelaMeta = ehRecusaDaPlataforma(mensagem);
+    return fail(
+      recusadaPelaMeta ? "unprocessable_entity" : "upstream_unavailable",
+      mensagem,
+      recusadaPelaMeta ? 422 : 503,
+      { requestId },
+    );
+  }
+
+  // A Meta já apagou: o espelho acompanha. Mensagens antigas guardam o nome em
+  // texto (`messages.template_name`), então o histórico não perde nada.
+  const { error } = await admin
+    .from("meta_templates")
+    .delete()
+    .eq("organization_id", r.orgId)
+    .eq("waba_id", sessao.wabaId)
+    .eq("name", nome);
+  if (error) {
+    logger.error("channels/templates: espelho não acompanhou o apagar", {
+      organization_id: r.orgId,
+      request_id: requestId,
+      error: error.message,
+    });
+  }
+
+  await audit({
+    action: "template.deleted",
+    organizationId: r.orgId,
+    resourceType: "channel_session",
+    resourceId: sessao.id,
+    requestId,
+    metadata: { name: nome, languages: idiomas },
+  });
+
+  return ok({ name: nome, languages: idiomas });
 }

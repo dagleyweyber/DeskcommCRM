@@ -68,6 +68,25 @@ export function useSyncTemplates() {
   });
 }
 
+/**
+ * Apaga o modelo NA META (todos os idiomas do nome) e tira do espelho. A rota
+ * devolve 409 com a lista de automações/campanhas que ainda usam o nome — a
+ * mensagem do erro já diz quais, e o toast padrão a mostra.
+ */
+export function useDeleteTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) =>
+      apiClient.delete<{ data: { name: string; languages: string[] } }>(
+        `/api/v1/channels/templates?name=${encodeURIComponent(name)}`,
+      ),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channel-templates"] });
+    },
+  });
+}
+
 export interface CreateTemplateInput {
   name: string;
   language: string;

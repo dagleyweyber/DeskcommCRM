@@ -2,12 +2,22 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PreviaDaDefinicao } from "./PreviaDaDefinicao";
 import {
   useCreateTemplate,
+  useDeleteTemplate,
   useSyncTemplates,
   useTemplates,
   type TemplatePreview,
@@ -416,10 +426,53 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
   );
 }
 
+/**
+ * Confirmação de apagar. Não tem volta: a Meta apaga o nome em TODOS os idiomas
+ * e o nome fica indisponível por um tempo. Se o modelo estiver em uso, a rota
+ * recusa (409) e o toast diz quais automações/campanhas — o diálogo fica aberto.
+ */
+function ApagarModelo({ nome, idiomas, onFechar }: { nome: string; idiomas: string[]; onFechar: () => void }) {
+  const apagar = useDeleteTemplate();
+  return (
+    <AlertDialog open onOpenChange={(aberto) => { if (!aberto) onFechar(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Apagar o modelo “{nome}”?</AlertDialogTitle>
+          <AlertDialogDescription>
+            O modelo é apagado na Meta e some desta lista. Não dá para desfazer.
+            {idiomas.length > 1 ? ` Os ${idiomas.length} idiomas (${idiomas.join(", ")}) saem juntos.` : ""}{" "}
+            A Meta pode não deixar criar outro modelo com o mesmo nome por alguns dias. As
+            mensagens já enviadas continuam no histórico.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={onFechar}>Cancelar</AlertDialogCancel>
+          <Button
+            variant="destructive"
+            disabled={apagar.isPending}
+            data-testid="btn-confirmar-apagar-modelo"
+            onClick={() =>
+              apagar.mutate(nome, {
+                onSuccess: () => {
+                  toast.success(`Modelo “${nome}” apagado.`);
+                  onFechar();
+                },
+              })
+            }
+          >
+            {apagar.isPending ? "Apagando…" : "Apagar modelo"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function TemplatesClient() {
   const { data, isPending } = useTemplates();
   const sync = useSyncTemplates();
   const [criando, setCriando] = useState(false);
+  const [apagando, setApagando] = useState<string | null>(null);
 
   const waba = data?.data.waba ?? null;
   const templates = data?.data.templates ?? null;
@@ -474,6 +527,14 @@ export function TemplatesClient() {
 
       {criando && <CriarModelo onCriado={() => setCriando(false)} />}
 
+      {apagando && (
+        <ApagarModelo
+          nome={apagando}
+          idiomas={templates.filter((t) => t.name === apagando).map((t) => t.language)}
+          onFechar={() => setApagando(null)}
+        />
+      )}
+
       {templates.length === 0 ? (
         <Card className="p-6">
           <h2 className="font-medium">Nenhum template ainda</h2>
@@ -503,6 +564,15 @@ export function TemplatesClient() {
                     ? "sem parâmetros"
                     : `${t.slots.length} parâmetro(s)`}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setApagando(t.name)}
+                  className="text-xs text-muted-foreground hover:text-destructive"
+                  aria-label={`Apagar o modelo ${t.name}`}
+                  data-testid="btn-apagar-modelo"
+                >
+                  apagar
+                </button>
               </div>
 
               {t.rejectedReason ? (

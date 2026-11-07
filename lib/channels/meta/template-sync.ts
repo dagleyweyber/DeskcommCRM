@@ -202,6 +202,18 @@ export function planSync(rows: MetaTemplateRow[], existing: LocalTemplate[]): Sy
   return { disable, counts: { inserted, updated, unchanged, disabled: disable.length } };
 }
 
+/**
+ * Status que a Meta usa para modelo apagado — ele continua voltando na listagem
+ * por um tempo depois do DELETE. Sem este filtro, o modelo que a pessoa acabou de
+ * apagar pela tela reapareceria no próximo "Sincronizar". Apagado fora do CRM
+ * cai na regra de sempre: some do remoto e o espelho o marca `DISABLED`.
+ */
+const STATUS_DE_APAGADO = new Set(["PENDING_DELETION", "DELETED"]);
+
+export function semOsApagados(rows: MetaTemplateRow[]): MetaTemplateRow[] {
+  return rows.filter((r) => !STATUS_DE_APAGADO.has(r.status.toUpperCase()));
+}
+
 export interface SyncInput {
   organizationId: string;
   wabaId: string;
@@ -262,7 +274,7 @@ async function fetchAllTemplates(input: SyncInput): Promise<unknown[]> {
  * query — o valor vem do chamador (sessão/token de webhook), nunca de body.
  */
 export async function syncTemplates(input: SyncInput): Promise<SyncCounts> {
-  const rows = (await fetchAllTemplates(input)) as MetaTemplateRow[];
+  const rows = semOsApagados((await fetchAllTemplates(input)) as MetaTemplateRow[]);
   const db = createAdminClient();
 
   const { data: existing, error: readError } = await db
