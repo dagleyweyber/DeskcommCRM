@@ -13,6 +13,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
+import { gravarLinks, prepararLinks } from "@/lib/campaigns/links-da-campanha";
 import { aplicarRegrasDeEnvio, regrasDeEnvioSchema, regrasDoCorpo } from "@/lib/campaigns/regras-de-envio";
 import {
   fraseDosValoresSemFonte,
@@ -65,7 +66,24 @@ export async function GET(): Promise<Response> {
     .order("created_at", { ascending: false });
 
   if (error) return fail("internal_error", error.message, 500, { requestId });
-  return ok({ campaigns: data ?? [] }, { requestId });
+
+  // Cliques do botão de link da campanha (migration 0216): o retorno de quem disparou.
+  const campanhas = data ?? [];
+  const { data: links } = campanhas.length
+    ? await admin
+        .from("whatsapp_campaign_links")
+        .select("campaign_id, cliques")
+        .eq("organization_id", authz.org.orgId)
+        .in("campaign_id", campanhas.map((c) => c.id))
+    : { data: [] };
+  const cliques = new Map<string, number>();
+  for (const l of (links ?? []) as Array<{ campaign_id: string; cliques: number }>) {
+    cliques.set(l.campaign_id, (cliques.get(l.campaign_id) ?? 0) + l.cliques);
+  }
+  return ok(
+    { campaigns: campanhas.map((c) => ({ ...c, cliques: cliques.get(c.id) ?? null })) },
+    { requestId },
+  );
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -134,6 +152,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
 
+  // Botão de link escolhido na campanha: o destino colado vira um código curto, e é o
+  // código que entra no mapeamento gravado e nos valores de cada destinatário.
+  const links = prepararLinks(template.components, input.variable_mapping as VariableMapping);
+  if (!links.ok) return fail("invalid_request", links.mensagem, 422, { requestId });
+  const mapping = links.mapping;
+
   // As regras vão junto do filtro em `audience_filter`: é o registro de COMO o
   // público foi montado, e o público em si já fica materializado nos destinatários.
   const recorte = await aplicarRegrasDeEnvio(
@@ -160,7 +184,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       channel_session_id: input.channel_session_id,
       template_name: input.template_name,
       template_language: input.template_language,
-      variable_mapping: input.variable_mapping,
+      variable_mapping: mapping,
       audience_filter: { ...input.audience, regras: input.regras },
       status: "draft",
       total_recipients: publico.length,
@@ -175,8 +199,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
 
+  const { error: erroLinks } = await gravarLinks(admin, authz.org.orgId, campanha.id, links.links);
+  if (erroLinks) {
+    // Sem a linha do link o botão levaria a um código que não existe: desfaz o rascunho.
+    await admin.from("whatsapp_campaigns").delete().eq("id", campanha.id).eq("organization_id", authz.org.orgId);
+    return fail("internal_error", erroLinks.message, 500, { requestId });
+  }
+
   if (publico.length > 0) {
-    const mapping = input.variable_mapping as VariableMapping;
     const linhas = publico.map((membro) => ({
       campaign_id: campanha.id,
       organization_id: authz.org.orgId,

@@ -23,6 +23,8 @@ export const PUBLIC_PATHS: RegExp[] = [
   /^\/_next\//,
   /^\/favicon\.ico$/,
   /^\/team\/accept-invite\/.+$/,
+  // Botão de link da campanha (app/l/[codigo]): quem clica é o paciente, sem sessão.
+  /^\/l\/[A-Za-z0-9]+$/,
   /^\/account-suspended$/,
 ];
 

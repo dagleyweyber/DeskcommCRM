@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { slotKey } from "@/lib/channels/meta/build-components";
+import { slotsDeLinkDaCampanha } from "@/lib/channels/template-conteudo";
 import type { VariableMapping, VariableSource } from "@/lib/messaging/variable-mapping";
 
 import { PreviaDoModelo } from "./PreviaDoModelo";
@@ -118,6 +119,7 @@ export function TemplateEVariaveisPicker({
         : null,
     [atual],
   );
+  const slotsDeLink = useMemo(() => (atual ? slotsDeLinkDaCampanha(atual.components) : []), [atual]);
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -158,6 +160,29 @@ export function TemplateEVariaveisPicker({
             const key = slotKey(s.address, s.key);
             const fonte = mapping[key];
             const fontes = fontesPara(s.expects, fontesExtras);
+            // Botão de link da campanha: o operador cola o DESTINO; quem troca pelo
+            // código curto é o servidor (`lib/campaigns/links-da-campanha.ts`).
+            if (slotsDeLink.includes(key)) {
+              return (
+                <div key={key} className="flex flex-col gap-1" data-testid="destino-do-link">
+                  <label className="text-xs font-medium" htmlFor={`destino-${key}`}>
+                    Para onde o botão {describeAddress(s.address).replace(/^botão /, "")} leva
+                  </label>
+                  <input
+                    id={`destino-${key}`}
+                    value={fonte?.kind === "fixed" ? fonte.value : ""}
+                    onChange={(e) =>
+                      onMappingChange({ ...mapping, [key]: { kind: "fixed", value: e.target.value.trim() } })
+                    }
+                    placeholder="https://chat.whatsapp.com/… ou qualquer link"
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    Todo mundo da campanha vai para este link. O CRM conta os cliques.
+                  </span>
+                </div>
+              );
+            }
             return (
               <div key={key} className="flex flex-wrap items-center gap-2">
                 <span className="w-40 shrink-0 text-xs text-muted-foreground">

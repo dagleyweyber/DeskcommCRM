@@ -19,6 +19,8 @@ export interface CampaignSummary {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  /** Cliques no botão de link da campanha; `null` quando o modelo não tem esse botão. */
+  cliques?: number | null;
 }
 
 const QUERY_KEY = ["campaigns"];

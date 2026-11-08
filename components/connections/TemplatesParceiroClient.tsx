@@ -14,6 +14,7 @@ import {
   LIMITE_CORPO,
   LIMITE_RODAPE,
   montarComponents,
+  problemasDosBotoes,
   type BotaoDaDefinicao,
 } from "@/lib/channels/template-conteudo";
 import { cn } from "@/lib/utils";
@@ -382,7 +383,13 @@ export function TemplatesParceiroClient() {
               type="button"
               size="sm"
               disabled={!nome.trim() || !corpo.trim() || acao.isPending}
-              onClick={() =>
+              onClick={() => {
+                // Mesmo aviso do canal oficial: botão incompleto não pode sumir em silêncio.
+                const problemas = problemasDosBotoes(botoes);
+                if (problemas.length > 0) {
+                  toast.error(problemas.join(" "));
+                  return;
+                }
                 acao.mutate({
                   acao: "criar",
                   name: nome.trim(),
@@ -395,8 +402,8 @@ export function TemplatesParceiroClient() {
                     cabecalho: { texto: cabecalho, midiaUrl },
                     botoes,
                   }),
-                })
-              }
+                });
+              }}
             >
               Enviar para revisão
             </Button>

@@ -191,6 +191,14 @@ beforeAll(() => {
             values (v_org, 'K7M2QX', '{"gclid":"Cj0K_rls"}'::jsonb);
         end if;
 
+        -- whatsapp_campaign_links (migration 0216): destino do botão de cada campanha
+        -- (link de grupo VIP, oferta) — o vizinho não pode ler. Código é único no banco
+        -- inteiro, então sai do id da org.
+        if not exists (select 1 from public.whatsapp_campaign_links where organization_id = v_org) then
+          insert into public.whatsapp_campaign_links (organization_id, codigo, destino)
+            values (v_org, 'rlslink' || replace(substr(v_org::text, 1, 8), '-', ''), 'https://exemplo.test/grupo');
+        end if;
+
         -- contact_field_proposals (migration 0123): a fila guarda e-mail e
         -- telefone que o cliente DITOU na conversa — PII crua, e a tabela nasce
         -- com CRUD inteiro para "authenticated" (o ALTER DEFAULT PRIVILEGES do
@@ -242,6 +250,8 @@ const TABLES = [
   "lead_touchpoints",
   // migration 0203 — cliques no WhatsApp da landing page (gclid/UTMs do anúncio).
   "rastreio_cliques",
+  // migration 0216 — destino do botão de link de cada campanha.
+  "whatsapp_campaign_links",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {

@@ -30,6 +30,7 @@ import {
   LIMITE_CORPO,
   LIMITE_RODAPE,
   montarComponents,
+  problemasDosBotoes,
   normalizarNomeDoModelo,
   semSublinhadoNoFim,
   type BotaoDaDefinicao,
@@ -288,6 +289,21 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                 className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
               />
               {b.tipo === "url" && (
+                <select
+                  value={b.linkNaCampanha ? "campanha" : "fixo"}
+                  onChange={(e) => {
+                    const p = [...botoes];
+                    p[i] = { ...b, linkNaCampanha: e.target.value === "campanha" };
+                    setBotoes(p);
+                  }}
+                  aria-label={`Tipo de link do botão ${i + 1}`}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="fixo">Link fixo</option>
+                  <option value="campanha">Link escolhido na campanha</option>
+                </select>
+              )}
+              {b.tipo === "url" && !b.linkNaCampanha && (
                 <input
                   value={b.url ?? ""}
                   onChange={(e) => {
@@ -299,6 +315,12 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                   aria-label={`URL do botão ${i + 1}`}
                   className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm"
                 />
+              )}
+              {b.tipo === "url" && b.linkNaCampanha && (
+                <span className="basis-full text-[11px] text-muted-foreground" data-testid="aviso-link-da-campanha">
+                  Você cola o destino ao criar cada campanha — pode ser o grupo do WhatsApp. O botão
+                  passa pelo endereço deste CRM, que conta o clique e redireciona.
+                </span>
               )}
               {b.tipo === "phone_number" && (
                 <input
@@ -369,7 +391,12 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
             type="button"
             size="sm"
             disabled={!semSublinhadoNoFim(nome) || !corpo.trim() || criar.isPending}
-            onClick={() =>
+            onClick={() => {
+              const problemas = problemasDosBotoes(botoes);
+              if (problemas.length > 0) {
+                toast.error(problemas.join(" "));
+                return;
+              }
               criar.mutate(
                 {
                   name: semSublinhadoNoFim(nome),
@@ -386,6 +413,9 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                     // URL. Ver `resumable-upload.ts`.
                     cabecalho: { texto: cabecalho, midiaUrl: midiaHandle },
                     botoes,
+                    // O endereço de onde o operador está usando o CRM — não uma
+                    // env de build: a imagem é genérica e serve qualquer domínio.
+                    origemDoLink: window.location.origin,
                   }),
                 },
                 {
@@ -403,8 +433,8 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                     onCriado();
                   },
                 },
-              )
-            }
+              );
+            }}
           >
             {criar.isPending ? "Enviando…" : "Enviar para revisão"}
           </Button>

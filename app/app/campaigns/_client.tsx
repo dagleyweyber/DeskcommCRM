@@ -46,6 +46,8 @@ function BarraDeProgresso({ campanha }: { campanha: CampaignSummary }) {
         {campanha.sent_count} enviada(s)
         {campanha.failed_count > 0 ? `, ${campanha.failed_count} falhou/falharam` : ""} de{" "}
         {campanha.total_recipients}
+        {/* Só aparece em campanha com botão de link da campanha (migration 0216). */}
+        {campanha.cliques !== null && campanha.cliques !== undefined ? ` · ${campanha.cliques} clique(s) no botão` : ""}
       </span>
     </div>
   );

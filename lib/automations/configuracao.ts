@@ -18,6 +18,7 @@ import {
   valoresSemFonte,
   type Definicao,
 } from "@/lib/channels/valores-sem-fonte";
+import { slotsDeLinkDaCampanha } from "@/lib/channels/template-conteudo";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 export type TimingKind = "day_of_8am" | "days_before" | "hours_before";
@@ -138,6 +139,16 @@ export async function validarConfiguracao(
       ok: false,
       mensagem:
         "Este modelo não está aprovado para este canal — sincronize em Conexões antes de criar a automação.",
+    };
+  }
+
+  // O link desse botão nasce na criação de cada CAMPANHA (migration 0216). A automação
+  // não tem esse passo: mandaria `<crm>/l/<o que foi digitado>`, um link quebrado.
+  if (slotsDeLinkDaCampanha(template.components).length > 0) {
+    return {
+      ok: false,
+      mensagem:
+        "Este modelo tem botão com link escolhido na campanha — ele só funciona em campanha, não em automação.",
     };
   }
 

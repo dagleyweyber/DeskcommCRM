@@ -55,8 +55,75 @@ export interface BotaoDaDefinicao {
   texto: string;
   /** Só para `url`. */
   url?: string;
+  /**
+   * Só para `url`: o destino é escolhido em cada campanha. O modelo vai para a
+   * revisão com `<crm>/l/{{1}}` (ver migration 0216) e `url` é ignorada.
+   */
+  linkNaCampanha?: boolean;
   /** Só para `phone_number`. */
   telefone?: string;
+}
+
+/** Caminho público que redireciona o botão de link da campanha (`app/l/[codigo]`). */
+export const CAMINHO_DO_LINK_DA_CAMPANHA = "/l/";
+
+/** O endereço que vai na aprovação: `https://crm…/l/{{1}}`. */
+export function urlDoLinkDaCampanha(origem: string): string {
+  return `${origem.replace(/\/+$/, "")}${CAMINHO_DO_LINK_DA_CAMPANHA}{{1}}`;
+}
+
+/** O botão é de link escolhido na campanha? Lê a URL como a Meta a devolve. */
+export function ehLinkDaCampanha(url: string | null | undefined): boolean {
+  return /\/l\/\{\{1\}\}$/.test(url ?? "");
+}
+
+/**
+ * Chaves de formulário (`slotKey`) dos botões de link da campanha de um modelo
+ * aprovado. Mesma chave que `slotKey({kind:"button",index}, "1")` monta: corpo
+ * sem prefixo, botão `button<i>:`.
+ */
+export function slotsDeLinkDaCampanha(components: unknown): string[] {
+  const lista = Array.isArray(components) ? (components as Bruto[]) : [];
+  const botoes = lista.find((c) => String(c.type ?? "").toUpperCase() === "BUTTONS")?.buttons;
+  if (!Array.isArray(botoes)) return [];
+  const out: string[] = [];
+  botoes.forEach((b, i) => {
+    const bt = obj(b);
+    if (bt && String(bt.type ?? "").toUpperCase() === "URL" && ehLinkDaCampanha(str(bt.url))) {
+      out.push(`button${i}:1`);
+    }
+  });
+  return out;
+}
+
+/** Domínios que a Meta recusa no botão ("Direct links to WhatsApp aren't allowed"). */
+const LINK_DO_WHATSAPP = /^(https?:\/\/)?([a-z0-9-]+\.)*(wa\.me|whatsapp\.com|whatsapp\.net)(\/|$)/i;
+
+/**
+ * O que impede os botões de irem para a revisão, dito antes de enviar.
+ *
+ * Antes, botão de link sem endereço era tirado EM SILÊNCIO: o
+ * `2_campanha_11_11` da B'Laser foi aprovado sem o botão que o texto mandava
+ * tocar, porque o endereço ia ser "colocado na campanha" (2026-11-08).
+ */
+export function problemasDosBotoes(botoes: BotaoDaDefinicao[]): string[] {
+  const out: string[] = [];
+  botoes.forEach((b, i) => {
+    const nome = `Botão ${i + 1}${b.texto.trim() ? ` ("${b.texto.trim()}")` : ""}`;
+    if (!textoDeBotaoAceitoPelaMeta(b.texto)) out.push(`${nome}: falta o texto do botão.`);
+    if (b.tipo === "url" && !b.linkNaCampanha) {
+      const url = (b.url ?? "").trim();
+      if (!url) {
+        out.push(`${nome}: falta o endereço. Para escolher o link em cada campanha, use "Link escolhido na campanha".`);
+      } else if (LINK_DO_WHATSAPP.test(url)) {
+        out.push(`${nome}: a Meta não aceita link do WhatsApp no botão. Use "Link escolhido na campanha" — o CRM redireciona.`);
+      } else if (!/^https?:\/\//i.test(url)) {
+        out.push(`${nome}: o endereço precisa começar com https://`);
+      }
+    }
+    if (b.tipo === "phone_number" && !(b.telefone ?? "").trim()) out.push(`${nome}: falta o telefone.`);
+  });
+  return out;
 }
 
 type Bruto = Record<string, unknown>;
@@ -201,6 +268,8 @@ export function montarComponents(input: {
   exemplos: string[];
   cabecalho?: { texto?: string | null; midiaUrl?: string | null } | null;
   botoes?: BotaoDaDefinicao[];
+  /** Endereço do CRM (`window.location.origin`) — obrigatório para botão de link da campanha. */
+  origemDoLink?: string;
 }): unknown[] {
   const n = contarVariaveis(input.body);
   const components: unknown[] = [];
@@ -255,7 +324,11 @@ export function montarComponents(input: {
     .slice(0, LIMITE_BOTOES)
     .map((b) => {
       const base: Bruto = { type: b.tipo.toUpperCase(), text: b.texto };
-      if (b.tipo === "url") base.url = (b.url ?? "").trim();
+      if (b.tipo === "url" && b.linkNaCampanha && input.origemDoLink) {
+        // URL com variável exige um exemplo completo na revisão, como o corpo.
+        base.url = urlDoLinkDaCampanha(input.origemDoLink);
+        base.example = [String(base.url).replace("{{1}}", "exemplo")];
+      } else if (b.tipo === "url") base.url = (b.url ?? "").trim();
       if (b.tipo === "phone_number") base.phone_number = (b.telefone ?? "").trim();
       return base;
     })
