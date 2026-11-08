@@ -9,7 +9,13 @@ import {
   type Definicao,
 } from "@/lib/channels/valores-sem-fonte";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
-import { useCreateCampaign, usePreviewAudience } from "@/hooks/campaigns/useCampaigns";
+import {
+  useCreateCampaign,
+  usePreviewAudience,
+  type ContagemDoPublico,
+  type RegrasDeEnvioInput,
+} from "@/hooks/campaigns/useCampaigns";
+import { JANELAS_EM_DIAS, type JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
 import { useTemplates } from "@/hooks/channels/useTemplates";
 import { useContactTags } from "@/hooks/contacts/useContactTags";
 import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
@@ -17,6 +23,19 @@ import type { AudienceFilter } from "@/lib/campaigns/audience";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 type AudienceKind = AudienceFilter["kind"];
+
+/** "Vai sair para 1.000 de 2.000 — 400 já receberam, 600 ficam para depois." */
+export function fraseDaContagem(c: ContagemDoPublico): string {
+  if (c.do_filtro === 0) return "Nenhum contato bate com esse público.";
+  const n = (v: number) => v.toLocaleString("pt-BR");
+  if (c.total === 0) return `Todos os ${n(c.do_filtro)} contatos desse público já receberam campanha no período.`;
+  const motivos = [
+    c.excluidos_por_recente > 0 ? `${n(c.excluidos_por_recente)} já receberam` : null,
+    c.cortados_pelo_limite > 0 ? `${n(c.cortados_pelo_limite)} ficam para a próxima` : null,
+  ].filter(Boolean);
+  if (motivos.length === 0) return `Isso vai atingir ${n(c.total)} contato(s).`;
+  return `Vai sair para ${n(c.total)} de ${n(c.do_filtro)} contatos — ${motivos.join(", ")}.`;
+}
 
 export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const templates = useTemplates();
@@ -32,7 +51,11 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const [tag, setTag] = useState("");
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
-  const [previewTotal, setPreviewTotal] = useState<number | null>(null);
+  const [contagem, setContagem] = useState<ContagemDoPublico | null>(null);
+  const [janela, setJanela] = useState<JanelaEmDias | null>(null);
+  const [limiteTexto, setLimiteTexto] = useState("");
+  const limite = /^\d+$/.test(limiteTexto) && Number(limiteTexto) > 0 ? Number(limiteTexto) : null;
+  const regras: RegrasDeEnvioInput = { excluir_quem_recebeu_dias: janela, limite };
 
   const stages = usePipelineStages(pipelineId || null);
 
@@ -74,8 +97,8 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
       toast.error("Escolha o público antes de conferir a contagem.");
       return;
     }
-    const r = await preview.mutateAsync(filtro);
-    setPreviewTotal(r.data.total);
+    const r = await preview.mutateAsync({ audience: filtro, regras });
+    setContagem(r.data);
   }
 
   function criarCampanha() {
@@ -90,6 +113,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         template_language: atual.language,
         variable_mapping: mapping,
         audience: filtro,
+        regras,
       },
       {
         onSuccess: (r) => {
@@ -162,7 +186,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
               value={tag}
               onChange={(e) => {
                 setTag(e.target.value);
-                setPreviewTotal(null);
+                setContagem(null);
               }}
               list="campanha-tags"
               placeholder="Nome da tag"
@@ -212,18 +236,61 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={verContagem} disabled={preview.isPending}>
-            {preview.isPending ? "Contando…" : "Ver quantos contatos"}
-          </Button>
-          {previewTotal !== null && (
-            <span className="text-sm text-muted-foreground">
-              {previewTotal === 0
-                ? "Nenhum contato bate com esse público."
-                : `Isso vai atingir ${previewTotal} contato(s).`}
-            </span>
-          )}
+      </div>
+
+      {/* Mandar uma base grande em partes sem repetir ninguém: hoje 1.000 com
+          teto, amanhã a mesma lista com "últimas 24h" pega só quem faltou. */}
+      <div className="flex flex-col gap-2" data-testid="campanha-regras">
+        <span className="text-sm font-medium">Evitar repetição</span>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label htmlFor="campanha-janela">Não enviar para quem recebeu campanha</label>
+          <select
+            id="campanha-janela"
+            value={janela ?? ""}
+            onChange={(e) => {
+              setJanela(e.target.value ? (Number(e.target.value) as JanelaEmDias) : null);
+              setContagem(null);
+            }}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">— enviar para todos —</option>
+            {JANELAS_EM_DIAS.map((d) => (
+              <option key={d} value={d}>
+                {d === 1 ? "nas últimas 24 horas" : `nos últimos ${d} dias`}
+              </option>
+            ))}
+          </select>
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label htmlFor="campanha-limite">Enviar para no máximo</label>
+          <input
+            id="campanha-limite"
+            inputMode="numeric"
+            value={limiteTexto}
+            onChange={(e) => {
+              setLimiteTexto(e.target.value.replace(/\D/g, "").slice(0, 6));
+              setContagem(null);
+            }}
+            placeholder="sem limite"
+            className="h-9 w-28 rounded-md border border-input bg-background px-2 text-sm"
+          />
+          <span className="text-muted-foreground">contatos nesta campanha</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Quem está na fila de uma campanha em andamento também fica de fora quando a primeira opção
+          está ligada.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={verContagem} disabled={preview.isPending}>
+          {preview.isPending ? "Contando…" : "Ver quantos contatos"}
+        </Button>
+        {contagem !== null && (
+          <span className="text-sm text-muted-foreground" data-testid="campanha-contagem">
+            {fraseDaContagem(contagem)}
+          </span>
+        )}
       </div>
 
       {semFonte.length > 0 && (

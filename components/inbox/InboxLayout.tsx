@@ -6,6 +6,7 @@ import { estadoDaJanela, formatarDecorrido } from "@/lib/channels/janela";
 import { JanelaFechadaAviso } from "@/components/inbox/JanelaFechadaAviso";
 import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
+import { useMarkConversationRead } from "@/hooks/inbox/useMarkConversationRead";
 import {
   useConversationsRealtime,
   type ConversationsFilters,
@@ -137,6 +138,19 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
 
   const claim = useClaimConversation();
   const close = useCloseConversation();
+
+  // Conversa aberta = lida. Depende do contador, não só do id: mensagem que
+  // chega com a conversa já aberta e a aba visível também foi vista.
+  const markRead = useMarkConversationRead();
+  const unreadSelecionada = selectedConversation?.unread_count_for_assignee ?? 0;
+  const selecionadaId = selectedConversation?.id ?? null;
+  useEffect(() => {
+    if (!selecionadaId || unreadSelecionada === 0) return;
+    if (document.visibilityState !== "visible") return;
+    markRead.mutate(selecionadaId);
+    // `markRead` muda a cada render; o que decide a chamada é a conversa e o contador.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selecionadaId, unreadSelecionada]);
 
   const handleSelect = useCallback((id: string) => setSelectedId(id), []);
   const handleVisibleChange = useCallback((ids: string[]) => setVisibleIds(ids), []);

@@ -18155,3 +18155,17 @@ update public.messages m
   from retrato r
  where r.id = m.id
    and (r.header is not null or r.footer is not null or jsonb_array_length(r.buttons) > 0);
+
+-- ---- não lidas que a equipe já respondeu (migration 0214) ----
+-- Espelho idempotente da migration 0214; racional (contador que nunca zerava ao abrir) no arquivo dela.
+update public.conversations
+   set unread_count_for_assignee = 0
+ where unread_count_for_assignee > 0
+   and last_outbound_at is not null
+   and (last_inbound_at is null or last_outbound_at >= last_inbound_at);
+
+-- ---- índice de quem recebeu campanha (migration 0215) ----
+-- Espelho idempotente da migration 0215; racional (regra "não enviar para quem recebeu") no arquivo dela.
+create index if not exists whatsapp_campaign_recipients_org_sent_idx
+  on public.whatsapp_campaign_recipients (organization_id, sent_at)
+  where status = 'sent';

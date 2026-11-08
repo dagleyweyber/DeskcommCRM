@@ -14,6 +14,7 @@ import { z } from "zod";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
+import { aplicarRegrasDeEnvio, regrasDeEnvioSchema, regrasDoCorpo } from "@/lib/campaigns/regras-de-envio";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +34,25 @@ export async function POST(req: NextRequest): Promise<Response> {
   const authz = await requireRole("manager", { requestId, resource: "whatsapp_campaigns" });
   if (!authz.ok) return authz.response;
 
-  const parsed = audienceSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) {
+  // O corpo é o filtro com as regras ao lado (`{kind, tag, excluir_quem_recebeu_dias, limite}`):
+  // cada schema lê só os seus campos.
+  const corpo = await req.json().catch(() => null);
+  const parsed = audienceSchema.safeParse(corpo);
+  const regras = regrasDeEnvioSchema.safeParse(corpo ?? {});
+  if (!parsed.success || !regras.success) {
     return fail("invalid_request", "Filtro de público inválido.", 422, { requestId });
   }
 
-  const publico = await resolveAudience(createAdminClient(), authz.org.orgId, parsed.data);
-  return ok({ total: publico.length }, { requestId });
+  const admin = createAdminClient();
+  const publico = await resolveAudience(admin, authz.org.orgId, parsed.data);
+  const r = await aplicarRegrasDeEnvio(admin, authz.org.orgId, publico, regrasDoCorpo(regras.data));
+  return ok(
+    {
+      total: r.selecionados.length,
+      do_filtro: r.doFiltro,
+      excluidos_por_recente: r.excluidosPorRecente,
+      cortados_pelo_limite: r.cortadosPeloLimite,
+    },
+    { requestId },
+  );
 }

@@ -13,6 +13,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
+import { aplicarRegrasDeEnvio, regrasDeEnvioSchema, regrasDoCorpo } from "@/lib/campaigns/regras-de-envio";
 import {
   fraseDosValoresSemFonte,
   valoresSemFonte,
@@ -46,6 +47,7 @@ const createCampaignSchema = z.object({
   template_language: z.string().trim().min(2).max(16),
   variable_mapping: z.record(z.string(), variableSourceSchema).default({}),
   audience: audienceSchema,
+  regras: regrasDeEnvioSchema.default({}),
 });
 
 export async function GET(): Promise<Response> {
@@ -132,7 +134,23 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   }
 
-  const publico = await resolveAudience(admin, authz.org.orgId, input.audience);
+  // As regras vão junto do filtro em `audience_filter`: é o registro de COMO o
+  // público foi montado, e o público em si já fica materializado nos destinatários.
+  const recorte = await aplicarRegrasDeEnvio(
+    admin,
+    authz.org.orgId,
+    await resolveAudience(admin, authz.org.orgId, input.audience),
+    regrasDoCorpo(input.regras),
+  );
+  const publico = recorte.selecionados;
+  if (publico.length === 0 && recorte.doFiltro > 0) {
+    return fail(
+      "invalid_request",
+      `Todos os ${recorte.doFiltro} contato(s) desse público já receberam campanha no período escolhido.`,
+      422,
+      { requestId },
+    );
+  }
 
   const { data: campanha, error: erroCriar } = await admin
     .from("whatsapp_campaigns")
@@ -143,7 +161,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       template_name: input.template_name,
       template_language: input.template_language,
       variable_mapping: input.variable_mapping,
-      audience_filter: input.audience,
+      audience_filter: { ...input.audience, regras: input.regras },
       status: "draft",
       total_recipients: publico.length,
       created_by: authz.user.id,
@@ -185,7 +203,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     metadata: {
       template_name: input.template_name,
       audience: input.audience,
+      regras: input.regras,
       total_recipients: publico.length,
+      excluidos_por_recente: recorte.excluidosPorRecente,
+      cortados_pelo_limite: recorte.cortadosPeloLimite,
     },
   });
 

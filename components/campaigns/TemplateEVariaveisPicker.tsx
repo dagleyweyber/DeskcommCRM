@@ -6,6 +6,8 @@ import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/tem
 import { slotKey } from "@/lib/channels/meta/build-components";
 import type { VariableMapping, VariableSource } from "@/lib/messaging/variable-mapping";
 
+import { PreviaDoModelo } from "./PreviaDoModelo";
+
 /**
  * O seletor "modelo aprovado → mapear cada variável" — extraído de dentro
  * de `NovaCampanhaForm.tsx` porque `NovaAutomacaoForm.tsx` precisa do
@@ -217,6 +219,8 @@ export function TemplateEVariaveisPicker({
           })}
         </div>
       )}
+
+      {atual && <PreviaDoModelo components={atual.components} mapping={mapping} />}
     </>
   );
 }

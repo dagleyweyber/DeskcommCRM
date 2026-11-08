@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
+import type { JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 export interface CampaignSummary {
@@ -43,6 +44,20 @@ export interface CreateCampaignInput {
   template_language: string;
   variable_mapping: VariableMapping;
   audience: AudienceFilter;
+  regras?: RegrasDeEnvioInput;
+}
+
+/** As regras como a API as recebe (snake_case). `null` = regra desligada. */
+export interface RegrasDeEnvioInput {
+  excluir_quem_recebeu_dias: JanelaEmDias | null;
+  limite: number | null;
+}
+
+export interface ContagemDoPublico {
+  total: number;
+  do_filtro: number;
+  excluidos_por_recente: number;
+  cortados_pelo_limite: number;
 }
 
 export function useCreateCampaign() {
@@ -57,8 +72,11 @@ export function useCreateCampaign() {
 
 export function usePreviewAudience() {
   return useMutation({
-    mutationFn: async (audience: AudienceFilter) =>
-      apiClient.post<{ data: { total: number } }>("/api/v1/campaigns/preview", audience),
+    mutationFn: async (args: { audience: AudienceFilter; regras: RegrasDeEnvioInput }) =>
+      apiClient.post<{ data: ContagemDoPublico }>("/api/v1/campaigns/preview", {
+        ...args.audience,
+        ...args.regras,
+      }),
     onError: showApiError,
   });
 }

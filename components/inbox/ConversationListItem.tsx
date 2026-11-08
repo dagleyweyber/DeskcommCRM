@@ -99,9 +99,12 @@ export function ConversationListItem({
     <button
       type="button"
       onClick={() => onSelect(conversation.id)}
+      // Selecionada: fundo cheio + barra à esquerda (o `border-l` existe sempre,
+      // transparente, para o texto não pular 3px ao selecionar). Antes era
+      // `bg-accent/60`, que quase não se distinguia do hover.
       className={cn(
-        "group flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-accent/40",
-        isSelected && "bg-accent/60",
+        "group flex w-full items-start gap-3 border-b border-l-[3px] border-b-border border-l-transparent px-3 py-3 text-left transition-colors hover:bg-accent/40",
+        isSelected && "border-l-primary bg-accent hover:bg-accent",
       )}
       aria-current={isSelected ? "true" : undefined}
     >
@@ -154,15 +157,33 @@ export function ConversationListItem({
           >
             {displayName}
           </span>
-          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <span
+            className={cn(
+              "shrink-0 text-[10px] uppercase tracking-wide",
+              unread > 0 ? "font-semibold text-emerald-600 dark:text-emerald-400" : "text-muted-foreground",
+            )}
+          >
             {time}
           </span>
         </div>
 
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-          {isAi ? <Robot size={10} weight="duotone" className="mr-1 inline" aria-hidden /> : null}
-          {truncated}
-        </p>
+        {/* Bolinha verde com a quantidade, como no WhatsApp Web — na linha da
+            prévia, onde o olho bate ao descer a lista. */}
+        <div className="mt-0.5 flex items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {isAi ? <Robot size={10} weight="duotone" className="mr-1 inline" aria-hidden /> : null}
+            {truncated}
+          </p>
+          {unread > 0 && (
+            <span
+              className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-semibold tabular-nums text-white"
+              aria-label={`${unread} mensagem(ns) não lida(s)`}
+              data-testid="nao-lidas"
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {visibleTags.map((t) => (
@@ -202,9 +223,6 @@ export function ConversationListItem({
             <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
               Anonimizado
             </Badge>
-          )}
-          {unread > 0 && (
-            <Badge className="ml-auto h-4 min-w-4 px-1.5 text-[10px]">{unread}</Badge>
           )}
         </div>
       </div>
