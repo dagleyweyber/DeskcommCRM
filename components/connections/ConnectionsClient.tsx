@@ -86,6 +86,44 @@ function dependeDoTransporte(c: ChannelSession): boolean {
   return Boolean(c.waha_session_name);
 }
 
+/**
+ * Baixa o CSV de contatos de um número. Lança com a mensagem da própria rota
+ * quando ela recusa (número sem agenda guardada, canal sem lista de contatos…),
+ * porque é ela quem sabe dizer o que o usuário deve fazer.
+ */
+class ExportacaoRecusada extends Error {
+  constructor(
+    readonly codigo: string | null,
+    mensagem: string,
+  ) {
+    super(mensagem);
+  }
+}
+
+async function baixarContatos(canalId: string, fonte: "agenda" | "conversas"): Promise<void> {
+  const res = await fetch(`/api/v1/channel-sessions/${canalId}/contacts/export?fonte=${fonte}`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const corpo = (await res.json().catch(() => null)) as {
+      error?: { code?: string; message?: string };
+    } | null;
+    throw new ExportacaoRecusada(
+      corpo?.error?.code ?? null,
+      corpo?.error?.message ?? "Não foi possível exportar os contatos.",
+    );
+  }
+  const nome = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "contatos.csv";
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /** "3 conversas" / "1 conversa" — ou nada, quando não há o que contar. */
 function contar(n: number, singular: string, plural: string): string | null {
   if (n <= 0) return null;
@@ -112,6 +150,8 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
   const [checking, setChecking] = useState(false);
   const [qr, setQr] = useState<{ sessionId: string; title: string } | null>(null);
   const [antiBanId, setAntiBanId] = useState<string | null>(null);
+  const [exportandoId, setExportandoId] = useState<string | null>(null);
+  const [toRepair, setToRepair] = useState<ChannelSession | null>(null);
   const [toDelete, setToDelete] = useState<ChannelSession | null>(null);
   const [toEdit, setToEdit] = useState<ChannelSession | null>(null);
   const pacingItems = usePacingKnobs().data?.items ?? [];
@@ -191,6 +231,26 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
       invalidate();
     },
     [invalidate],
+  );
+
+  const exportarContatos = useCallback(
+    async (c: ChannelSession, fonte: "agenda" | "conversas") => {
+      setExportandoId(c.id);
+      try {
+        await baixarContatos(c.id, fonte);
+      } catch (err) {
+        // Número sem agenda guardada não é falha: a saída é parear de novo, e é
+        // isso que o diálogo oferece — um toast só repetiria o problema.
+        if (err instanceof ExportacaoRecusada && err.codigo === "address_book_unavailable") {
+          setToRepair(c);
+        } else {
+          toast.error(err instanceof Error ? err.message : "Não foi possível exportar os contatos.");
+        }
+      } finally {
+        setExportandoId(null);
+      }
+    },
+    [],
   );
 
   const handleDeleted = useCallback(() => {
@@ -365,17 +425,31 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                       Reconectar
                     </Button>
                   )}
-                  {/* Link comum, não fetch: o navegador baixa o arquivo sozinho e a
-                      rota decide papel e auditoria. Só traz quem TEM CONVERSA neste
-                      número — a agenda do celular não entra no CRM. */}
-                  <Button asChild variant="outline" size="sm">
-                    <a
-                      href={`/api/v1/channel-sessions/${c.id}/contacts/export`}
-                      title="Baixar em CSV os contatos que têm conversa neste número"
-                    >
+                  {/* `fetch` e não link: quando o número ainda não guarda a agenda a rota
+                      responde com a explicação (e o que fazer), que um link mostraria
+                      como JSON cru. A agenda é lida do WhatsApp na hora e não fica no CRM. */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exportandoId === c.id}
+                    onClick={() => void exportarContatos(c, "agenda")}
+                    title="Baixar em CSV todos os contatos do WhatsApp deste número (salvos e não salvos)"
+                  >
+                    {exportandoId === c.id ? (
+                      <CircleNotch size={14} className="animate-spin" aria-hidden />
+                    ) : (
                       <DownloadSimple size={14} aria-hidden />
-                      Exportar contatos
-                    </a>
+                    )}
+                    Exportar contatos
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={exportandoId === c.id}
+                    onClick={() => void exportarContatos(c, "conversas")}
+                    title="Baixar em CSV só quem já conversou com você pelo CRM neste número"
+                  >
+                    Só quem conversou
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => setAntiBanId(c.id)}>
                     <ShieldCheck size={14} aria-hidden />
@@ -415,6 +489,18 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
           onSaved={() => {
             setToEdit(null);
             invalidate();
+          }}
+        />
+      )}
+
+      {toRepair && (
+        <ReparearParaAgendaDialog
+          canal={toRepair}
+          onCancel={() => setToRepair(null)}
+          onConfirm={async () => {
+            await forcePair(toRepair.id);
+            setQr({ sessionId: toRepair.id, title: `Reconectar ${channelLabel(toRepair)}` });
+            setToRepair(null);
           }}
         />
       )}
@@ -689,6 +775,75 @@ function ExcluirCanalDialog({
               <Trash size={14} aria-hidden />
             )}
             Excluir
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Pareia o número de novo para o WhatsApp mandar a agenda completa.
+ *
+ * A sincronização completa só acontece no pareamento — por isso não basta
+ * "ligar" nada num número que já está conectado. O custo é real e o diálogo o
+ * diz: o número fica fora do ar até alguém escanear o QR, e se ninguém o fizer
+ * ele não recebe nem envia mensagem.
+ */
+function ReparearParaAgendaDialog({
+  canal,
+  onCancel,
+  onConfirm,
+}: {
+  canal: ChannelSession;
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [pareando, setPareando] = useState(false);
+
+  const confirmar = async () => {
+    setPareando(true);
+    try {
+      await onConfirm();
+    } catch (err) {
+      toast.error(errMsg(err, "Não foi possível reiniciar a conexão."));
+      setPareando(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !pareando && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Conectar {channelLabel(canal)} de novo para exportar a agenda?</DialogTitle>
+          <DialogDescription asChild>
+            <div className="space-y-2">
+              <p>
+                Este número foi conectado antes de o CRM guardar a agenda do WhatsApp, então hoje não
+                há lista completa para exportar. O WhatsApp só envia a agenda no momento em que o
+                número é conectado.
+              </p>
+              <p>
+                Para ativar, o número é desconectado e você escaneia o QR de novo com o celular. As
+                conversas e os contatos que já estão no CRM continuam.
+              </p>
+              <p className="font-medium text-foreground">
+                Enquanto o QR não for escaneado, o número não recebe nem envia mensagens.
+              </p>
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" disabled={pareando} onClick={onCancel}>
+            Agora não
+          </Button>
+          <Button disabled={pareando} onClick={confirmar}>
+            {pareando ? (
+              <CircleNotch size={14} className="animate-spin" aria-hidden />
+            ) : (
+              <ArrowsClockwise size={14} aria-hidden />
+            )}
+            Desconectar e gerar QR
           </Button>
         </div>
       </DialogContent>

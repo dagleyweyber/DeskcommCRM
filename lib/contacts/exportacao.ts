@@ -13,6 +13,8 @@
  *  - **BOM UTF-8.** Sem ele o Excel em pt-BR abre "João" como "JoÃ£o".
  */
 
+import type { ContatoDaAgenda } from "@/lib/channels/agenda";
+
 export interface ContatoExportavel {
   name: string | null;
   display_name: string | null;
@@ -88,8 +90,23 @@ export function montarCsv(linhas: LinhaDoCanal[]): string {
   return BOM + corpo.join("\r\n") + "\r\n";
 }
 
+/** Colunas da exportação da agenda lida do WhatsApp (sem dado do CRM: ela não passa por ele). */
+export const CABECALHO_AGENDA = ["nome", "telefone", "salvo_na_agenda", "nome_no_whatsapp"] as const;
+
+export function montarCsvAgenda(linhas: ContatoDaAgenda[]): string {
+  const corpo = [
+    CABECALHO_AGENDA.join(","),
+    ...linhas.map((l) =>
+      [l.nome ?? "", l.telefone, l.salvo ? "sim" : "nao", l.nome_no_whatsapp ?? ""]
+        .map(celulaCsv)
+        .join(","),
+    ),
+  ];
+  return BOM + corpo.join("\r\n") + "\r\n";
+}
+
 /** Nome de arquivo seguro para o `Content-Disposition`: só [a-z0-9-], sem acento. */
-export function nomeDoArquivo(rotulo: string, hoje: Date): string {
+export function nomeDoArquivo(rotulo: string, hoje: Date, prefixo = "contatos"): string {
   const slug =
     rotulo
       .normalize("NFD")
@@ -98,5 +115,5 @@ export function nomeDoArquivo(rotulo: string, hoje: Date): string {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 40) || "canal";
-  return `contatos-${slug}-${hoje.toISOString().slice(0, 10)}.csv`;
+  return `${prefixo}-${slug}-${hoje.toISOString().slice(0, 10)}.csv`;
 }

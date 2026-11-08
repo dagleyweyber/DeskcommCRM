@@ -20,6 +20,56 @@ import { classificarFalhaDeAlcance, explicarFalhaDeAlcance } from "@/lib/net/alc
  * usado em `lib/automation/actions/call-webhook.ts`.
  */
 const WAHA_TIMEOUT_MS = 15_000;
+/** Leitura de uma página da agenda/chats: a resposta carrega milhares de itens, 15s é pouco. */
+const WAHA_LEITURA_EM_LOTE_TIMEOUT_MS = 45_000;
+
+/**
+ * Configuração com que TODA sessão nasce.
+ *
+ * Sem `store`, o WAHA não guarda a agenda nem a lista de conversas — só repassa
+ * as mensagens que chegam —, e `/contacts/all` e `/chats/overview` respondem 400
+ * (medido em produção: as 12 sessões existentes foram criadas com `config: {}`).
+ * `fullSync` pede ao WhatsApp o histórico e a agenda COMPLETOS, e isso só
+ * acontece no PAREAMENTO: ligar depois não recupera o passado, só passa a
+ * guardar o que chegar dali em diante.
+ *
+ * O armazenamento fica no WAHA, não no CRM. O CRM lê sob demanda e descarta.
+ */
+export const CONFIG_DE_SESSAO = {
+  noweb: { store: { enabled: true, fullSync: true } },
+} as const;
+
+/** O WAHA recusou a leitura porque a sessão foi criada sem o armazenamento ligado. */
+export class WahaStoreDesligadoError extends Error {
+  constructor() {
+    super("waha_store_disabled");
+    this.name = "WahaStoreDesligadoError";
+  }
+}
+
+/** Contato como o WAHA o devolve (campos que o CRM usa; o resto é ignorado). */
+export interface WahaContatoCru {
+  id?: string;
+  name?: string | null;
+  pushname?: string | null;
+  isMyContact?: boolean | null;
+  isGroup?: boolean | null;
+}
+
+/** Item de `/chats/overview`. */
+export interface WahaChatCru {
+  id?: string;
+  name?: string | null;
+}
+
+export interface OpcoesDeInicio {
+  /**
+   * Sessão que JÁ existe: reaplica a configuração antes de iniciar. Sem isto o
+   * `create` devolve 422 e a configuração nova é ignorada em silêncio — que é
+   * exatamente o que impediria o armazenamento de ligar num número reconectado.
+   */
+  reaplicarConfig?: boolean;
+}
 
 export class WahaClient {
   constructor(
@@ -31,19 +81,36 @@ export class WahaClient {
    * Idempotent: ensures session exists, then starts it.
    * WAHA Plus split the API:
    *   POST /api/sessions               → create (422 if exists)
+   *   PUT  /api/sessions/{name}        → update config (só com `reaplicarConfig`)
    *   POST /api/sessions/{name}/start  → start (422 if already starting/working)
    */
-  async startSession(name: string): Promise<{ qr?: string; status: string }> {
+  async startSession(
+    name: string,
+    opcoes: OpcoesDeInicio = {},
+  ): Promise<{ qr?: string; status: string }> {
     // 1) Create session (ignore 422/409 = already exists)
     const createRes = await fetch(`${this.baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ name, config: {} }),
+      body: JSON.stringify({ name, config: CONFIG_DE_SESSAO }),
       signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
     });
     if (!createRes.ok && createRes.status !== 422 && createRes.status !== 409) {
       const body = await createRes.text().catch(() => "");
       throw new Error(`waha_create_${createRes.status}: ${body.slice(0, 200)}`);
+    }
+
+    if (opcoes.reaplicarConfig && (createRes.status === 422 || createRes.status === 409)) {
+      const updateRes = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ name, config: CONFIG_DE_SESSAO }),
+        signal: AbortSignal.timeout(WAHA_TIMEOUT_MS),
+      });
+      if (!updateRes.ok) {
+        const body = await updateRes.text().catch(() => "");
+        throw new Error(`waha_update_${updateRes.status}: ${body.slice(0, 200)}`);
+      }
     }
 
     // 2) Start session
@@ -234,6 +301,48 @@ export class WahaClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Uma página da agenda que o WAHA guarda para a sessão.
+   *
+   * Lança `WahaStoreDesligadoError` quando a sessão foi criada sem o
+   * armazenamento (400 citando o `store`) — é um estado do número, não uma
+   * falha: quem chama explica ao usuário que é preciso reconectar.
+   */
+  async listContacts(
+    session: string,
+    pagina: { limit: number; offset: number },
+  ): Promise<WahaContatoCru[]> {
+    return this.lerEmLote(
+      `/api/contacts/all?session=${encodeURIComponent(session)}` +
+        `&limit=${pagina.limit}&offset=${pagina.offset}`,
+    );
+  }
+
+  /** Uma página das conversas que o WAHA conhece (traz também quem NÃO está salvo na agenda). */
+  async listChatsOverview(
+    session: string,
+    pagina: { limit: number; offset: number },
+  ): Promise<WahaChatCru[]> {
+    return this.lerEmLote(
+      `/api/${encodeURIComponent(session)}/chats/overview` +
+        `?limit=${pagina.limit}&offset=${pagina.offset}`,
+    );
+  }
+
+  private async lerEmLote<T>(caminho: string): Promise<T[]> {
+    const res = await fetch(`${this.baseUrl}${caminho}`, {
+      headers: { "X-Api-Key": this.apiKey },
+      signal: AbortSignal.timeout(WAHA_LEITURA_EM_LOTE_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const corpo = await res.text().catch(() => "");
+      if (res.status === 400 && /store/i.test(corpo)) throw new WahaStoreDesligadoError();
+      throw new Error(`waha_${res.status}: ${corpo.slice(0, 200)}`);
+    }
+    const json: unknown = await res.json();
+    return Array.isArray(json) ? (json as T[]) : [];
   }
 
   async sendMessage(session: string, chatId: string, text: string): Promise<unknown> {
