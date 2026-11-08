@@ -45,18 +45,25 @@ create policy tenant_isolation_whatsapp_campaign_links_select
 revoke all on public.whatsapp_campaign_links from anon;
 
 -- Conta o clique e devolve o destino, numa ida só e sem corrida entre cliques.
--- `null` = código desconhecido.
+-- `null` = código desconhecido. plpgsql (não sql) porque o corpo só é resolvido na
+-- execução: no baseline a função vem antes da tabela (precisa ficar antes da
+-- varredura de anon, e a tabela depende de whatsapp_campaigns, criada depois dela).
 create or replace function public.fn_registrar_clique_do_link(p_codigo text)
 returns text
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_destino text;
+begin
   update public.whatsapp_campaign_links
      set cliques = cliques + 1,
          ultimo_clique_at = now()
    where codigo = p_codigo
-  returning destino;
+  returning destino into v_destino;
+  return v_destino;
+end;
 $$;
 
 revoke execute on function public.fn_registrar_clique_do_link(text) from public, anon;
