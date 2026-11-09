@@ -200,3 +200,55 @@ describe("fora da janela de horário, o tick não manda nada", () => {
     expect(campanha[0]!.status).toBe("running");
   });
 });
+
+describe("canais diferentes disparam ao mesmo tempo", () => {
+  it("⭐ campanhas de dois números saem intercaladas — uma loja não espera a outra terminar", async () => {
+    const canais = [
+      { id: "dc0ca11e-0000-4000-8000-0000000000a1", fone: "5511900000091" },
+      { id: "dc0ca11e-0000-4000-8000-0000000000a2", fone: "5511900000092" },
+    ];
+    const campanhas: string[] = [];
+    for (const canal of canais) {
+      await pool.query(
+        `insert into channel_sessions (id, organization_id, provider, meta_phone_number_id, meta_waba_id, status, webhook_secret_encrypted)
+         values ($1, $2, 'meta_cloud', $3, '999', 'WORKING', '\x00'::bytea) on conflict (id) do nothing`,
+        [canal.id, ORG, canal.fone],
+      );
+      await pool.query(
+        `insert into meta_templates (organization_id, waba_id, channel_session_id, name, language, status, components, contract_hash)
+         values ($1, '999', $2, 'oferta', 'pt_BR', 'APPROVED', $3::jsonb, 'hash-teste')`,
+        [ORG, canal.id, JSON.stringify([{ type: "BODY", text: "Olá {{1}}, aproveite!" }])],
+      );
+      const { rows } = await pool.query<{ id: string }>(
+        `insert into whatsapp_campaigns
+           (organization_id, name, channel_session_id, template_name, template_language,
+            variable_mapping, audience_filter, status, total_recipients)
+         values ($1, 'Campanha do canal', $2, 'oferta', 'pt_BR', '{}'::jsonb, '{"kind":"tag","tag":"x"}'::jsonb, 'queued', 2)
+         returning id`,
+        [ORG, canal.id],
+      );
+      campanhas.push(rows[0]!.id);
+      await novoDestinatario(rows[0]!.id, contatoA, { "1": "Ana" });
+      await novoDestinatario(rows[0]!.id, contatoB, { "1": "Bia" });
+    }
+
+    const ordem: string[] = [];
+    const sendFn = vi.fn(async (_admin: unknown, ctx: unknown, _input: unknown): Promise<Message> => {
+      ordem.push((ctx as { actor: { id: string } }).actor.id);
+      return { id: "msg-p", status: "sent", external_id: "wamid.P", type: "template" } as unknown as Message;
+    });
+
+    await dispatchCampaignsTick(admin, {
+      // A pausa precisa ceder a vez de verdade; sem isso a ordem não prova nada.
+      sleep: () => new Promise((r) => setTimeout(r, 5)),
+      sendMessageFn: sendFn,
+      now: () => new Date("2026-01-01T14:00:00Z"),
+      timeBudgetMs: 5000,
+    });
+
+    const minhas = ordem.filter((id) => campanhas.includes(id));
+    expect(minhas).toHaveLength(4);
+    // Em fila a ordem seria A,A,B,B: o segundo envio já seria do mesmo canal do primeiro.
+    expect(minhas[1]).not.toBe(minhas[0]);
+  });
+});

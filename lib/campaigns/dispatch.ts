@@ -197,20 +197,35 @@ export async function dispatchCampaignsTick(
     .in("status", ["queued", "running"])
     .order("created_at", { ascending: true });
 
+  // Um número de WhatsApp é um recurso só: o espaçamento anti-banimento vale POR NÚMERO.
+  // Campanhas do mesmo canal seguem em fila (mais antiga primeiro); canais diferentes não
+  // têm nada a ver um com o outro e rodam ao mesmo tempo — senão a campanha de uma loja
+  // esperava a das outras terminarem.
+  const porCanal = new Map<string, CampanhaRow[]>();
   for (const campanha of (campanhas ?? []) as CampanhaRow[]) {
-    if (Date.now() > deadline) break;
-
-    if (campanha.status === "queued") {
-      await admin.from("whatsapp_campaigns").update({ status: "running" }).eq("id", campanha.id);
-    }
-
-    if (!withinSendWindow(now())) continue;
-    const daily = await checkDailyLimit(admin, campanha.organization_id, campanha.channel_session_id);
-    if (!daily.allowed) continue;
-
-    resumo.campaignsProcessed += 1;
-    await processarCampanha(admin, campanha, deadline, resolvedDeps, resumo);
+    const fila = porCanal.get(campanha.channel_session_id) ?? [];
+    fila.push(campanha);
+    porCanal.set(campanha.channel_session_id, fila);
   }
+
+  await Promise.all(
+    [...porCanal.values()].map(async (fila) => {
+      for (const campanha of fila) {
+        if (Date.now() > deadline) break;
+
+        if (campanha.status === "queued") {
+          await admin.from("whatsapp_campaigns").update({ status: "running" }).eq("id", campanha.id);
+        }
+
+        if (!withinSendWindow(now())) continue;
+        const daily = await checkDailyLimit(admin, campanha.organization_id, campanha.channel_session_id);
+        if (!daily.allowed) continue;
+
+        resumo.campaignsProcessed += 1;
+        await processarCampanha(admin, campanha, deadline, resolvedDeps, resumo);
+      }
+    }),
+  );
 
   return resumo;
 }
