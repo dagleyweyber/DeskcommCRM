@@ -204,20 +204,20 @@ describe("fora da janela de horário, o tick não manda nada", () => {
 describe("canais diferentes disparam ao mesmo tempo", () => {
   it("⭐ campanhas de dois números saem intercaladas — uma loja não espera a outra terminar", async () => {
     const canais = [
-      { id: "dc0ca11e-0000-4000-8000-0000000000a1", fone: "5511900000091" },
-      { id: "dc0ca11e-0000-4000-8000-0000000000a2", fone: "5511900000092" },
+      { id: "dc0ca11e-0000-4000-8000-0000000000a1", fone: "5511900000091", waba: "991" },
+      { id: "dc0ca11e-0000-4000-8000-0000000000a2", fone: "5511900000092", waba: "992" },
     ];
     const campanhas: string[] = [];
     for (const canal of canais) {
       await pool.query(
         `insert into channel_sessions (id, organization_id, provider, meta_phone_number_id, meta_waba_id, status, webhook_secret_encrypted)
-         values ($1, $2, 'meta_cloud', $3, '999', 'WORKING', '\\x00'::bytea) on conflict (id) do nothing`,
-        [canal.id, ORG, canal.fone],
+         values ($1, $2, 'meta_cloud', $3, $4, 'WORKING', '\\x00'::bytea) on conflict (id) do nothing`,
+        [canal.id, ORG, canal.fone, canal.waba],
       );
       await pool.query(
         `insert into meta_templates (organization_id, waba_id, channel_session_id, name, language, status, components, contract_hash)
-         values ($1, '999', $2, 'oferta', 'pt_BR', 'APPROVED', $3::jsonb, 'hash-teste')`,
-        [ORG, canal.id, JSON.stringify([{ type: "BODY", text: "Olá {{1}}, aproveite!" }])],
+         values ($1, $4, $2, 'oferta', 'pt_BR', 'APPROVED', $3::jsonb, 'hash-teste')`,
+        [ORG, canal.id, JSON.stringify([{ type: "BODY", text: "Olá {{1}}, aproveite!" }]), canal.waba],
       );
       const { rows } = await pool.query<{ id: string }>(
         `insert into whatsapp_campaigns
