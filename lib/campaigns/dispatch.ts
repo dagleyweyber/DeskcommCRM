@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureConversation } from "@/lib/automation/start-conversation";
 import { checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
+import { pausarSeCobrancaRecusada } from "@/lib/campaigns/cobranca-recusada";
 import { FALHAS_SEGUIDAS_PARA_FREAR, RITMOS, ritmoDe, VELOCIDADE_PADRAO } from "@/lib/campaigns/velocidade";
 import { lerConteudo } from "@/lib/channels/template-conteudo";
 import { motivoDaFalha } from "@/lib/messaging/motivo-da-falha";
@@ -51,6 +52,7 @@ interface CampanhaRow {
   template_name: string;
   template_language: string;
   status: string;
+  name?: string | null;
   velocidade?: string | null;
 }
 
@@ -178,6 +180,9 @@ async function processarCampanha(
     }
   }
 
+  // Antes de mandar mais: a Meta já recusou a cobrança das últimas? Então não adianta continuar.
+  if (await pausarSeCobrancaRecusada(admin, campanha)) return;
+
   const ritmoEscolhido = ritmoDe(campanha.velocidade);
   let falhasSeguidas = 0;
 
@@ -228,7 +233,7 @@ export async function dispatchCampaignsTick(
 
   const { data: campanhas } = await admin
     .from("whatsapp_campaigns")
-    .select("id, organization_id, channel_session_id, template_name, template_language, status, velocidade")
+    .select("id, organization_id, channel_session_id, name, template_name, template_language, status, velocidade")
     .in("status", ["queued", "running"])
     .order("created_at", { ascending: true });
 
