@@ -213,6 +213,14 @@ const PARES: Array<{
     arquivo: "lib/meta-ads/stage-event-vocabulary.ts",
     simbolo: "EVENTOS_META_CAPI_DE_ETAPA",
   },
+  {
+    tabela: "whatsapp_campaigns",
+    coluna: "velocidade",
+    // lib/campaigns/velocidade.ts → VELOCIDADES_DA_CAMPANHA (tupla `as const`; o Zod da rota
+    // de campanhas usa `z.enum(...)` direto dela). Nasce com a migration 0217.
+    arquivo: "lib/campaigns/velocidade.ts",
+    simbolo: "VELOCIDADES_DA_CAMPANHA",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */

@@ -15,6 +15,7 @@ import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
 import { gravarLinks, prepararLinks } from "@/lib/campaigns/links-da-campanha";
 import { aplicarRegrasDeEnvio, regrasDeEnvioSchema, regrasDoCorpo } from "@/lib/campaigns/regras-de-envio";
+import { VELOCIDADE_PADRAO, VELOCIDADES_DA_CAMPANHA } from "@/lib/campaigns/velocidade";
 import {
   fraseDosValoresSemFonte,
   valoresSemFonte,
@@ -49,6 +50,7 @@ const createCampaignSchema = z.object({
   variable_mapping: z.record(z.string(), variableSourceSchema).default({}),
   audience: audienceSchema,
   regras: regrasDeEnvioSchema.default({}),
+  velocidade: z.enum(VELOCIDADES_DA_CAMPANHA).default(VELOCIDADE_PADRAO),
 });
 
 export async function GET(): Promise<Response> {
@@ -186,6 +188,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       template_language: input.template_language,
       variable_mapping: mapping,
       audience_filter: { ...input.audience, regras: input.regras },
+      velocidade: input.velocidade,
       status: "draft",
       total_recipients: publico.length,
       created_by: authz.user.id,
@@ -234,6 +237,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       template_name: input.template_name,
       audience: input.audience,
       regras: input.regras,
+      velocidade: input.velocidade,
       total_recipients: publico.length,
       excluidos_por_recente: recorte.excluidosPorRecente,
       cortados_pelo_limite: recorte.cortadosPeloLimite,

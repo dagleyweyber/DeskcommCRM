@@ -18227,3 +18227,9 @@ create policy tenant_isolation_whatsapp_campaign_links_select
   );
 
 revoke all on public.whatsapp_campaign_links from anon;
+
+-- ---- velocidade da campanha (migration 0217) ----
+-- Espelho idempotente da migration 0217. Aditiva: linhas existentes ficam 'cuidadosa' (o ritmo de sempre).
+alter table public.whatsapp_campaigns
+  add column if not exists velocidade text not null default 'cuidadosa'
+    check (velocidade in ('cuidadosa', 'normal', 'rapida'));

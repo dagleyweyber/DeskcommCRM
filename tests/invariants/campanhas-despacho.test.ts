@@ -252,3 +252,90 @@ describe("canais diferentes disparam ao mesmo tempo", () => {
     expect(minhas[1]).not.toBe(minhas[0]);
   });
 });
+
+describe("velocidade da campanha", () => {
+  async function campanhaComVelocidade(velocidade: string | null, destinatarios: number) {
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into whatsapp_campaigns
+         (organization_id, name, channel_session_id, template_name, template_language,
+          variable_mapping, audience_filter, status, total_recipients, velocidade)
+       values ($1, 'Campanha de velocidade', $2, 'oferta', 'pt_BR', '{}'::jsonb, '{"kind":"tag","tag":"x"}'::jsonb,
+               'queued', $3, coalesce($4, 'cuidadosa'))
+       returning id`,
+      [ORG, SESSION, destinatarios, velocidade],
+    );
+    const id = rows[0]!.id;
+    const { rows: contatos } = await pool.query<{ id: string }>(
+      `insert into contacts (organization_id, display_name, phone_number, source)
+       select $1, 'Velocidade ' || g, '+55119' || lpad((random() * 99999999)::int::text, 8, '0') || g::text, 'whatsapp'
+         from generate_series(1, $2) g
+       returning id`,
+      [ORG, destinatarios],
+    );
+    for (const c of contatos) await novoDestinatario(id, c.id, { "1": "Fulano" });
+    return id;
+  }
+
+  /** Dublê que registra quantos envios DESTA campanha estavam em voo quando cada um começou. */
+  function sendFnQueMede(campaignId: string, falha = false) {
+    let emVoo = 0;
+    const sequencia: number[] = [];
+    const fn = vi.fn(async (_admin: unknown, ctx: unknown, _input: unknown): Promise<Message> => {
+      if ((ctx as { actor: { id: string } }).actor.id !== campaignId) {
+        return { id: "msg-x", status: "sent", external_id: "wamid.X", type: "template" } as unknown as Message;
+      }
+      emVoo += 1;
+      sequencia.push(emVoo);
+      await new Promise((r) => setTimeout(r, 80));
+      emVoo -= 1;
+      if (falha) throw new Error("meta_131026: número recusado");
+      return { id: "msg-v", status: "sent", external_id: "wamid.V", type: "template" } as unknown as Message;
+    });
+    return { fn, sequencia };
+  }
+
+  const tick = (sendMessageFn: ReturnType<typeof sendFnSucesso>) =>
+    dispatchCampaignsTick(admin, {
+      sleep: async () => {},
+      sendMessageFn,
+      now: () => new Date("2026-01-01T14:00:00Z"),
+      timeBudgetMs: 10_000,
+    });
+
+  it("⭐ sem escolha, a campanha anda no ritmo de sempre: um envio por vez", async () => {
+    const id = await campanhaComVelocidade(null, 3);
+    const { fn, sequencia } = sendFnQueMede(id);
+    await tick(fn);
+    expect(sequencia).toEqual([1, 1, 1]);
+  });
+
+  it("⭐ rápida manda em lotes de 5 ao mesmo tempo, e todos saem", async () => {
+    const id = await campanhaComVelocidade("rapida", 10);
+    const { fn, sequencia } = sendFnQueMede(id);
+    await tick(fn);
+    expect(Math.max(...sequencia)).toBe(5);
+    const { rows } = await pool.query<{ status: string; n: number }>(
+      "select status, count(*)::int as n from whatsapp_campaign_recipients where campaign_id = $1 group by status",
+      [id],
+    );
+    expect(rows).toEqual([{ status: "sent", n: 10 }]);
+  });
+
+  it("⭐ freio: depois de uma rodada de falhas seguidas a campanha rápida desacelera para um por vez", async () => {
+    const id = await campanhaComVelocidade("rapida", 7);
+    const { fn, sequencia } = sendFnQueMede(id, true);
+    await tick(fn);
+    expect(sequencia).toHaveLength(7);
+    expect(Math.max(...sequencia.slice(0, 5))).toBe(5);
+    expect(sequencia.slice(5)).toEqual([1, 1]);
+    const { rows } = await pool.query<{ n: number }>(
+      "select count(*)::int as n from whatsapp_campaign_recipients where campaign_id = $1 and status = 'failed'",
+      [id],
+    );
+    expect(rows[0]!.n).toBe(7);
+  });
+
+  it("o banco recusa velocidade fora da lista", async () => {
+    await expect(campanhaComVelocidade("turbo", 1)).rejects.toThrow(/velocidade/);
+  });
+});

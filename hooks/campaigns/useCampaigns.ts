@@ -5,6 +5,7 @@ import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
 import type { JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
+import type { VelocidadeDaCampanha } from "@/lib/campaigns/velocidade";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
 
 export interface CampaignSummary {
@@ -47,6 +48,7 @@ export interface CreateCampaignInput {
   variable_mapping: VariableMapping;
   audience: AudienceFilter;
   regras?: RegrasDeEnvioInput;
+  velocidade?: VelocidadeDaCampanha;
 }
 
 /** As regras como a API as recebe (snake_case). `null` = regra desligada. */

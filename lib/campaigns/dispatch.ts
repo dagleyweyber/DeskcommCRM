@@ -2,7 +2,7 @@
  * Um TICK do despachante de campanhas — chamado pelo cron
  * `api/v1/cron/campaign-dispatch` a cada minuto. Processa um lote pequeno
  * por campanha `queued`/`running`, respeitando janela de horário, limite
- * diário e `CAMPAIGN_SEND_SPACING_MS` — TUDO reaproveitado de
+ * diário e o ritmo da campanha (`lib/campaigns/velocidade.ts`) — TUDO reaproveitado de
  * `lib/automation/throttle.ts`, nada novo em anti-banimento.
  *
  * Nenhum código aqui fala com a Graph API: `ensureConversation` +
@@ -13,7 +13,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureConversation } from "@/lib/automation/start-conversation";
-import { CAMPAIGN_SEND_SPACING_MS, checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
+import { checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
+import { FALHAS_SEGUIDAS_PARA_FREAR, RITMOS, ritmoDe, VELOCIDADE_PADRAO } from "@/lib/campaigns/velocidade";
 import { lerConteudo } from "@/lib/channels/template-conteudo";
 import { motivoDaFalha } from "@/lib/messaging/motivo-da-falha";
 import { renderBodyWithValues } from "@/lib/messaging/render-body";
@@ -47,6 +48,7 @@ interface CampanhaRow {
   template_name: string;
   template_language: string;
   status: string;
+  velocidade?: string | null;
 }
 
 interface DestinatarioRow {
@@ -100,22 +102,8 @@ async function processarCampanha(
     lerConteudo((templateRow as { components?: unknown } | null)?.components ?? []).body ??
     campanha.template_name;
 
-  while (Date.now() < deadline) {
-    const { data: pendentes } = await admin
-      .from("whatsapp_campaign_recipients")
-      .select("id, contact_id, resolved_values")
-      .eq("campaign_id", campanha.id)
-      .eq("status", "pending")
-      .order("created_at", { ascending: true })
-      .limit(1);
-    const alvo = ((pendentes ?? []) as DestinatarioRow[])[0];
-    if (!alvo) break;
-
-    await admin
-      .from("whatsapp_campaign_recipients")
-      .update({ status: "sending" })
-      .eq("id", alvo.id);
-
+  /** Manda para UM destinatário já marcado `sending`; devolve se saiu. */
+  async function enviarUm(alvo: DestinatarioRow): Promise<boolean> {
     try {
       const conversationId = await deps.ensureConversationFn(
         admin,
@@ -146,19 +134,20 @@ async function processarCampanha(
           .update({ status: "sent", external_id: message.external_id, sent_at: new Date().toISOString() })
           .eq("id", alvo.id);
         resumo.sent += 1;
-      } else {
-        // `queued`/`failed` — o canal pode ter caído entre a criação da
-        // campanha e este tick. Tratado como falha desta tentativa; o
-        // operador vê o motivo na lista de destinatários.
-        await admin
-          .from("whatsapp_campaign_recipients")
-          .update({
-            status: "failed",
-            error_message: motivoDaFalha(message),
-          })
-          .eq("id", alvo.id);
-        resumo.failed += 1;
+        return true;
       }
+      // `queued`/`failed` — o canal pode ter caído entre a criação da
+      // campanha e este tick. Tratado como falha desta tentativa; o
+      // operador vê o motivo na lista de destinatários.
+      await admin
+        .from("whatsapp_campaign_recipients")
+        .update({
+          status: "failed",
+          error_message: motivoDaFalha(message),
+        })
+        .eq("id", alvo.id);
+      resumo.failed += 1;
+      return false;
     } catch (err) {
       await admin
         .from("whatsapp_campaign_recipients")
@@ -168,10 +157,38 @@ async function processarCampanha(
         })
         .eq("id", alvo.id);
       resumo.failed += 1;
+      return false;
     }
+  }
+
+  const ritmoEscolhido = ritmoDe(campanha.velocidade);
+  let falhasSeguidas = 0;
+
+  while (Date.now() < deadline) {
+    // Freio: falha em sequência (número recusado, token caído, Meta instável) desacelera para o
+    // ritmo cuidadoso até a próxima rodada, em vez de martelar a Meta na velocidade escolhida.
+    const ritmo = falhasSeguidas >= FALHAS_SEGUIDAS_PARA_FREAR ? RITMOS[VELOCIDADE_PADRAO] : ritmoEscolhido;
+
+    const { data: pendentes } = await admin
+      .from("whatsapp_campaign_recipients")
+      .select("id, contact_id, resolved_values")
+      .eq("campaign_id", campanha.id)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true })
+      .limit(ritmo.lote);
+    const lote = (pendentes ?? []) as DestinatarioRow[];
+    if (lote.length === 0) break;
+
+    await admin
+      .from("whatsapp_campaign_recipients")
+      .update({ status: "sending" })
+      .in("id", lote.map((d) => d.id));
+
+    const resultados = await Promise.all(lote.map(enviarUm));
+    for (const saiu of resultados) falhasSeguidas = saiu ? 0 : falhasSeguidas + 1;
 
     if (Date.now() >= deadline) break;
-    await deps.sleep(CAMPAIGN_SEND_SPACING_MS);
+    await deps.sleep(ritmo.pausaMs);
   }
 
   await atualizarContadores(admin, campanha.id);
@@ -193,7 +210,7 @@ export async function dispatchCampaignsTick(
 
   const { data: campanhas } = await admin
     .from("whatsapp_campaigns")
-    .select("id, organization_id, channel_session_id, template_name, template_language, status")
+    .select("id, organization_id, channel_session_id, template_name, template_language, status, velocidade")
     .in("status", ["queued", "running"])
     .order("created_at", { ascending: true });
 

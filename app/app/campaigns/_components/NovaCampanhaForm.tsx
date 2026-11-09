@@ -16,6 +16,12 @@ import {
   type RegrasDeEnvioInput,
 } from "@/hooks/campaigns/useCampaigns";
 import { JANELAS_EM_DIAS, type JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
+import {
+  RITMOS,
+  VELOCIDADE_PADRAO,
+  VELOCIDADES_DA_CAMPANHA,
+  type VelocidadeDaCampanha,
+} from "@/lib/campaigns/velocidade";
 import { useTemplates } from "@/hooks/channels/useTemplates";
 import { useContactTags } from "@/hooks/contacts/useContactTags";
 import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
@@ -54,6 +60,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const [contagem, setContagem] = useState<ContagemDoPublico | null>(null);
   const [janela, setJanela] = useState<JanelaEmDias | null>(null);
   const [limiteTexto, setLimiteTexto] = useState("");
+  const [velocidade, setVelocidade] = useState<VelocidadeDaCampanha>(VELOCIDADE_PADRAO);
   const limite = /^\d+$/.test(limiteTexto) && Number(limiteTexto) > 0 ? Number(limiteTexto) : null;
   const regras: RegrasDeEnvioInput = { excluir_quem_recebeu_dias: janela, limite };
 
@@ -114,6 +121,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         variable_mapping: mapping,
         audience: filtro,
         regras,
+        velocidade,
       },
       {
         onSuccess: (r) => {
@@ -280,6 +288,35 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
           Quem está na fila de uma campanha em andamento também fica de fora quando a primeira opção
           está ligada.
         </p>
+      </div>
+
+      {/* A Meta limita por nível do número (250, 1.000, 10 mil… contatos a cada 24 h) e pela
+          qualidade; ir mais rápido só adianta se o número aguenta. Padrão = o ritmo de sempre. */}
+      <div className="flex flex-col gap-2" data-testid="campanha-velocidade">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label htmlFor="campanha-velocidade-select" className="font-medium">
+            Velocidade do envio
+          </label>
+          <select
+            id="campanha-velocidade-select"
+            value={velocidade}
+            onChange={(e) => setVelocidade(e.target.value as VelocidadeDaCampanha)}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            {VELOCIDADES_DA_CAMPANHA.map((v) => (
+              <option key={v} value={v}>
+                {RITMOS[v].rotulo} — cerca de {RITMOS[v].porHora.toLocaleString("pt-BR")} por hora
+              </option>
+            ))}
+          </select>
+        </div>
+        {velocidade !== VELOCIDADE_PADRAO && (
+          <p className="text-xs text-amber-700 dark:text-amber-500" data-testid="campanha-velocidade-aviso">
+            A Meta limita quantos contatos diferentes o número alcança em 24 horas (250, 1.000, 10 mil…
+            conforme o nível dele). Use mais rápido só se o número já aguenta essa quantidade com boa
+            qualidade. Se muitos envios falharem em sequência, o disparo desacelera sozinho.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
