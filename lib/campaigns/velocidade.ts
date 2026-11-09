@@ -1,8 +1,8 @@
 /**
  * Velocidade do disparo de uma campanha, escolhida na hora de criar.
  *
- * O ritmo de hoje (1 mensagem, pausa de 5 s) nasceu do WAHA, onde número demais mandando
- * rápido é banimento. Na API oficial o limite real é outro — o teto de contatos por 24 h do
+ * O ritmo de hoje (1 mensagem, pausa de 5 s) nasceu do canal não oficial, onde número demais
+ * mandando rápido é banimento. Na API oficial o limite real é outro — o teto de contatos por 24 h do
  * nível do número e a qualidade —, então quem sabe que o número aguenta pode escolher mais.
  * O padrão continua sendo o ritmo antigo: campanha sem escolha anda como sempre andou.
  *

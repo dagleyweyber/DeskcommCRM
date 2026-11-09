@@ -179,10 +179,11 @@ async function processarCampanha(
     const lote = (pendentes ?? []) as DestinatarioRow[];
     if (lote.length === 0) break;
 
-    await admin
-      .from("whatsapp_campaign_recipients")
-      .update({ status: "sending" })
-      .in("id", lote.map((d) => d.id));
+    await Promise.all(
+      lote.map((d) =>
+        admin.from("whatsapp_campaign_recipients").update({ status: "sending" }).eq("id", d.id),
+      ),
+    );
 
     const resultados = await Promise.all(lote.map(enviarUm));
     for (const saiu of resultados) falhasSeguidas = saiu ? 0 : falhasSeguidas + 1;
