@@ -23,6 +23,9 @@ import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 /** Deixa margem sob o timeout do cron (25s, `docker/scheduler/entrypoint.sh`). */
 const DEFAULT_TIME_BUDGET_MS = 20_000;
 
+/** Tamanho da página do PostgREST (`max-rows`): leitura maior que isso volta truncada. */
+const PAGINA_DE_DESTINATARIOS = 1000;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -63,12 +66,26 @@ interface DestinatarioRow {
  * (mesma premissa que `_lastSendAt` em `send-whatsapp.ts` já assume), então
  * não há corrida a resolver, só simplicidade a ganhar.
  */
-async function atualizarContadores(admin: SupabaseClient, campaignId: string): Promise<void> {
-  const { data } = await admin
-    .from("whatsapp_campaign_recipients")
-    .select("status")
-    .eq("campaign_id", campaignId);
-  const linhas = (data ?? []) as Array<{ status: string }>;
+export async function atualizarContadores(admin: SupabaseClient, campaignId: string): Promise<void> {
+  // O PostgREST devolve no máximo 1.000 linhas por consulta: lido de uma vez, uma campanha
+  // maior contava só as mil primeiras (que são as ainda não enviadas, porque a linha
+  // atualizada muda de lugar) — contador em 0 e, pior, `completed` antes da hora.
+  // `order("id")` dá às páginas uma ordem estável.
+  const linhas: Array<{ status: string }> = [];
+  for (let de = 0; ; de += PAGINA_DE_DESTINATARIOS) {
+    const { data, error } = await admin
+      .from("whatsapp_campaign_recipients")
+      .select("status")
+      .eq("campaign_id", campaignId)
+      .order("id", { ascending: true })
+      .range(de, de + PAGINA_DE_DESTINATARIOS - 1);
+    // Sem leitura confiável não se atualiza nada: gravar `completed` por uma contagem
+    // parcial é pior do que deixar o contador desatualizado até o próximo minuto.
+    if (error) return;
+    const pagina = (data ?? []) as Array<{ status: string }>;
+    linhas.push(...pagina);
+    if (pagina.length < PAGINA_DE_DESTINATARIOS) break;
+  }
   const sentCount = linhas.filter((l) => l.status === "sent").length;
   const failedCount = linhas.filter((l) => l.status === "failed").length;
   const restaAlgo = linhas.some((l) => l.status === "pending" || l.status === "sending");
