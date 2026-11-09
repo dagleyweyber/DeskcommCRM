@@ -211,7 +211,7 @@ describe("canais diferentes disparam ao mesmo tempo", () => {
     for (const canal of canais) {
       await pool.query(
         `insert into channel_sessions (id, organization_id, provider, meta_phone_number_id, meta_waba_id, status, webhook_secret_encrypted)
-         values ($1, $2, 'meta_cloud', $3, '999', 'WORKING', '\x00'::bytea) on conflict (id) do nothing`,
+         values ($1, $2, 'meta_cloud', $3, '999', 'WORKING', '\\x00'::bytea) on conflict (id) do nothing`,
         [canal.id, ORG, canal.fone],
       );
       await pool.query(
