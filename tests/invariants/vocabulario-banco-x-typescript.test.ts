@@ -229,6 +229,14 @@ const PARES: Array<{
     arquivo: "lib/campaigns/motivos-de-pausa.ts",
     simbolo: "MOTIVOS_DE_PAUSA",
   },
+  {
+    tabela: "whatsapp_template_automation_sends",
+    coluna: "status",
+    // lib/automations/estados-do-envio.ts → ESTADOS_DO_ENVIO (tupla `as const`; o despachante
+    // grava a reserva 'sending' e o desfecho daqui). 'skipped' nasce na 0220, 'sending' na 0221.
+    arquivo: "lib/automations/estados-do-envio.ts",
+    simbolo: "ESTADOS_DO_ENVIO",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */

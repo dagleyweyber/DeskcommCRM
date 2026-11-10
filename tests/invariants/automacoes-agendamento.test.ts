@@ -82,6 +82,7 @@ async function configura(campos: {
 
 async function limpa() {
   await pool.query("delete from whatsapp_template_automation_sends where automation_id = $1", [AUTOMATION]);
+  await pool.query("delete from agent_inbox_items where organization_id = $1", [ORG]);
   await pool.query("delete from crm_lead_activities where organization_id = $1", [ORG]);
   await pool.query("delete from calendar_appointments where organization_id = $1", [ORG]);
   await configura({});
@@ -175,7 +176,7 @@ describe("fn_due_appointment_reminders — lê a Agenda (0201)", () => {
     await limpa();
   });
 
-  it("⭐ envio feito com a chave ANTIGA (id da atividade, antes da 0201) continua valendo — sem mensagem em dobro na virada", async () => {
+  it("⭐ envio feito com a chave ANTIGA (id da atividade, antes da 0201) continua valendo depois do vínculo da 0221 — sem mensagem em dobro", async () => {
     const id = await compromisso(HOJE_15H_SP);
     const { rows: act } = await pool.query<{ id: string }>(
       `insert into crm_lead_activities (organization_id, lead_id, contact_id, source_module, source_id, type, payload, performed_at)
@@ -187,7 +188,40 @@ describe("fn_due_appointment_reminders — lê a Agenda (0201)", () => {
        values ($1, $2, $3, $4, $5, 'sent')`,
       [AUTOMATION, ORG, lead, contato, act[0]!.id],
     );
+    // A 0221 tirou a leitura da timeline do CRM da consulta: o envio antigo passa a
+    // valer pelo `appointment_id` que o vínculo (rodado pela migration e pelo
+    // `update.sh` do clone) grava nele.
+    const { rows: vinculo } = await pool.query<{ n: number }>(
+      "select fn_vincular_envios_antigos_ao_compromisso() as n",
+    );
+    expect(vinculo[0]!.n).toBeGreaterThanOrEqual(1);
     expect((await devidos(HOJE_MEIO_DIA_SP)).map((r) => r.activity_id)).not.toContain(id);
+    await limpa();
+  });
+
+  it("⭐ a consulta de devidos NÃO lê a timeline do CRM (causa das paradas de 06/11 e 10/11)", async () => {
+    // Com `crm_lead_activities` dentro da consulta, o custo crescia com a timeline de
+    // TODOS os clientes, até passar dos 8 s do PostgREST. A 0212 e a 0219 trataram o
+    // plano; a 0221 tirou a tabela. Este teste reprova a volta dela.
+    const { rows } = await pool.query<{ def: string }>(
+      "select pg_get_functiondef('public.fn_due_appointment_reminders(uuid,uuid,timestamptz)'::regprocedure) as def",
+    );
+    const semComentarios = rows[0]!.def.replace(/--[^\n]*/g, "");
+    expect(semComentarios).not.toMatch(/crm_lead_activities/);
+  });
+
+  it("⭐ envio reservado ('sending') ou dispensado ('skipped') também encerra a ocorrência", async () => {
+    const reservado = await compromisso(HOJE_15H_SP);
+    const dispensado = await compromisso("2026-03-10T19:00:00.000Z", { contactId: contatoSemNegocio });
+    await pool.query(
+      `insert into whatsapp_template_automation_sends
+         (automation_id, organization_id, contact_id, occurrence_key, appointment_id, status)
+       values ($1, $2, $3, $4, $4, 'sending'), ($1, $2, $5, $6, $6, 'skipped')`,
+      [AUTOMATION, ORG, contato, reservado, contatoSemNegocio, dispensado],
+    );
+    const ids = (await devidos(HOJE_MEIO_DIA_SP)).map((r) => r.activity_id);
+    expect(ids).not.toContain(reservado);
+    expect(ids).not.toContain(dispensado);
     await limpa();
   });
 
@@ -315,6 +349,89 @@ describe("dispatchAutomationsTick — ciclo completo contra Postgres real", () =
 
     expect(resumo.sent).toBe(0);
     expect(sendFn).not.toHaveBeenCalled();
+    await limpa();
+  });
+
+  it("⭐ dois ticks AO MESMO TEMPO mandam UMA mensagem — a reserva decide quem envia", async () => {
+    // É o que permite o cron rodar a cada minuto: um tick lento pode se sobrepor ao
+    // seguinte, e os dois enxergam a mesma ocorrência devida.
+    const id = await compromisso(HOJE_MEIO_DIA_SP);
+    const sendFn = vi.fn(async (): Promise<Message> => {
+      await new Promise((r) => setTimeout(r, 300));
+      return { id: "msg-1", status: "sent", external_id: "wamid.UNICO", type: "template" } as unknown as Message;
+    });
+    const deps = { sleep: async () => {}, sendMessageFn: sendFn, now: () => new Date(HOJE_08H_SP), timeBudgetMs: 5000 };
+
+    const [a, b] = await Promise.all([dispatchAutomationsTick(admin, deps), dispatchAutomationsTick(admin, deps)]);
+
+    expect(sendFn).toHaveBeenCalledTimes(1);
+    expect(a.sent + b.sent).toBe(1);
+    const { rows } = await pool.query(
+      "select status, external_id from whatsapp_template_automation_sends where automation_id = $1 and appointment_id = $2",
+      [AUTOMATION, id],
+    );
+    expect(rows).toEqual([{ status: "sent", external_id: "wamid.UNICO" }]);
+    await limpa();
+  });
+
+  it("⭐ reserva abandonada vira 'failed' e NÃO é reenviada (envio em dobro é pior que não-envio)", async () => {
+    const id = await compromisso(HOJE_MEIO_DIA_SP);
+    await pool.query(
+      `insert into whatsapp_template_automation_sends
+         (automation_id, organization_id, contact_id, occurrence_key, appointment_id, status, sent_at)
+       values ($1, $2, $3, $4, $4, 'sending', now() - interval '11 minutes')`,
+      [AUTOMATION, ORG, contato, id],
+    );
+    const sendFn = vi.fn();
+
+    await dispatchAutomationsTick(admin, {
+      sleep: async () => {},
+      sendMessageFn: sendFn as never,
+      now: () => new Date(HOJE_08H_SP),
+      timeBudgetMs: 5000,
+    });
+
+    expect(sendFn).not.toHaveBeenCalled();
+    const { rows } = await pool.query(
+      "select status, error_message from whatsapp_template_automation_sends where automation_id = $1",
+      [AUTOMATION],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "failed", error_message: expect.stringContaining("não reenviado") });
+    await limpa();
+  });
+
+  it("⭐ consulta de devidos que FALHA abre UM aviso crítico na Central; o tick que funciona o fecha", async () => {
+    await compromisso(HOJE_MEIO_DIA_SP);
+    const quebrado = {
+      ...admin,
+      rpc: async () => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }),
+    } as unknown as typeof admin;
+    const sendFn = vi.fn(
+      async (): Promise<Message> =>
+        ({ id: "msg-1", status: "sent", external_id: "wamid.VOLTOU", type: "template" }) as unknown as Message,
+    );
+    const deps = { sleep: async () => {}, sendMessageFn: sendFn, now: () => new Date(HOJE_08H_SP), timeBudgetMs: 5000 };
+    const avisos = async () =>
+      (
+        await pool.query<{ status: string; severity: string; title: string }>(
+          `select status, severity, title from agent_inbox_items
+            where organization_id = $1 and kind = 'automation_rule_failed' and ref_id = $2`,
+          [ORG, AUTOMATION],
+        )
+      ).rows;
+
+    const falhou = await dispatchAutomationsTick(quebrado, deps);
+    await dispatchAutomationsTick(quebrado, deps); // segundo tick quebrado: não duplica o aviso
+    expect(falhou.resolveFailed).toBe(1);
+    expect(sendFn).not.toHaveBeenCalled();
+    expect(await avisos()).toEqual([
+      { status: "open", severity: "critical", title: 'A automação "Lembrete de consulta" parou de enviar' },
+    ]);
+
+    const voltou = await dispatchAutomationsTick(admin, deps);
+    expect(voltou.sent).toBe(1);
+    expect((await avisos()).map((a) => a.status)).toEqual(["resolved"]);
     await limpa();
   });
 });

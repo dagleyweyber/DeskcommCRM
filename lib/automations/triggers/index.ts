@@ -10,4 +10,5 @@ export const TRIGGER_RESOLVERS: Record<string, TriggerResolver> = {
   appointment_reminder: resolvedorDeAgendamento,
 };
 
+export { FalhaAoResolver } from "./types";
 export type { AutomationForResolve, OcorrenciaDevida, TriggerResolver } from "./types";

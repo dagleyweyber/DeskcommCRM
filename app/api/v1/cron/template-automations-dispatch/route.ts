@@ -1,7 +1,8 @@
 /**
  * GET/POST /api/v1/cron/template-automations-dispatch — avalia todas as
  * automações `active` da plataforma e dispara quem estiver devido, a cada
- * 15 minutos (ver `docker/scheduler/entrypoint.sh`).
+ * minuto (ver `docker/scheduler/entrypoint.sh`). Ticks que se sobrepõem são
+ * seguros: cada envio é reservado antes de sair (`lib/automations/dispatch.ts`).
  *
  * A REGRA vive em `lib/automations/dispatch.ts` (`dispatchAutomationsTick`),
  * separada do handler HTTP pelo mesmo motivo de todo cron deste repo: o

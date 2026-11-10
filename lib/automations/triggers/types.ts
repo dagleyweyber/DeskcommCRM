@@ -40,6 +40,23 @@ export interface AutomationForResolve {
 }
 
 export interface TriggerResolver {
-  /** Quem está devido AGORA — já filtrado por quem nunca recebeu esta ocorrência. */
+  /**
+   * Quem está devido AGORA — já filtrado por quem nunca recebeu esta ocorrência.
+   *
+   * Consulta que falhou LANÇA (`FalhaAoResolver`), nunca devolve `[]`: "ninguém
+   * devido" e "não consegui saber" são coisas diferentes, e confundi-las deixou
+   * uma clínica sem confirmação o dia inteiro, em silêncio (2026-11-10). Quem
+   * decide o que fazer com a falha é o despachante.
+   */
   resolve(admin: SupabaseClient, automation: AutomationForResolve, now: Date): Promise<OcorrenciaDevida[]>;
+}
+
+export class FalhaAoResolver extends Error {
+  constructor(
+    message: string,
+    readonly codigo: string | null,
+  ) {
+    super(message);
+    this.name = "FalhaAoResolver";
+  }
 }

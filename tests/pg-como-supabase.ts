@@ -472,6 +472,15 @@ class AtualizacaoPg<T> implements PromiseLike<RespostaFalsa<unknown>> {
     return this;
   }
 
+  /**
+   * `<` num UPDATE — nasceu com o despachante de automações, que fecha as reservas
+   * `sending` abandonadas com `.update(...).eq("status", "sending").lt("sent_at", limite)`.
+   */
+  lt(coluna: string, valor: unknown): this {
+    this.filtros.push(["<", coluna, valor]);
+    return this;
+  }
+
   select(colunas = "*"): this {
     this.colunasDeVolta = colunas;
     return this;

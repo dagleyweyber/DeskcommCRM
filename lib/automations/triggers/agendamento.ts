@@ -16,7 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { logger } from "@/lib/logger";
 
-import type { AutomationForResolve, OcorrenciaDevida, TriggerResolver } from "./types";
+import { FalhaAoResolver, type AutomationForResolve, type OcorrenciaDevida, type TriggerResolver } from "./types";
 
 interface LinhaDevida {
   lead_id: string | null;
@@ -39,15 +39,16 @@ export const resolvedorDeAgendamento: TriggerResolver = {
       p_now: now.toISOString(),
     });
     if (error) {
-      // Antes era "ninguém devido" em silêncio: a consulta passou do timeout do
-      // PostgREST (8 s) e a clínica ficou dias sem confirmação, sem nenhum rastro.
+      // Nunca "ninguém devido": a consulta passou do timeout do PostgREST (8 s) duas
+      // vezes (06/11 e 10/11) e a clínica ficou sem confirmação, sem rastro além do
+      // log. Lançar faz o despachante abrir o aviso na Central.
       logger.error("[automations/agendamento] fn_due_appointment_reminders falhou", {
         automation_id: automation.id,
         organization_id: automation.organizationId,
         code: error.code,
         message: error.message,
       });
-      return [];
+      throw new FalhaAoResolver(error.message, error.code ?? null);
     }
     if (!data) return [];
 
