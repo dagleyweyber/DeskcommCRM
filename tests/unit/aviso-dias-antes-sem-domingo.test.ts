@@ -11,10 +11,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const raiz = process.cwd();
-const semComentarios = (sql: string) => sql.replace(/^\s*--.*$/gm, "");
+// CRLF vira LF ANTES de tirar os comentários: com `\r` no texto, o `^` multilinha do JS casa
+// entre `\r` e `\n` e deixa um `\r` solto no fim da linha anterior (o baseline é CRLF).
+const semComentarios = (sql: string) => sql.replace(/\r\n/g, "\n").replace(/^\s*--.*$/gm, "");
 
 const migration = semComentarios(
   readFileSync(join(raiz, "supabase/migrations/20261107120000_0213_aviso_dias_antes_sem_domingo.sql"), "utf8"),
+).replace(/\r\n/g, "\n");
+/**
+ * A versão VIGENTE da função. A 0221 reescreveu a deduplicação (sem ler a timeline do
+ * CRM) e manteve a regra do domingo; quem reescrever a função de novo troca este
+ * caminho — e este teste confere que a regra veio junto.
+ */
+const vigente = semComentarios(
+  readFileSync(join(raiz, "supabase/migrations/20261110220000_0221_confirmacao_sem_atividades_e_reserva.sql"), "utf8"),
 ).replace(/\r\n/g, "\n");
 const baseline = semComentarios(readFileSync(join(raiz, "supabase/baseline.sql"), "utf8")).replace(/\r\n/g, "\n");
 
@@ -36,10 +46,11 @@ describe("fn_due_appointment_reminders (0213) — nada de aviso no domingo", () 
     expect(horas).not.toMatch(/dow/);
   });
 
-  it("⭐ a definição que vale no baseline é a nova, com o mesmo corpo da migration", () => {
+  it("⭐ a definição que vale no baseline mantém a regra, com o mesmo corpo da migration vigente (0221)", () => {
     const def = ultimaDefinicao(baseline);
     expect(def).toMatch(REGRA_DOMINGO);
-    expect(corpo(def)).toBe(corpo(migration));
+    expect(corpo(ultimaDefinicao(vigente))).toMatch(REGRA_DOMINGO);
+    expect(corpo(def)).toBe(corpo(ultimaDefinicao(vigente)));
   });
 
   it("mantém a 0212: chaves calculadas uma vez, sem varredura por envio", () => {

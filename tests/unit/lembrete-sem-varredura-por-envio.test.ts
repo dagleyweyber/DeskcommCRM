@@ -39,10 +39,12 @@ describe("fn_due_appointment_reminders (0212)", () => {
     expect(migration).not.toMatch(QUADRATICO);
   });
 
-  it("⭐ a definição que vale no baseline é a nova", () => {
+  it("⭐ a definição que vale no baseline não tem o formato quadrático — nem lê a timeline do CRM (0221)", () => {
+    // A 0212 trocou o formato quadrático por CTEs; a CTE regrediu em produção (10/11) e a
+    // 0221 tirou `crm_lead_activities` da consulta. A guarda acompanha a versão vigente.
     const def = ultimaDefinicao(baseline);
-    expect(def).toMatch(/chaves_enviadas as \(/);
     expect(def).not.toMatch(QUADRATICO);
+    expect(def).not.toMatch(/crm_lead_activities/);
   });
 
   it("continua fechada para anon/authenticated e aberta só ao service_role", () => {

@@ -216,7 +216,7 @@ describe("fn_due_appointment_reminders — lê a Agenda (0201)", () => {
     await pool.query(
       `insert into whatsapp_template_automation_sends
          (automation_id, organization_id, contact_id, occurrence_key, appointment_id, status)
-       values ($1, $2, $3, $4, $4, 'sending'), ($1, $2, $5, $6, $6, 'skipped')`,
+       values ($1, $2, $3, $4::text, $4::uuid, 'sending'), ($1, $2, $5, $6::text, $6::uuid, 'skipped')`,
       [AUTOMATION, ORG, contato, reservado, contatoSemNegocio, dispensado],
     );
     const ids = (await devidos(HOJE_MEIO_DIA_SP)).map((r) => r.activity_id);
@@ -379,7 +379,7 @@ describe("dispatchAutomationsTick — ciclo completo contra Postgres real", () =
     await pool.query(
       `insert into whatsapp_template_automation_sends
          (automation_id, organization_id, contact_id, occurrence_key, appointment_id, status, sent_at)
-       values ($1, $2, $3, $4, $4, 'sending', now() - interval '11 minutes')`,
+       values ($1, $2, $3, $4::text, $4::uuid, 'sending', now() - interval '11 minutes')`,
       [AUTOMATION, ORG, contato, id],
     );
     const sendFn = vi.fn();
