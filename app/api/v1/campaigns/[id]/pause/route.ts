@@ -34,8 +34,16 @@ export async function POST(
 
   const { error } = await admin
     .from("whatsapp_campaigns")
-    .update({ status: "paused" })
-    .eq("id", id);
+    // O motivo fica gravado também na pausa manual: a tela mostra "Pausada pela equipe" em vez
+    // de deixar o operador supor que foi a Meta.
+    .update({
+      status: "paused",
+      pausa_motivo: "manual",
+      pausa_detalhe: null,
+      pausada_em: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("organization_id", authz.org.orgId);
   if (error) return fail("internal_error", error.message, 500, { requestId });
 
   void audit({

@@ -311,6 +311,11 @@ export interface ChannelHealth {
   status: string | null;
   /** Detalhe do erro, para o corpo do aviso. Nunca credencial. */
   detail: string | null;
+  /**
+   * Qualidade e limite do número segundo a plataforma, quando o transporte informa
+   * (vocabulário da plataforma: GREEN/YELLOW/RED, TIER_250/TIER_1K…). Ausente = não informa.
+   */
+  qualidade?: { nota: string | null; limite: string | null };
 }
 
 /** Definição aprovada, na forma NEUTRA — sem o vocabulário de nenhum provider. */

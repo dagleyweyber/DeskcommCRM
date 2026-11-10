@@ -15,6 +15,13 @@ import {
   type ContagemDoPublico,
   type RegrasDeEnvioInput,
 } from "@/hooks/campaigns/useCampaigns";
+import {
+  BLOCO_MAXIMO,
+  BLOCO_MINIMO,
+  ESPERA_MAXIMA_MIN,
+  ESPERA_MINIMA_MIN,
+  previsaoDosBlocos,
+} from "@/lib/campaigns/blocos";
 import { JANELAS_EM_DIAS, type JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
 import {
   RITMOS,
@@ -43,6 +50,33 @@ export function fraseDaContagem(c: ContagemDoPublico): string {
   return `Vai sair para ${n(c.total)} de ${n(c.do_filtro)} contatos — ${motivos.join(", ")}.`;
 }
 
+/**
+ * A espera entre blocos como a API recebe. `null` = desligada; `"invalida"` = ligada com número
+ * fora da faixa — o botão de criar fica desabilitado em vez de mandar algo que a API recusa.
+ */
+export function blocosDoFormulario(
+  ligado: boolean,
+  blocoTexto: string,
+  esperaTexto: string,
+): { tamanho: number; espera_minutos: number } | null | "invalida" {
+  if (!ligado) return null;
+  const tamanho = /^\d+$/.test(blocoTexto.trim()) ? Number(blocoTexto.trim()) : NaN;
+  const espera = /^\d+$/.test(esperaTexto.trim()) ? Number(esperaTexto.trim()) : NaN;
+  if (!(tamanho >= BLOCO_MINIMO && tamanho <= BLOCO_MAXIMO)) return "invalida";
+  if (!(espera >= ESPERA_MINIMA_MIN && espera <= ESPERA_MAXIMA_MIN)) return "invalida";
+  return { tamanho, espera_minutos: espera };
+}
+
+/** "4 blocos com 3 esperas — cerca de 2h20 no total, dentro do horário de envio (7h às 22h)." */
+export function fraseDaPrevisao(total: number, tamanho: number, esperaMinutos: number, porHora: number): string {
+  const p = previsaoDosBlocos(total, { tamanho, esperaMinutos }, porHora);
+  const h = Math.floor(p.minutos / 60);
+  const m = p.minutos % 60;
+  const duracao = h > 0 ? `${h}h${m > 0 ? String(m).padStart(2, "0") : ""}` : `${m} min`;
+  const esperas = p.esperas === 1 ? "1 espera" : `${p.esperas} esperas`;
+  return `${total.toLocaleString("pt-BR")} contatos: ${p.blocos} bloco(s) com ${esperas} — cerca de ${duracao} no total, contando só o horário de envio (7h às 22h).`;
+}
+
 export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const templates = useTemplates();
   const pipelines = usePipelines();
@@ -63,6 +97,10 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const [velocidade, setVelocidade] = useState<VelocidadeDaCampanha>(VELOCIDADE_PADRAO);
   const limite = /^\d+$/.test(limiteTexto) && Number(limiteTexto) > 0 ? Number(limiteTexto) : null;
   const regras: RegrasDeEnvioInput = { excluir_quem_recebeu_dias: janela, limite };
+  const [comEspera, setComEspera] = useState(false);
+  const [blocoTexto, setBlocoTexto] = useState("300");
+  const [esperaTexto, setEsperaTexto] = useState("30");
+  const blocos = blocosDoFormulario(comEspera, blocoTexto, esperaTexto);
 
   const stages = usePipelineStages(pipelineId || null);
 
@@ -111,7 +149,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   function criarCampanha() {
     const filtro = audience();
     const channelSessionId = templates.data?.data.channelSessionId;
-    if (!nome.trim() || !atual || !filtro || !channelSessionId) return;
+    if (!nome.trim() || !atual || !filtro || !channelSessionId || blocos === "invalida") return;
     criar.mutate(
       {
         name: nome.trim(),
@@ -122,6 +160,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         audience: filtro,
         regras,
         velocidade,
+        blocos,
       },
       {
         onSuccess: (r) => {
@@ -319,6 +358,65 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
         )}
       </div>
 
+      {/* Espera programada: manda em levas, para o número respirar e a equipe dar conta das
+          respostas de cada leva. Desligada = manda direto até o fim. */}
+      <div className="flex flex-col gap-2" data-testid="campanha-blocos">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={comEspera}
+            onChange={(e) => setComEspera(e.target.checked)}
+            data-testid="campanha-blocos-ligar"
+          />
+          Enviar em blocos, com espera entre eles
+        </label>
+        {comEspera && (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span>A cada</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={BLOCO_MINIMO}
+                max={BLOCO_MAXIMO}
+                value={blocoTexto}
+                onChange={(e) => setBlocoTexto(e.target.value)}
+                aria-label="Mensagens por bloco"
+                className="h-9 w-24 rounded-md border border-input bg-background px-2 text-sm"
+                data-testid="campanha-blocos-tamanho"
+              />
+              <span>mensagens, esperar</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={ESPERA_MINIMA_MIN}
+                max={ESPERA_MAXIMA_MIN}
+                value={esperaTexto}
+                onChange={(e) => setEsperaTexto(e.target.value)}
+                aria-label="Minutos de espera entre blocos"
+                className="h-9 w-20 rounded-md border border-input bg-background px-2 text-sm"
+                data-testid="campanha-blocos-espera"
+              />
+              <span>minutos antes do próximo bloco.</span>
+            </div>
+            {blocos === "invalida" ? (
+              <p className="text-xs text-destructive" data-testid="campanha-blocos-erro">
+                Use blocos de {BLOCO_MINIMO} a {BLOCO_MAXIMO.toLocaleString("pt-BR")} mensagens e espera de{" "}
+                {ESPERA_MINIMA_MIN} a {ESPERA_MAXIMA_MIN} minutos (24 horas).
+              </p>
+            ) : (
+              blocos && (
+                <p className="text-xs text-muted-foreground" data-testid="campanha-blocos-previsao">
+                  {contagem && contagem.total > 0
+                    ? fraseDaPrevisao(contagem.total, blocos.tamanho, blocos.espera_minutos, RITMOS[velocidade].porHora)
+                    : `Manda ${blocos.tamanho.toLocaleString("pt-BR")} mensagens, espera ${blocos.espera_minutos} min e continua. Clique em "Ver quantos contatos" para ver a previsão completa.`}
+                </p>
+              )
+            )}
+          </>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="outline" size="sm" onClick={verContagem} disabled={preview.isPending}>
           {preview.isPending ? "Contando…" : "Ver quantos contatos"}
@@ -344,6 +442,7 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
             !nome.trim() ||
             !atual ||
             semFonte.length > 0 ||
+            blocos === "invalida" ||
             criar.isPending ||
             !templates.data?.data.channelSessionId
           }

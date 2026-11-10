@@ -14,6 +14,7 @@ import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { resolveAudience, type AudienceFilter } from "@/lib/campaigns/audience";
 import { gravarLinks, prepararLinks } from "@/lib/campaigns/links-da-campanha";
+import { BLOCO_MAXIMO, BLOCO_MINIMO, ESPERA_MAXIMA_MIN, ESPERA_MINIMA_MIN } from "@/lib/campaigns/blocos";
 import { aplicarRegrasDeEnvio, regrasDeEnvioSchema, regrasDoCorpo } from "@/lib/campaigns/regras-de-envio";
 import { VELOCIDADE_PADRAO, VELOCIDADES_DA_CAMPANHA } from "@/lib/campaigns/velocidade";
 import {
@@ -51,6 +52,14 @@ const createCampaignSchema = z.object({
   audience: audienceSchema,
   regras: regrasDeEnvioSchema.default({}),
   velocidade: z.enum(VELOCIDADES_DA_CAMPANHA).default(VELOCIDADE_PADRAO),
+  // Espera programada: a cada `tamanho` mensagens, `espera_minutos` de espera. `null` = sem blocos.
+  blocos: z
+    .object({
+      tamanho: z.number().int().min(BLOCO_MINIMO).max(BLOCO_MAXIMO),
+      espera_minutos: z.number().int().min(ESPERA_MINIMA_MIN).max(ESPERA_MAXIMA_MIN),
+    })
+    .nullable()
+    .default(null),
 });
 
 export async function GET(): Promise<Response> {
@@ -62,7 +71,7 @@ export async function GET(): Promise<Response> {
   const { data, error } = await admin
     .from("whatsapp_campaigns")
     .select(
-      "id, name, status, template_name, template_language, total_recipients, sent_count, failed_count, created_at, started_at, completed_at",
+      "id, name, status, channel_session_id, template_name, template_language, total_recipients, sent_count, failed_count, created_at, started_at, completed_at, velocidade, pausa_motivo, pausa_detalhe, pausada_em, bloco_tamanho, bloco_espera_minutos, bloco_enviados, proximo_bloco_em",
     )
     .eq("organization_id", authz.org.orgId)
     .order("created_at", { ascending: false });
@@ -189,6 +198,8 @@ export async function POST(req: NextRequest): Promise<Response> {
       variable_mapping: mapping,
       audience_filter: { ...input.audience, regras: input.regras },
       velocidade: input.velocidade,
+      bloco_tamanho: input.blocos?.tamanho ?? null,
+      bloco_espera_minutos: input.blocos?.espera_minutos ?? null,
       status: "draft",
       total_recipients: publico.length,
       created_by: authz.user.id,
@@ -238,6 +249,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       audience: input.audience,
       regras: input.regras,
       velocidade: input.velocidade,
+      blocos: input.blocos,
       total_recipients: publico.length,
       excluidos_por_recente: recorte.excluidosPorRecente,
       cortados_pelo_limite: recorte.cortadosPeloLimite,

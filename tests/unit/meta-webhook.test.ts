@@ -261,7 +261,7 @@ describe("parseMetaWebhook", () => {
   it("campo desconhecido é IGNORADO, não erro — senão a Meta re-entrega em loop", () => {
     const eventos = parseMetaWebhook({
       object: "whatsapp_business_account",
-      entry: [{ id: "w", changes: [{ field: "account_alerts", value: { qualquer: "coisa" } }] }],
+      entry: [{ id: "w", changes: [{ field: "campo_que_ainda_nao_existe", value: { qualquer: "coisa" } }] }],
     });
     expect(eventos).toEqual([]);
   });

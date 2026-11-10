@@ -339,3 +339,233 @@ describe("velocidade da campanha", () => {
     await expect(campanhaComVelocidade("turbo", 1)).rejects.toThrow(/velocidade/);
   });
 });
+
+describe("parada automática, espera em blocos e painel (migration 0218)", () => {
+  const agora = new Date("2026-01-01T14:00:00Z");
+  const tick = (sendMessageFn: ReturnType<typeof sendFnSucesso>, timeBudgetMs = 10_000) =>
+    dispatchCampaignsTick(admin, { sleep: async () => {}, sendMessageFn, now: () => agora, timeBudgetMs });
+
+  /** Canal próprio por teste: o estado do modelo e do número de um não vaza para o outro. */
+  async function cenario(opcoes: {
+    sufixo: string;
+    modelo?: { status: string; quality?: string | null };
+    destinatarios: number;
+    extras?: string;
+    valoresExtras?: unknown[];
+  }) {
+    const canal = `dc0ca11e-0000-4000-8000-0000000b${opcoes.sufixo.padStart(4, "0")}`;
+    const waba = `9${opcoes.sufixo}`;
+    await pool.query(
+      `insert into channel_sessions (id, organization_id, provider, meta_phone_number_id, meta_waba_id, status, webhook_secret_encrypted)
+       values ($1, $2, 'meta_cloud', $3, $4, 'WORKING', '\\x00'::bytea) on conflict (id) do nothing`,
+      [canal, ORG, `55119${opcoes.sufixo.padStart(8, "0")}`, waba],
+    );
+    await pool.query(
+      `insert into meta_templates (organization_id, waba_id, channel_session_id, name, language, status, quality_score, components, contract_hash)
+       values ($1, $2, $3, 'oferta', 'pt_BR', $4, $5, $6::jsonb, 'hash-teste')`,
+      [
+        ORG,
+        waba,
+        canal,
+        opcoes.modelo?.status ?? "APPROVED",
+        opcoes.modelo?.quality ?? null,
+        JSON.stringify([{ type: "BODY", text: "Olá {{1}}, aproveite!" }]),
+      ],
+    );
+    const extras = opcoes.extras ? `, ${opcoes.extras}` : "";
+    const marcas = (opcoes.valoresExtras ?? []).map((_, i) => `, $${i + 4}`).join("");
+    const { rows } = await pool.query<{ id: string }>(
+      `insert into whatsapp_campaigns
+         (organization_id, name, channel_session_id, template_name, template_language,
+          variable_mapping, audience_filter, status, total_recipients${extras})
+       values ($1, 'Campanha de freio', $2, 'oferta', 'pt_BR', '{}'::jsonb, '{"kind":"tag","tag":"x"}'::jsonb, 'queued', $3${marcas})
+       returning id`,
+      [ORG, canal, opcoes.destinatarios, ...(opcoes.valoresExtras ?? [])],
+    );
+    const id = rows[0]!.id;
+    const { rows: contatos } = await pool.query<{ id: string }>(
+      `insert into contacts (organization_id, display_name, phone_number, source)
+       select $1, 'Freio ' || g, '+5521' || $3 || lpad(g::text, 5, '0'), 'whatsapp'
+         from generate_series(1, $2) g
+       returning id`,
+      [ORG, opcoes.destinatarios, opcoes.sufixo.padStart(4, "0")],
+    );
+    for (const c of contatos) await novoDestinatario(id, c.id, { "1": "Fulano" });
+    return { id, canal, contatos: contatos.map((c) => c.id) };
+  }
+
+  async function campanha(id: string) {
+    const { rows } = await pool.query<{
+      status: string;
+      pausa_motivo: string | null;
+      bloco_enviados: number;
+      proximo_bloco_em: Date | null;
+    }>("select status, pausa_motivo, bloco_enviados, proximo_bloco_em from whatsapp_campaigns where id = $1", [id]);
+    return rows[0]!;
+  }
+
+  async function contagem(id: string) {
+    const { rows } = await pool.query<{ status: string; n: number }>(
+      "select status, count(*)::int as n from whatsapp_campaign_recipients where campaign_id = $1 group by status order by status",
+      [id],
+    );
+    return Object.fromEntries(rows.map((r) => [r.status, r.n]));
+  }
+
+  it("⭐ modelo PAUSADO pela Meta: a campanha para com o motivo gravado e ninguém é queimado", async () => {
+    const { id } = await cenario({ sufixo: "101", modelo: { status: "PAUSED" }, destinatarios: 3 });
+    const sendFn = sendFnSucesso();
+    await tick(sendFn);
+
+    expect(sendFn).not.toHaveBeenCalled();
+    expect(await campanha(id)).toMatchObject({ status: "paused", pausa_motivo: "modelo_pausado" });
+    expect(await contagem(id)).toEqual({ pending: 3 });
+  });
+
+  it("⭐ nota amarela para; com a nota dispensada ao retomar, segue", async () => {
+    const parada = await cenario({ sufixo: "102", modelo: { status: "APPROVED", quality: "YELLOW" }, destinatarios: 2 });
+    await tick(sendFnSucesso());
+    expect(await campanha(parada.id)).toMatchObject({ status: "paused", pausa_motivo: "modelo_nota_amarela" });
+
+    const dispensada = await cenario({
+      sufixo: "103",
+      modelo: { status: "APPROVED", quality: "YELLOW" },
+      destinatarios: 2,
+      extras: "freios_dispensados",
+      valoresExtras: [["modelo_nota_amarela"]],
+    });
+    await tick(sendFnSucesso());
+    expect(await contagem(dispensada.id)).toEqual({ sent: 2 });
+  });
+
+  it("⭐ a Meta recusa o modelo no envio (132015): para na hora e o contato VOLTA para a fila", async () => {
+    const { id } = await cenario({ sufixo: "104", destinatarios: 4 });
+    const sendFn = vi.fn(async (_admin: unknown, _ctx: unknown, _input: unknown): Promise<Message> => {
+      throw new Error("meta_132015: Template is paused due to low quality");
+    });
+    await tick(sendFn);
+
+    expect(sendFn).toHaveBeenCalledTimes(1); // nada depois da primeira recusa
+    expect(await campanha(id)).toMatchObject({ status: "paused", pausa_motivo: "modelo_pausado" });
+    expect(await contagem(id)).toEqual({ pending: 4 });
+  });
+
+  it("⭐ blocos: manda o bloco, marca a espera e não manda mais até ela acabar", async () => {
+    const { id } = await cenario({
+      sufixo: "105",
+      destinatarios: 12,
+      extras: "velocidade, bloco_tamanho, bloco_espera_minutos",
+      valoresExtras: ["rapida", 10, 30],
+    });
+    await tick(sendFnSucesso());
+
+    expect(await contagem(id)).toEqual({ pending: 2, sent: 10 });
+    const depois = await campanha(id);
+    expect(depois.status).toBe("running");
+    expect(depois.bloco_enviados).toBe(0);
+    expect(new Date(depois.proximo_bloco_em!).getTime()).toBe(agora.getTime() + 30 * 60_000);
+
+    // Ainda na espera: o tick seguinte não manda nada desta campanha.
+    await tick(sendFnSucesso());
+    expect(await contagem(id)).toEqual({ pending: 2, sent: 10 });
+
+    // Espera vencida: sai o resto e a campanha fecha.
+    await pool.query("update whatsapp_campaigns set proximo_bloco_em = $2 where id = $1", [
+      id,
+      new Date(agora.getTime() - 1000),
+    ]);
+    await tick(sendFnSucesso());
+    expect(await contagem(id)).toEqual({ sent: 12 });
+    expect((await campanha(id)).status).toBe("completed");
+  });
+
+  it("o banco recusa bloco sem espera (os dois ou nenhum)", async () => {
+    await expect(
+      cenario({ sufixo: "106", destinatarios: 1, extras: "bloco_tamanho", valoresExtras: [300] }),
+    ).rejects.toThrow(/bloco_completo/);
+  });
+
+  it("⭐ painel: aceitas, entregues, lidas, respostas, saídas e falhas por código, numa ida só", async () => {
+    const { id, canal, contatos } = await cenario({ sufixo: "107", destinatarios: 5 });
+    const { rows: conv } = await pool.query<{ id: string; contact_id: string }>(
+      `insert into conversations (organization_id, contact_id, channel_session_id)
+       select $1, c, $2 from unnest($3::uuid[]) c returning id, contact_id`,
+      [ORG, canal, contatos],
+    );
+    const conversaDe = new Map(conv.map((c) => [c.contact_id, c.id]));
+    const enviadoEm = new Date("2026-01-01T13:00:00Z");
+    const estados = ["read", "delivered", "delivered", "failed"]; // o 5º falha já no envio
+    for (const [i, contato] of contatos.entries()) {
+      if (i === 4) {
+        await pool.query(
+          "update whatsapp_campaign_recipients set status = 'failed', error_message = 'meta_131026: undeliverable' where campaign_id = $1 and contact_id = $2",
+          [id, contato],
+        );
+        continue;
+      }
+      const wamid = `wamid.painel.${i}`;
+      await pool.query(
+        "update whatsapp_campaign_recipients set status = 'sent', external_id = $3, sent_at = $4 where campaign_id = $1 and contact_id = $2",
+        [id, contato, wamid, enviadoEm],
+      );
+      await pool.query(
+        `insert into messages (organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, sent_via, sent_at, metadata)
+         values ($1, $2, $3, $4, $5, 'template', 'outbound', $6, 'automation', $7, $8::jsonb)`,
+        [
+          ORG,
+          conversaDe.get(contato),
+          canal,
+          contato,
+          wamid,
+          estados[i],
+          enviadoEm,
+          JSON.stringify(estados[i] === "failed" ? { failure_code: 131049 } : {}),
+        ],
+      );
+    }
+    // O 1º respondeu uma hora depois; o 2º pediu para sair; o 3º respondeu só 4 dias depois (não conta).
+    const umaHora = new Date(enviadoEm.getTime() + 3600_000);
+    await pool.query(
+      `insert into messages (organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, sent_via, sent_at, body)
+       values ($1, $2, $3, $4, 'wamid.resp.0', 'text', 'inbound', 'received', 'user', $5, 'Quero!'),
+              ($1, $6, $3, $7, 'wamid.resp.2', 'text', 'inbound', 'received', 'user', $8, 'Oi')`,
+      [
+        ORG,
+        conversaDe.get(contatos[0]!),
+        canal,
+        contatos[0],
+        umaHora,
+        conversaDe.get(contatos[2]!),
+        contatos[2],
+        new Date(enviadoEm.getTime() + 4 * 86400_000),
+      ],
+    );
+    await pool.query("update contacts set is_blocked = true, blocked_reason = 'stop_keyword', blocked_at = $2 where id = $1", [
+      contatos[1],
+      umaHora,
+    ]);
+
+    const { rows } = await pool.query<{ r: Record<string, unknown> }>(
+      "select public.fn_resultado_da_campanha($1, $2) as r",
+      [ORG, id],
+    );
+    expect(rows[0]!.r).toEqual({
+      total: 5,
+      pendentes: 0,
+      aceitas: 4,
+      entregues: 3,
+      lidas: 1,
+      respostas: 1,
+      saidas: 1,
+      falhas: 2,
+      falhas_por_codigo: { "131026": 1, "131049": 1 },
+    });
+
+    // Outra organização não enxerga nada desta campanha.
+    const { rows: alheio } = await pool.query<{ r: { total: number } }>(
+      "select public.fn_resultado_da_campanha('00000000-0000-4000-8000-000000000000', $1) as r",
+      [id],
+    );
+    expect(alheio[0]!.r.total).toBe(0);
+  });
+});

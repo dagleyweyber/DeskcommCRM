@@ -16,6 +16,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { sincronizarSaudeDaConexao } from "../health";
 import { registrarAviso } from "../zernio/avisos";
 import { avisoDoAccountUpdate, detalheDaDesconexao, saudeDoAccountUpdate } from "./account-update";
+import {
+  aplicarAlertaDaConta,
+  aplicarQualidadeDoModelo,
+  aplicarQualidadeDoNumero,
+  pausarPorAvisoDaConta,
+  pausarPorEstadoDoModelo,
+} from "./avisos-de-qualidade";
 import type { AccountUpdateEvent } from "./coexistence-webhook";
 import {
   ingestContactSync,
@@ -195,6 +202,23 @@ export async function processarEventosMeta(input: {
     // este, para o endereço por canal reaproveitar se um dia receber um.
     if (e.kind === "account_update") {
       desfechos.push(`account_update:${e.event}:${await tratarAccountUpdate(admin, session, e)}`);
+      // Violação, restrição ou banimento: nenhuma campanha da conta segue disparando.
+      const pausadas = await pausarPorAvisoDaConta(admin, session, e);
+      if (pausadas > 0) desfechos.push(`campanhas_pausadas:${pausadas}`);
+      continue;
+    }
+
+    // ── Qualidade e alertas: gravam o estado e param as campanhas que dependem dele.
+    if (e.kind === "template_quality") {
+      desfechos.push(await aplicarQualidadeDoModelo(admin, session, e));
+      continue;
+    }
+    if (e.kind === "phone_quality") {
+      desfechos.push(await aplicarQualidadeDoNumero(admin, session, e));
+      continue;
+    }
+    if (e.kind === "account_alert") {
+      desfechos.push(await aplicarAlertaDaConta(admin, session, e));
       continue;
     }
 
@@ -212,6 +236,9 @@ export async function processarEventosMeta(input: {
         .eq("waba_id", e.wabaId)
         .eq("name", e.templateName)
         .eq("language", e.templateLanguage);
+      // Modelo pausado/desativado/reprovado: as campanhas dele param agora, não no próximo minuto.
+      const pausadas = await pausarPorEstadoDoModelo(admin, session, e);
+      if (pausadas > 0) desfechos.push(`campanhas_pausadas:${pausadas}`);
     } else if (e.kind === "template_category") {
       await admin
         .from("meta_templates")
@@ -254,15 +281,41 @@ export async function processarEventosMeta(input: {
           failure_reason: detalheErro,
         };
       }
+      if (e.status === "failed") {
+        await admin
+          .from("messages")
+          .update({ status: "failed", updated_at: now, ...(metadataMesclado ? { metadata: metadataMesclado } : {}) })
+          .eq("organization_id", session.organizationId)
+          .eq("external_id", e.externalId);
+        continue;
+      }
+
+      // Entregue e lida eram achatadas em "sent": nenhuma tela sabia quem RECEBEU, e o painel
+      // de campanha não tinha o que contar. A Meta pode entregar os status fora de ordem (o
+      // "read" antes do "delivered"), então o status só SOBE: cada um atualiza apenas linhas
+      // que ainda estão num estado anterior.
+      const quando = (e.timestamp ?? new Date(now)).toISOString();
+      const transicao =
+        e.status === "read"
+          ? { valores: { status: "read", read_at: quando }, de: ["queued", "sending", "sent", "delivered"] }
+          : e.status === "delivered"
+            ? { valores: { status: "delivered", delivered_at: quando }, de: ["queued", "sending", "sent"] }
+            : { valores: { status: "sent" }, de: ["queued", "sending"] };
       await admin
         .from("messages")
-        .update({
-          status: e.status === "failed" ? "failed" : "sent",
-          updated_at: now,
-          ...(metadataMesclado ? { metadata: metadataMesclado } : {}),
-        })
+        .update({ ...transicao.valores, updated_at: now })
         .eq("organization_id", session.organizationId)
-        .eq("external_id", e.externalId);
+        .eq("external_id", e.externalId)
+        .in("status", transicao.de);
+      // A lida que chegou antes da entregue deixaria `delivered_at` vazio para sempre.
+      if (e.status === "read") {
+        await admin
+          .from("messages")
+          .update({ delivered_at: quando })
+          .eq("organization_id", session.organizationId)
+          .eq("external_id", e.externalId)
+          .is("delivered_at", null);
+      }
     }
   }
 

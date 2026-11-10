@@ -123,7 +123,17 @@ describe("canal oficial direto", () => {
 
   it("número responde → está de pé", async () => {
     globalThis.fetch = respondeCom({ display_phone_number: "+595..." });
-    expect(await saude()).toEqual({ reachable: true, status: "WORKING", detail: null });
+    expect(await saude()).toEqual({
+      reachable: true,
+      status: "WORKING",
+      detail: null,
+      qualidade: { nota: null, limite: null },
+    });
+  });
+
+  it("⭐ a nota e o limite do número vêm na mesma resposta e não são mais descartados", async () => {
+    globalThis.fetch = respondeCom({ display_phone_number: "+595...", quality_rating: "YELLOW", messaging_limit_tier: "TIER_1K" });
+    expect(await saude()).toMatchObject({ status: "WORKING", qualidade: { nota: "YELLOW", limite: "TIER_1K" } });
   });
 
   it("token recusado → FAILED", async () => {

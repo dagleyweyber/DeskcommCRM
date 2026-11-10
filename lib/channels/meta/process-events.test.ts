@@ -8,6 +8,15 @@ const registrar = vi.fn();
 vi.mock("../health", () => ({ sincronizarSaudeDaConexao: (...a: unknown[]) => sincronizar(...a) }));
 vi.mock("../zernio/avisos", () => ({ registrarAviso: (...a: unknown[]) => registrar(...a) }));
 vi.mock("./ingest", () => ({ ingestMetaInbound: vi.fn() }));
+// A parada das campanhas tem teste próprio (`avisos-de-qualidade.test.ts`); aqui só o roteamento.
+const pausarPorConta = vi.fn(async (..._a: unknown[]) => 0);
+vi.mock("./avisos-de-qualidade", () => ({
+  aplicarAlertaDaConta: vi.fn(async () => "account_alert"),
+  aplicarQualidadeDoModelo: vi.fn(async () => "template_quality"),
+  aplicarQualidadeDoNumero: vi.fn(async () => "phone_quality"),
+  pausarPorAvisoDaConta: (...a: unknown[]) => pausarPorConta(...a),
+  pausarPorEstadoDoModelo: vi.fn(async () => 0),
+}));
 vi.mock("./coexistence-ingest", () => ({
   ingestContactSync: vi.fn(),
   ingestEcho: vi.fn(),
@@ -56,9 +65,15 @@ function adminFalso() {
         return q;
       },
       update: (arg: unknown) => {
-        updates.push({ tabela, arg });
+        const registro: { tabela: string; arg: unknown; filtros?: unknown[][] } = { tabela, arg };
+        updates.push(registro);
         const q: Record<string, unknown> = {};
-        q.eq = () => q;
+        for (const m of ["eq", "in", "is"]) {
+          q[m] = (...a: unknown[]) => {
+            (registro.filtros ??= []).push([m, ...a]);
+            return q;
+          };
+        }
         return Object.assign(Promise.resolve({ error: null }), q);
       },
     }),
@@ -188,7 +203,7 @@ describe("processarEventosMeta — categoria do template no espelho", () => {
       requestId: "r",
     });
     expect(updates).toEqual([
-      { tabela: "meta_templates", arg: expect.objectContaining({ category: "MARKETING" }) },
+      expect.objectContaining({ tabela: "meta_templates", arg: expect.objectContaining({ category: "MARKETING" }) }),
     ]);
     expect(desfechos).toEqual(["template_category:UTILITY->MARKETING"]);
   });
@@ -202,5 +217,47 @@ describe("processarEventosMeta — categoria do template no espelho", () => {
       requestId: "r",
     });
     expect(updates).toEqual([]);
+  });
+});
+
+describe("processarEventosMeta — entregue e lida (status só sobe)", () => {
+  const status = (s: string) => ({
+    kind: "message_status" as const,
+    wabaId: "W1",
+    externalId: "wamid.A",
+    status: s,
+    recipient: null,
+    errorCode: null,
+    errorTitle: null,
+    errorMessage: null,
+    errorDetails: null,
+    timestamp: new Date("2026-11-10T15:00:00Z"),
+  });
+
+  it("⭐ entregue grava `delivered` + `delivered_at`, só sobre quem ainda não passou disso", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({ admin, session, eventos: [status("delivered")], requestId: "r" });
+    expect(updates[0]).toMatchObject({
+      tabela: "messages",
+      arg: { status: "delivered", delivered_at: "2026-11-10T15:00:00.000Z" },
+    });
+    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual(["in", "status", ["queued", "sending", "sent"]]);
+  });
+
+  it("⭐ lida grava `read` (também sobre entregue) e completa `delivered_at` se a entregue nunca chegou", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({ admin, session, eventos: [status("read")], requestId: "r" });
+    expect(updates[0]).toMatchObject({ tabela: "messages", arg: { status: "read", read_at: "2026-11-10T15:00:00.000Z" } });
+    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual([
+      "in", "status", ["queued", "sending", "sent", "delivered"],
+    ]);
+    expect(updates[1]).toMatchObject({ tabela: "messages", arg: { delivered_at: "2026-11-10T15:00:00.000Z" } });
+    expect((updates[1] as { filtros: unknown[][] }).filtros).toContainEqual(["is", "delivered_at", null]);
+  });
+
+  it("`sent` atrasado não rebaixa a mensagem que já foi lida", async () => {
+    const { admin, updates } = adminFalso();
+    await processarEventosMeta({ admin, session, eventos: [status("sent")], requestId: "r" });
+    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual(["in", "status", ["queued", "sending"]]);
   });
 });

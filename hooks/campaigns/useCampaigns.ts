@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 import type { AudienceFilter } from "@/lib/campaigns/audience";
+import type { MotivoDePausa } from "@/lib/campaigns/motivos-de-pausa";
 import type { JanelaEmDias } from "@/lib/campaigns/regras-de-envio";
 import type { VelocidadeDaCampanha } from "@/lib/campaigns/velocidade";
 import type { VariableMapping } from "@/lib/messaging/variable-mapping";
@@ -22,6 +23,60 @@ export interface CampaignSummary {
   completed_at: string | null;
   /** Cliques no botão de link da campanha; `null` quando o modelo não tem esse botão. */
   cliques?: number | null;
+  channel_session_id?: string;
+  velocidade?: VelocidadeDaCampanha | null;
+  /** Por que parou (migration 0218). `null` quando não está pausada ou é anterior ao campo. */
+  pausa_motivo?: MotivoDePausa | null;
+  pausa_detalhe?: string | null;
+  pausada_em?: string | null;
+  bloco_tamanho?: number | null;
+  bloco_espera_minutos?: number | null;
+  bloco_enviados?: number | null;
+  proximo_bloco_em?: string | null;
+}
+
+/** O painel de UMA campanha (`GET /api/v1/campaigns/[id]/resultado`). */
+export interface ResultadoDaCampanha {
+  total: number;
+  pendentes: number;
+  aceitas: number;
+  entregues: number;
+  lidas: number;
+  respostas: number;
+  saidas: number;
+  falhas: number;
+  falhas_por_codigo: Array<{ codigo: string; quantidade: number; explicacao: string }>;
+  cliques: number | null;
+}
+
+export interface NumeroDaApi {
+  id: string;
+  nome: string;
+  telefone: string | null;
+  conectado: boolean;
+  qualidade: string | null;
+  limite: string | null;
+  ultimo_evento: string | null;
+  atualizado_em: string | null;
+  campanhas_andando: number;
+}
+
+/** Atualiza junto com a lista enquanto a campanha anda; parada, não muda mais sozinha. */
+export function useResultadoDaCampanha(id: string, aberto: boolean, andando: boolean) {
+  return useQuery({
+    queryKey: [...QUERY_KEY, id, "resultado"],
+    queryFn: async () => apiClient.get<{ data: ResultadoDaCampanha }>(`/api/v1/campaigns/${id}/resultado`),
+    enabled: aberto,
+    refetchInterval: aberto && andando ? 30_000 : false,
+  });
+}
+
+export function useNumerosDaApi() {
+  return useQuery({
+    queryKey: [...QUERY_KEY, "numeros"],
+    queryFn: async () => apiClient.get<{ data: { numeros: NumeroDaApi[] } }>("/api/v1/campaigns/numeros"),
+    refetchInterval: 60_000,
+  });
 }
 
 const QUERY_KEY = ["campaigns"];
@@ -49,6 +104,8 @@ export interface CreateCampaignInput {
   audience: AudienceFilter;
   regras?: RegrasDeEnvioInput;
   velocidade?: VelocidadeDaCampanha;
+  /** Espera programada entre blocos; `null` = manda direto até o fim. */
+  blocos?: { tamanho: number; espera_minutos: number } | null;
 }
 
 /** As regras como a API as recebe (snake_case). `null` = regra desligada. */

@@ -127,7 +127,7 @@ export const metaCloudAdapter: ChannelAdapter = {
     const version = process.env.META_GRAPH_VERSION ?? "v22.0";
     try {
       const res = await fetch(
-        `https://graph.facebook.com/${version}/${input.sessionRef}?fields=display_phone_number,quality_rating`,
+        `https://graph.facebook.com/${version}/${input.sessionRef}?fields=display_phone_number,quality_rating,messaging_limit_tier`,
         {
           headers: { Authorization: `Bearer ${creds.token}` },
           // Teto de espera: um endpoint que pendura a conexão penduraria o cron
@@ -137,6 +137,8 @@ export const metaCloudAdapter: ChannelAdapter = {
       );
       const body = (await res.json().catch(() => ({}))) as {
         error?: { message?: string; code?: number };
+        quality_rating?: string;
+        messaging_limit_tier?: string;
       };
 
       if (res.status === 401 || res.status === 403) {
@@ -148,7 +150,14 @@ export const metaCloudAdapter: ChannelAdapter = {
         // justamente a falha calada sem aviso.
         return { reachable: true, status: "FAILED", detail: (body.error?.message ?? "").slice(0, 200) || null };
       }
-      return { reachable: true, status: "WORKING", detail: null };
+      // A nota e o limite vinham nesta mesma resposta e eram descartados: o painel de números e
+      // o freio de "número com qualidade baixa" das campanhas leem daqui.
+      return {
+        reachable: true,
+        status: "WORKING",
+        detail: null,
+        qualidade: { nota: body.quality_rating ?? null, limite: body.messaging_limit_tier ?? null },
+      };
     } catch (err) {
       const detail = err instanceof Error ? err.message : "erro_desconhecido";
       return { reachable: false, status: null, detail: detail.slice(0, 200) };

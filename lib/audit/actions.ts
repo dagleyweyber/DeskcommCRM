@@ -275,6 +275,8 @@ export type AuditAction =
   // o despachante em si é service role e não passa por rota autenticada.
   | "campaign.created"
   | "campaign.started"
+  /** Retomada depois de pausa (manual ou automática); metadata guarda o motivo e o que foi dispensado. */
+  | "campaign.resumed"
   | "campaign.paused"
   | "campaign.cancelled"
   // Automações recorrentes por gatilho de dado (1ª: lembrete de

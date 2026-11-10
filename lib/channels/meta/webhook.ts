@@ -165,11 +165,55 @@ export interface MessageStatusEvent {
   errorMessage: string | null;
   /** `error.error_data.details` — o campo que costuma ter o motivo ESPECÍFICO. */
   errorDetails: string | null;
+  /** Quando a Meta registrou este status (`timestamp`, epoch em segundos); `null` sem o campo. */
+  timestamp: Date | null;
+}
+
+/**
+ * A nota de QUALIDADE de um modelo mudou (`message_template_quality_update`): GREEN, YELLOW,
+ * RED ou UNKNOWN. É o aviso antecipado de que a Meta vai pausar o modelo — e o gatilho da
+ * parada automática da campanha que o usa.
+ */
+export interface TemplateQualityEvent {
+  kind: "template_quality";
+  wabaId: string;
+  templateName: string;
+  templateLanguage: string;
+  newScore: string;
+  previousScore: string | null;
+}
+
+/**
+ * A qualidade ou o limite de um NÚMERO mudou (`phone_number_quality_update`). `event` é o que
+ * aconteceu (FLAGGED, UNFLAGGED, DOWNGRADE, UPGRADE…); `currentLimit`, o limite de contatos
+ * por 24 h (TIER_250, TIER_1K…). O número vem como telefone, não como id.
+ */
+export interface PhoneQualityEvent {
+  kind: "phone_quality";
+  wabaId: string;
+  displayPhoneNumber: string;
+  event: string;
+  currentLimit: string | null;
+}
+
+/** Alerta da Meta na conta (`account_alerts`): severidade, tipo e o texto que a Meta escreveu. */
+export interface AccountAlertEvent {
+  kind: "account_alert";
+  wabaId: string;
+  entityType: string | null;
+  entityId: string | null;
+  severity: string;
+  status: string | null;
+  alertType: string | null;
+  description: string | null;
 }
 
 export type MetaWebhookEvent =
   | TemplateStatusEvent
   | TemplateCategoryEvent
+  | TemplateQualityEvent
+  | PhoneQualityEvent
+  | AccountAlertEvent
   | MessageStatusEvent
   | InboundMessageEvent
   | CoexistenceEvent;
@@ -267,6 +311,54 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
           event: str(v.event) ?? "UNKNOWN",
           reason: normalizeRejectedReason(v.reason),
           category: categoria(v.message_template_category),
+        });
+        continue;
+      }
+
+      if (change.field === "message_template_quality_update") {
+        const name = str(v.message_template_name);
+        const language = str(v.message_template_language);
+        const nova = str(v.new_quality_score);
+        if (!name || !language || !nova) continue;
+        out.push({
+          kind: "template_quality",
+          wabaId,
+          templateName: name,
+          templateLanguage: language,
+          newScore: nova.toUpperCase(),
+          previousScore: str(v.previous_quality_score)?.toUpperCase() ?? null,
+        });
+        continue;
+      }
+
+      if (change.field === "phone_number_quality_update") {
+        const telefone = str(v.display_phone_number);
+        const evento = str(v.event);
+        if (!telefone || !evento) continue;
+        out.push({
+          kind: "phone_quality",
+          wabaId,
+          displayPhoneNumber: telefone,
+          event: evento.toUpperCase(),
+          // O nome do campo mudou entre versões da Graph API; os dois significam o mesmo limite.
+          currentLimit: str(v.current_limit) ?? str(v.messaging_limit_tier),
+        });
+        continue;
+      }
+
+      if (change.field === "account_alerts") {
+        const info = (v.alert_info ?? {}) as Record<string, unknown>;
+        const severidade = str(info.alert_severity);
+        if (!severidade) continue;
+        out.push({
+          kind: "account_alert",
+          wabaId,
+          entityType: str(v.entity_type),
+          entityId: str(v.entity_id),
+          severity: severidade.toUpperCase(),
+          status: str(info.alert_status),
+          alertType: str(info.alert_type),
+          description: str(info.alert_description),
         });
         continue;
       }
@@ -369,6 +461,7 @@ export function parseMetaWebhook(envelope: MetaWebhookEnvelope): MetaWebhookEven
             errorTitle: str(first.title),
             errorMessage: str(first.message),
             errorDetails: str(errorData?.details),
+            timestamp: str(raw.timestamp) ? new Date(Number(str(raw.timestamp)) * 1000) : null,
           });
         }
       }

@@ -221,6 +221,14 @@ const PARES: Array<{
     arquivo: "lib/campaigns/velocidade.ts",
     simbolo: "VELOCIDADES_DA_CAMPANHA",
   },
+  {
+    tabela: "whatsapp_campaigns",
+    coluna: "pausa_motivo",
+    // lib/campaigns/motivos-de-pausa.ts → MOTIVOS_DE_PAUSA (tupla `as const`; os freios e a rota de
+    // pausa gravam daqui, e a tela lê o texto de cada um). Nasce com a migration 0218.
+    arquivo: "lib/campaigns/motivos-de-pausa.ts",
+    simbolo: "MOTIVOS_DE_PAUSA",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */

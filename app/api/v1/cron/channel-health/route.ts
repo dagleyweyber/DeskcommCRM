@@ -116,6 +116,20 @@ async function handle(req: NextRequest): Promise<Response> {
           .eq("organization_id", s.organization_id);
       }
 
+      // Nota e limite do número (quando o transporte informa): o painel de números lê daqui, e o
+      // despachante de campanhas para quando a nota fica vermelha.
+      if (saude.qualidade) {
+        await admin
+          .from("channel_sessions")
+          .update({
+            meta_quality_rating: saude.qualidade.nota,
+            meta_messaging_limit: saude.qualidade.limite,
+            meta_quality_updated_at: new Date().toISOString(),
+          })
+          .eq("id", s.id)
+          .eq("organization_id", s.organization_id);
+      }
+
       const apelido = s.display_name ?? s.phone_number ?? "sem nome";
       const desfecho = await sincronizarSaudeDaConexao(
         admin,

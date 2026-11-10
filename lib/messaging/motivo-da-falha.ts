@@ -50,7 +50,16 @@ const EXPLICACAO_POR_CODIGO: Record<number, string> = {
   130429: "Limite de envios por segundo do Meta atingido. Aguarde um pouco e tente de novo.",
   132000: "O número de valores enviados não bate com o que o modelo pede ({{1}}, {{2}}…). Confira as variáveis.",
   132001: "O modelo não existe, ou não está aprovado neste idioma, neste número.",
+  132015: "A Meta pausou o modelo por baixa qualidade (muita gente bloqueando ou denunciando). Use outro modelo ou aguarde.",
+  132016: "A Meta desativou o modelo depois de pausas repetidas por baixa qualidade. Ele não pode mais ser usado.",
+  131050: "O cliente pediu à Meta para não receber mensagens de marketing desta empresa.",
 };
+
+/** A explicação em português de um código da Meta, ou `null` quando o código não é conhecido. */
+export function explicacaoDoCodigo(codigo: string | number): string | null {
+  const n = codigoNumerico(codigo);
+  return n !== null ? (EXPLICACAO_POR_CODIGO[n] ?? null) : null;
+}
 
 function codigoNumerico(valor: unknown): number | null {
   if (typeof valor === "number" && Number.isFinite(valor)) return valor;

@@ -5,6 +5,10 @@
  * diário e o ritmo da campanha (`lib/campaigns/velocidade.ts`) — TUDO reaproveitado de
  * `lib/automation/throttle.ts`, nada novo em anti-banimento.
  *
+ * Antes de cada rodada passa pelos freios (`lib/campaigns/freios.ts`): modelo pausado ou com
+ * nota baixa, número com qualidade baixa, cobrança recusada, saídas acima de 2%. E respeita a
+ * espera programada entre blocos (`lib/campaigns/blocos.ts`).
+ *
  * Nenhum código aqui fala com a Graph API: `ensureConversation` +
  * `sendMessageHandler` são o MESMO caminho que `JanelaFechadaAviso.tsx` usa
  * pro envio manual de um template só. As duas funções entram por parâmetro
@@ -14,7 +18,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureConversation } from "@/lib/automation/start-conversation";
 import { checkDailyLimit, withinSendWindow } from "@/lib/automation/throttle";
-import { pausarSeCobrancaRecusada } from "@/lib/campaigns/cobranca-recusada";
+import { blocosDe, emEspera, quantosCabem } from "@/lib/campaigns/blocos";
+import { freioAntesDaRodada, freioDoErroDeEnvio, pausarCampanha, type Freio } from "@/lib/campaigns/freios";
 import { FALHAS_SEGUIDAS_PARA_FREAR, RITMOS, ritmoDe, VELOCIDADE_PADRAO } from "@/lib/campaigns/velocidade";
 import { lerConteudo } from "@/lib/channels/template-conteudo";
 import { motivoDaFalha } from "@/lib/messaging/motivo-da-falha";
@@ -54,6 +59,12 @@ interface CampanhaRow {
   status: string;
   name?: string | null;
   velocidade?: string | null;
+  retomada_em?: string | null;
+  freios_dispensados?: string[] | null;
+  bloco_tamanho?: number | null;
+  bloco_espera_minutos?: number | null;
+  bloco_enviados?: number | null;
+  proximo_bloco_em?: string | null;
 }
 
 interface DestinatarioRow {
@@ -61,6 +72,9 @@ interface DestinatarioRow {
   contact_id: string;
   resolved_values: Record<string, string>;
 }
+
+/** O desfecho de um envio: saiu, falhou, ou a Meta recusou o MODELO (nada mais da campanha sai). */
+type Desfecho = { saiu: true } | { saiu: false; freio?: Freio };
 
 /**
  * Recontagem por LEITURA das linhas, não incremento — a mesma proteção que
@@ -106,23 +120,42 @@ async function processarCampanha(
   admin: SupabaseClient,
   campanha: CampanhaRow,
   deadline: number,
-  deps: Required<Pick<DispatchDeps, "sleep" | "ensureConversationFn" | "sendMessageFn">>,
+  deps: Required<Pick<DispatchDeps, "sleep" | "ensureConversationFn" | "sendMessageFn" | "now">>,
   resumo: DispatchSummary,
 ): Promise<void> {
-  const { data: templateRow } = await admin
-    .from("meta_templates")
-    .select("components")
-    .eq("organization_id", campanha.organization_id)
-    .eq("channel_session_id", campanha.channel_session_id)
-    .eq("name", campanha.template_name)
-    .eq("language", campanha.template_language)
-    .maybeSingle();
-  const rawBody =
-    lerConteudo((templateRow as { components?: unknown } | null)?.components ?? []).body ??
-    campanha.template_name;
+  const [{ data: templateRow }, { data: canal }] = await Promise.all([
+    admin
+      .from("meta_templates")
+      .select("components, status, quality_score")
+      .eq("organization_id", campanha.organization_id)
+      .eq("channel_session_id", campanha.channel_session_id)
+      .eq("name", campanha.template_name)
+      .eq("language", campanha.template_language)
+      .maybeSingle(),
+    admin
+      .from("channel_sessions")
+      .select("meta_quality_rating")
+      .eq("id", campanha.channel_session_id)
+      .eq("organization_id", campanha.organization_id)
+      .maybeSingle(),
+  ]);
+  const modelo = templateRow as { components?: unknown; status?: string | null; quality_score?: string | null } | null;
 
-  /** Manda para UM destinatário já marcado `sending`; devolve se saiu. */
-  async function enviarUm(alvo: DestinatarioRow): Promise<boolean> {
+  // Antes de mandar mais: há motivo para parar? (modelo, número, cobrança, saídas)
+  const freio = await freioAntesDaRodada(admin, campanha, {
+    modelo: modelo ? { status: modelo.status ?? null, quality_score: modelo.quality_score ?? null } : null,
+    qualidadeDoNumero: (canal as { meta_quality_rating?: string | null } | null)?.meta_quality_rating ?? null,
+  });
+  if (freio) {
+    await pausarCampanha(admin, campanha, freio);
+    return;
+  }
+
+  const rawBody = lerConteudo(modelo?.components ?? []).body ?? campanha.template_name;
+
+  /** Manda para UM destinatário já marcado `sending`. */
+  async function enviarUm(alvo: DestinatarioRow): Promise<Desfecho> {
+    let erro: string;
     try {
       const conversationId = await deps.ensureConversationFn(
         admin,
@@ -153,43 +186,45 @@ async function processarCampanha(
           .update({ status: "sent", external_id: message.external_id, sent_at: new Date().toISOString() })
           .eq("id", alvo.id);
         resumo.sent += 1;
-        return true;
+        return { saiu: true };
       }
       // `queued`/`failed` — o canal pode ter caído entre a criação da
       // campanha e este tick. Tratado como falha desta tentativa; o
       // operador vê o motivo na lista de destinatários.
-      await admin
-        .from("whatsapp_campaign_recipients")
-        .update({
-          status: "failed",
-          error_message: motivoDaFalha(message),
-        })
-        .eq("id", alvo.id);
-      resumo.failed += 1;
-      return false;
+      erro = motivoDaFalha(message);
     } catch (err) {
-      await admin
-        .from("whatsapp_campaign_recipients")
-        .update({
-          status: "failed",
-          error_message: err instanceof Error ? err.message.slice(0, 500) : "erro desconhecido",
-        })
-        .eq("id", alvo.id);
-      resumo.failed += 1;
-      return false;
+      erro = err instanceof Error ? err.message.slice(0, 500) : "erro desconhecido";
     }
+
+    // Modelo recusado pela Meta não é culpa do contato: ele volta para a fila e sai quando a
+    // campanha for retomada com o modelo aprovado. Marcá-lo `failed` queimava o contato
+    // (Boa Viagem, 2026-11-09: 353 de uma vez).
+    const freioDoEnvio = freioDoErroDeEnvio(erro, campanha.template_name);
+    if (freioDoEnvio) {
+      await admin.from("whatsapp_campaign_recipients").update({ status: "pending" }).eq("id", alvo.id);
+      return { saiu: false, freio: freioDoEnvio };
+    }
+    await admin
+      .from("whatsapp_campaign_recipients")
+      .update({ status: "failed", error_message: erro })
+      .eq("id", alvo.id);
+    resumo.failed += 1;
+    return { saiu: false };
   }
 
-  // Antes de mandar mais: a Meta já recusou a cobrança das últimas? Então não adianta continuar.
-  if (await pausarSeCobrancaRecusada(admin, campanha)) return;
-
   const ritmoEscolhido = ritmoDe(campanha.velocidade);
+  const blocos = blocosDe(campanha);
+  let enviadosNoBloco = campanha.bloco_enviados ?? 0;
   let falhasSeguidas = 0;
+  let freioNoEnvio: Freio | null = null;
+  let blocoFechou = false;
 
   while (Date.now() < deadline) {
     // Freio: falha em sequência (número recusado, token caído, Meta instável) desacelera para o
     // ritmo cuidadoso até a próxima rodada, em vez de martelar a Meta na velocidade escolhida.
     const ritmo = falhasSeguidas >= FALHAS_SEGUIDAS_PARA_FREAR ? RITMOS[VELOCIDADE_PADRAO] : ritmoEscolhido;
+    const tamanho = quantosCabem(blocos, enviadosNoBloco, ritmo.lote);
+    if (tamanho === 0) break;
 
     const { data: pendentes } = await admin
       .from("whatsapp_campaign_recipients")
@@ -197,7 +232,7 @@ async function processarCampanha(
       .eq("campaign_id", campanha.id)
       .eq("status", "pending")
       .order("created_at", { ascending: true })
-      .limit(ritmo.lote);
+      .limit(tamanho);
     const lote = (pendentes ?? []) as DestinatarioRow[];
     if (lote.length === 0) break;
 
@@ -207,11 +242,38 @@ async function processarCampanha(
       ),
     );
 
-    const resultados = await Promise.all(lote.map(enviarUm));
-    for (const saiu of resultados) falhasSeguidas = saiu ? 0 : falhasSeguidas + 1;
+    const desfechos = await Promise.all(lote.map(enviarUm));
+    for (const d of desfechos) {
+      falhasSeguidas = d.saiu ? 0 : falhasSeguidas + 1;
+      if (!d.saiu && d.freio) freioNoEnvio ??= d.freio;
+    }
+    if (freioNoEnvio) break;
+
+    enviadosNoBloco += desfechos.length;
+    if (blocos && enviadosNoBloco >= blocos.tamanho) {
+      blocoFechou = true;
+      break;
+    }
 
     if (Date.now() >= deadline) break;
     await deps.sleep(ritmo.pausaMs);
+  }
+
+  if (freioNoEnvio) await pausarCampanha(admin, campanha, freioNoEnvio);
+
+  if (blocos) {
+    // O bloco fechado zera a conta e marca a volta; senão, guarda quanto do bloco já foi.
+    await admin
+      .from("whatsapp_campaigns")
+      .update(
+        blocoFechou
+          ? {
+              bloco_enviados: 0,
+              proximo_bloco_em: new Date(deps.now().getTime() + blocos.esperaMinutos * 60_000).toISOString(),
+            }
+          : { bloco_enviados: enviadosNoBloco },
+      )
+      .eq("id", campanha.id);
   }
 
   await atualizarContadores(admin, campanha.id);
@@ -224,6 +286,7 @@ export async function dispatchCampaignsTick(
   const now = deps.now ?? (() => new Date());
   const deadline = Date.now() + (deps.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
   const resolvedDeps = {
+    now,
     sleep: deps.sleep ?? sleep,
     ensureConversationFn: deps.ensureConversationFn ?? ensureConversation,
     sendMessageFn: deps.sendMessageFn ?? sendMessageHandler,
@@ -233,7 +296,10 @@ export async function dispatchCampaignsTick(
 
   const { data: campanhas } = await admin
     .from("whatsapp_campaigns")
-    .select("id, organization_id, channel_session_id, name, template_name, template_language, status, velocidade")
+    .select(
+      "id, organization_id, channel_session_id, name, template_name, template_language, status, velocidade, " +
+        "retomada_em, freios_dispensados, bloco_tamanho, bloco_espera_minutos, bloco_enviados, proximo_bloco_em",
+    )
     .in("status", ["queued", "running"])
     .order("created_at", { ascending: true });
 
@@ -242,7 +308,7 @@ export async function dispatchCampaignsTick(
   // têm nada a ver um com o outro e rodam ao mesmo tempo — senão a campanha de uma loja
   // esperava a das outras terminarem.
   const porCanal = new Map<string, CampanhaRow[]>();
-  for (const campanha of (campanhas ?? []) as CampanhaRow[]) {
+  for (const campanha of (campanhas ?? []) as unknown as CampanhaRow[]) {
     const fila = porCanal.get(campanha.channel_session_id) ?? [];
     fila.push(campanha);
     porCanal.set(campanha.channel_session_id, fila);
@@ -258,6 +324,8 @@ export async function dispatchCampaignsTick(
         }
 
         if (!withinSendWindow(now())) continue;
+        // Esperando o próximo bloco: a vez passa para a próxima campanha do mesmo número.
+        if (emEspera(campanha.proximo_bloco_em, now())) continue;
         const daily = await checkDailyLimit(admin, campanha.organization_id, campanha.channel_session_id);
         if (!daily.allowed) continue;
 
