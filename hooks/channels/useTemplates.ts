@@ -49,10 +49,22 @@ export interface SyncCounts {
   disabled: number;
 }
 
-export function useTemplates() {
+/**
+ * Os modelos do espelho. Com `channelSessionId`, só os DAQUELE número (organização com mais de
+ * um número oficial); sem ele, o comportamento de sempre (primeiro número). `null` mantém a
+ * consulta parada: a tela de campanha só pede depois de o operador escolher o número.
+ */
+export function useTemplates(channelSessionId?: string | null) {
   return useQuery({
-    queryKey: ["channel-templates"],
-    queryFn: async () => apiClient.get<{ data: TemplatesPayload }>("/api/v1/channels/templates"),
+    // A chave começa por "channel-templates": quem invalida o prefixo (sync, criar) atualiza todas.
+    queryKey: ["channel-templates", channelSessionId ?? "padrao"],
+    queryFn: async () =>
+      apiClient.get<{ data: TemplatesPayload }>(
+        channelSessionId
+          ? `/api/v1/channels/templates?channel_session_id=${encodeURIComponent(channelSessionId)}`
+          : "/api/v1/channels/templates",
+      ),
+    enabled: channelSessionId !== null,
     staleTime: 30_000,
   });
 }

@@ -96,21 +96,45 @@ async function orgOrFail(requestId: string): Promise<OrgGate> {
   return { autorizado: true, orgId: activeOrg.orgId };
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
   const r = await orgOrFail(requestId);
   if (!r.autorizado) return r.resposta;
 
-  const sessao = await metaSessionForOrg(r.orgId);
   const admin = createAdminClient();
-  const { data, error } = await admin
+
+  // `?channel_session_id=`: a lista é a de UM número. Com mais de um número oficial na
+  // organização, sem isto os modelos de todos vinham misturados (e repetidos, já que o mesmo
+  // nome existe em cada número) e a sessão devolvida era sempre a mais antiga. Sem o parâmetro
+  // o comportamento é o de sempre (primeiro número) — as telas de Conexões dependem dele.
+  const pedido = req.nextUrl.searchParams.get("channel_session_id");
+  let sessao: { id: string; wabaId: string | null } | null;
+  if (pedido !== null) {
+    if (!z.string().uuid().safeParse(pedido).success) {
+      return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
+    }
+    const { data: escolhida } = await admin
+      .from("channel_sessions")
+      .select("id, meta_waba_id")
+      .eq("id", pedido)
+      .eq("organization_id", r.orgId)
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .is("archived_at", null)
+      .maybeSingle();
+    if (!escolhida) return fail("not_found", "Número não encontrado nesta organização.", 404, { requestId });
+    sessao = { id: escolhida.id as string, wabaId: (escolhida.meta_waba_id as string | null) ?? null };
+  } else {
+    sessao = await metaSessionForOrg(r.orgId);
+  }
+
+  let consulta = admin
     .from("meta_templates")
     .select(
       "name, language, status, category, rejected_reason, quality_score, parameter_format, contract_hash, components, synced_at",
     )
-    .eq("organization_id", r.orgId)
-    .order("status")
-    .order("name");
+    .eq("organization_id", r.orgId);
+  if (pedido !== null) consulta = consulta.eq("channel_session_id", pedido);
+  const { data, error } = await consulta.order("status").order("name");
 
   if (error) return fail("internal_error", error.message, 500, { requestId });
 

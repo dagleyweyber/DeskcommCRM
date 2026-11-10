@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
+import { SeletorDeNumero, useNumeroEscolhido } from "./SeletorDeNumero";
 import {
   useCreateAutomation,
   useUpdateAutomation,
@@ -83,7 +84,10 @@ interface FormProps {
 }
 
 export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps) {
-  const templates = useTemplates();
+  // Criar: o número é escolhido ANTES do modelo (cada número tem os seus). Editar: o número da
+  // automação não muda — a lista continua a de sempre.
+  const [numeroId, setNumeroId] = useState<string | null>(null);
+  const templates = useTemplates(automacao ? undefined : numeroId);
   const criar = useCreateAutomation();
   const atualizar = useUpdateAutomation(automacao?.id ?? "");
   const servicos = useEventTypes();
@@ -100,6 +104,13 @@ export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps)
   const [momento, setMomento] = useState(momentoInicial);
   const [botaoConfirma, setBotaoConfirma] = useState(automacao?.confirm_button_text ?? "");
   const [botaoDesmarca, setBotaoDesmarca] = useState(automacao?.decline_button_text ?? "");
+
+  const trocarNumero = useCallback((id: string | null) => {
+    setNumeroId(id);
+    setTemplateEscolhido("");
+    setMapping({});
+  }, []);
+  const numero = useNumeroEscolhido(editando ? null : numeroId, trocarNumero);
 
   const aprovados = useMemo(
     () => (templates.data?.data.templates ?? []).filter((t) => t.status === "APPROVED"),
@@ -167,8 +178,8 @@ export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps)
   }
 
   function criarAutomacao() {
-    const channelSessionId = templates.data?.data.channelSessionId;
-    if (!nome.trim() || !atual || !channelSessionId) return;
+    const channelSessionId = numeroId;
+    if (!nome.trim() || !atual || !channelSessionId || numero.bloqueado) return;
     criar.mutate(
       {
         name: nome.trim(),
@@ -279,6 +290,8 @@ export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps)
         </p>
       </div>
 
+      {!editando && <SeletorDeNumero estado={numero} valor={numeroId} onChange={trocarNumero} />}
+
       <TemplateEVariaveisPicker
         aprovados={aprovados}
         templateEscolhido={templateEscolhido}
@@ -358,7 +371,7 @@ export function AutomacaoForm({ automacao, onConcluido, onCancelar }: FormProps)
             (Boolean(botaoConfirma) && botaoConfirma === botaoDesmarca) ||
             criar.isPending ||
             atualizar.isPending ||
-            (!editando && !templates.data?.data.channelSessionId)
+            (!editando && (!numeroId || numero.bloqueado))
           }
         >
           {editando

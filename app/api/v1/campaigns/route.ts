@@ -23,6 +23,7 @@ import {
   type Definicao,
 } from "@/lib/channels/valores-sem-fonte";
 import { resolveValuesForRecipient, type VariableMapping } from "@/lib/messaging/variable-mapping";
+import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -116,11 +117,16 @@ export async function POST(req: NextRequest): Promise<Response> {
   // nasceria pra nunca conseguir mandar nada.
   const { data: sessao } = await admin
     .from("channel_sessions")
-    .select("id, status")
+    .select("id, status, provider")
     .eq("id", input.channel_session_id)
     .eq("organization_id", authz.org.orgId)
     .maybeSingle();
   if (!sessao) return fail("invalid_request", "Canal não encontrado nesta organização.", 422, { requestId });
+  // Campanha em massa é da API oficial: um canal de outro tipo (QR code) passava na checagem
+  // acima e a campanha nascia para nunca conseguir mandar o modelo.
+  if (sessao.provider !== CHANNEL_PROVIDER_META) {
+    return fail("invalid_request", "Campanhas saem só por um número da API oficial.", 422, { requestId });
+  }
   if (sessao.status !== "WORKING") {
     return fail("invalid_request", "O canal escolhido não está conectado.", 422, { requestId });
   }

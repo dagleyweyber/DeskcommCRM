@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useCampaigns,
   useCancelCampaign,
+  useNumerosDaApi,
   usePauseCampaign,
   useStartCampaign,
   type CampaignSummary,
@@ -186,6 +187,10 @@ function AcoesDaCampanha({ campanha }: { campanha: CampaignSummary }) {
 
 function CartaoDaCampanha({ c }: { c: CampaignSummary }) {
   const [vendoResultado, setVendoResultado] = useState(false);
+  // Com mais de um número oficial, o cartão diz por qual a campanha sai.
+  const { data: numeros } = useNumerosDaApi();
+  const todos = numeros?.data.numeros ?? [];
+  const numero = todos.length > 1 ? todos.find((n) => n.id === c.channel_session_id) : undefined;
   const andando = c.status === "running" || c.status === "queued";
   return (
     <Card className="p-4" data-testid="campanha-cartao">
@@ -195,6 +200,11 @@ function CartaoDaCampanha({ c }: { c: CampaignSummary }) {
         <span className="text-xs text-muted-foreground">
           {c.template_name} ({c.template_language})
         </span>
+        {numero && (
+          <Badge variant="outline" data-testid="campanha-numero">
+            {numero.nome}
+          </Badge>
+        )}
         <div className="ml-auto">
           <AcoesDaCampanha campanha={c} />
         </div>

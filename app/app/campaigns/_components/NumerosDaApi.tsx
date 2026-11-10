@@ -9,6 +9,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useNumerosDaApi, type NumeroDaApi } from "@/hooks/campaigns/useCampaigns";
+import { textoDoLimite } from "@/lib/campaigns/numero-de-envio";
 
 const QUALIDADE: Record<string, { rotulo: string; classe: string; texto: string }> = {
   GREEN: {
@@ -28,15 +29,8 @@ const QUALIDADE: Record<string, { rotulo: string; classe: string; texto: string 
   },
 };
 
-/** TIER_1K → "até 1.000 contatos por dia". */
-export function textoDoLimite(limite: string | null): string | null {
-  if (!limite) return null;
-  if (limite.toUpperCase() === "TIER_UNLIMITED") return "sem limite diário de contatos";
-  const m = /^TIER_(\d+)(K)?$/i.exec(limite);
-  if (!m) return limite;
-  const n = Number(m[1]) * (m[2] ? 1000 : 1);
-  return `até ${n.toLocaleString("pt-BR")} contatos diferentes a cada 24 h`;
-}
+// O texto do limite mora em `lib/campaigns/numero-de-envio.ts`: o seletor de número do formulário usa o mesmo.
+export { textoDoLimite };
 
 function LinhaDoNumero({ n }: { n: NumeroDaApi }) {
   const q = n.qualidade ? QUALIDADE[n.qualidade.toUpperCase()] : undefined;

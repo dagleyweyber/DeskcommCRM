@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import {
   type Definicao,
 } from "@/lib/channels/valores-sem-fonte";
 import { TemplateEVariaveisPicker } from "@/components/campaigns/TemplateEVariaveisPicker";
+import { SeletorDeNumero, useNumeroEscolhido } from "./SeletorDeNumero";
 import {
   useCreateCampaign,
   usePreviewAudience,
@@ -78,7 +79,9 @@ export function fraseDaPrevisao(total: number, tamanho: number, esperaMinutos: n
 }
 
 export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
-  const templates = useTemplates();
+  // O número vem ANTES do modelo: cada número tem os seus modelos aprovados.
+  const [numeroId, setNumeroId] = useState<string | null>(null);
+  const templates = useTemplates(numeroId);
   const pipelines = usePipelines();
   const tags = useContactTags();
   const preview = usePreviewAudience();
@@ -87,11 +90,19 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
   const [nome, setNome] = useState("");
   const [templateEscolhido, setTemplateEscolhido] = useState("");
   const [mapping, setMapping] = useState<VariableMapping>({});
+  const [contagem, setContagem] = useState<ContagemDoPublico | null>(null);
+  // Trocar de número troca a lista de modelos: o modelo e as variáveis escolhidos deixam de valer.
+  const trocarNumero = useCallback((id: string | null) => {
+    setNumeroId(id);
+    setTemplateEscolhido("");
+    setMapping({});
+    setContagem(null);
+  }, []);
+  const numero = useNumeroEscolhido(numeroId, trocarNumero);
   const [audienceKind, setAudienceKind] = useState<AudienceKind>("tag");
   const [tag, setTag] = useState("");
   const [pipelineId, setPipelineId] = useState("");
   const [stageId, setStageId] = useState("");
-  const [contagem, setContagem] = useState<ContagemDoPublico | null>(null);
   const [janela, setJanela] = useState<JanelaEmDias | null>(null);
   const [limiteTexto, setLimiteTexto] = useState("");
   const [velocidade, setVelocidade] = useState<VelocidadeDaCampanha>(VELOCIDADE_PADRAO);
@@ -148,8 +159,8 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
 
   function criarCampanha() {
     const filtro = audience();
-    const channelSessionId = templates.data?.data.channelSessionId;
-    if (!nome.trim() || !atual || !filtro || !channelSessionId || blocos === "invalida") return;
+    const channelSessionId = numeroId;
+    if (!nome.trim() || !atual || !filtro || !channelSessionId || numero.bloqueado || blocos === "invalida") return;
     criar.mutate(
       {
         name: nome.trim(),
@@ -185,6 +196,8 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
         />
       </div>
+
+      <SeletorDeNumero estado={numero} valor={numeroId} onChange={trocarNumero} />
 
       <TemplateEVariaveisPicker
         aprovados={aprovados}
@@ -444,7 +457,8 @@ export function NovaCampanhaForm({ onCriada }: { onCriada: () => void }) {
             semFonte.length > 0 ||
             blocos === "invalida" ||
             criar.isPending ||
-            !templates.data?.data.channelSessionId
+            !numeroId ||
+            numero.bloqueado
           }
         >
           {criar.isPending ? "Criando…" : "Criar campanha"}
