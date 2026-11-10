@@ -239,8 +239,10 @@ describe("canais diferentes disparam ao mesmo tempo", () => {
     });
 
     await dispatchCampaignsTick(admin, {
-      // A pausa precisa ceder a vez de verdade; sem isso a ordem não prova nada.
-      sleep: () => new Promise((r) => setTimeout(r, 5)),
+      // A pausa precisa ceder a vez de verdade; sem isso a ordem não prova nada. Longa o
+      // bastante para o outro canal passar pelos freios (várias consultas num pool de 3
+      // conexões) antes do segundo envio deste — 5 ms media a fila do pool, não o despachante.
+      sleep: () => new Promise((r) => setTimeout(r, 300)),
       sendMessageFn: sendFn,
       now: () => new Date("2026-01-01T14:00:00Z"),
       timeBudgetMs: 5000,

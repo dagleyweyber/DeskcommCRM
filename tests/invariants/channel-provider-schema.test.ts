@@ -77,11 +77,17 @@ describe("0087 · o canal da sessão chega ao clone", () => {
                          and column_name like 'meta\\_%' order by 1`).split("\n");
     // 0195 somou o modo de conexão (byo | embedded_coexistence) e o fim do
     // onboarding — também dado da sessão Meta, não de outro provider.
+    // 0218 somou a qualidade e o limite do número segundo a Meta (painel de números e
+    // freio de campanha) — nullable, gravados pela checagem de saúde e pelo webhook.
     expect(cols).toEqual([
       "meta_app_id",
       "meta_connection_mode",
+      "meta_messaging_limit",
       "meta_onboarded_at",
       "meta_phone_number_id",
+      "meta_quality_event",
+      "meta_quality_rating",
+      "meta_quality_updated_at",
       "meta_token_encrypted",
       "meta_waba_id",
     ]);

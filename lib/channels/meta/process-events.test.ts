@@ -47,7 +47,7 @@ const ev = (p: Partial<AccountUpdateEvent>): AccountUpdateEvent => ({
 });
 
 function adminFalso() {
-  const updates: Array<{ tabela: string; arg: unknown }> = [];
+  const updates: Array<{ tabela: string; arg: unknown; filtros?: unknown[][] }> = [];
   const admin = {
     from: (tabela: string) => ({
       select: () => {
@@ -241,23 +241,23 @@ describe("processarEventosMeta — entregue e lida (status só sobe)", () => {
       tabela: "messages",
       arg: { status: "delivered", delivered_at: "2026-11-10T15:00:00.000Z" },
     });
-    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual(["in", "status", ["queued", "sending", "sent"]]);
+    expect(updates[0]!.filtros).toContainEqual(["in", "status", ["queued", "sending", "sent"]]);
   });
 
   it("⭐ lida grava `read` (também sobre entregue) e completa `delivered_at` se a entregue nunca chegou", async () => {
     const { admin, updates } = adminFalso();
     await processarEventosMeta({ admin, session, eventos: [status("read")], requestId: "r" });
     expect(updates[0]).toMatchObject({ tabela: "messages", arg: { status: "read", read_at: "2026-11-10T15:00:00.000Z" } });
-    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual([
+    expect(updates[0]!.filtros).toContainEqual([
       "in", "status", ["queued", "sending", "sent", "delivered"],
     ]);
     expect(updates[1]).toMatchObject({ tabela: "messages", arg: { delivered_at: "2026-11-10T15:00:00.000Z" } });
-    expect((updates[1] as { filtros: unknown[][] }).filtros).toContainEqual(["is", "delivered_at", null]);
+    expect(updates[1]!.filtros).toContainEqual(["is", "delivered_at", null]);
   });
 
   it("`sent` atrasado não rebaixa a mensagem que já foi lida", async () => {
     const { admin, updates } = adminFalso();
     await processarEventosMeta({ admin, session, eventos: [status("sent")], requestId: "r" });
-    expect((updates[0] as { filtros: unknown[][] }).filtros).toContainEqual(["in", "status", ["queued", "sending"]]);
+    expect(updates[0]!.filtros).toContainEqual(["in", "status", ["queued", "sending"]]);
   });
 });
