@@ -14,6 +14,7 @@ import {
   dddDoTelefone,
   juntarAgendamentos,
   statusDoBelle,
+  ddiDoCliente,
   telefoneDoBelle,
   variantesDoTelefone,
 } from "@/lib/agenda-externa/belle/traduzir";
@@ -89,6 +90,26 @@ describe("⭐ resposta da paciente × status do Belle", () => {
 
   it("status mudado pela equipe no CRM (sem resposta da paciente) não segura o do Belle", () => {
     expect(statusFinal("pending", { status: "confirmed", client_responded_at: null })).toBe("pending");
+  });
+});
+
+describe("DDI estrangeiro do Belle (B'Laser Parnamirim, 11/11)", () => {
+  it("⭐ DDI +351 à parte: o celular de 9 dígitos é de Portugal, não +55 81", () => {
+    expect(telefoneDoBelle("915765003", "81", "+351")).toBe("+351915765003");
+    expect(telefoneDoBelle("915765003", "81", "351")).toBe("+351915765003");
+  });
+  it("DDI brasileiro, vazio ou ausente mantém o comportamento de sempre", () => {
+    expect(telefoneDoBelle("915765003", "81", "+55")).toBe("+5581915765003");
+    expect(telefoneDoBelle("915765003", "81", "")).toBe("+5581915765003");
+    expect(telefoneDoBelle("915765003", "81")).toBe("+5581915765003");
+    expect(telefoneDoBelle("(81)98756-1002", "84", "55")).toBe("+5581987561002");
+  });
+  it("o campo do DDI é achado por qualquer nome razoável, e o do Celular 2 é ignorado", () => {
+    expect(ddiDoCliente({ cod: "1", ddiCelular1: "351" })).toBe("351");
+    expect(ddiDoCliente({ ddi: "+351" })).toBe("351");
+    expect(ddiDoCliente({ ddiCelular2: "351" })).toBeNull();
+    expect(ddiDoCliente({ cod: "1", nome: "x" })).toBeNull();
+    expect(ddiDoCliente(null)).toBeNull();
   });
 });
 

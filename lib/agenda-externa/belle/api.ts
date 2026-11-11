@@ -54,7 +54,10 @@ export const agendamentoDaListaSchema = z.object({
   status: texto,
   tipo: texto,
   observacao: texto,
-  cliente: z.object({ cod: texto, nome: texto, celular: texto }).partial().nullish(),
+  // passthrough: o Belle guarda o DDI do celular num campo À PARTE (tela "Cliente - Edição":
+  // DDI +351 + Celular 1 "915765003"). Sem passthrough o zod descartava qualquer campo extra
+  // e o número de Portugal virava +55 81 915765003 (B'Laser Parnamirim, 11/11).
+  cliente: z.object({ cod: texto, nome: texto, celular: texto }).partial().passthrough().nullish(),
   sala: z.object({ cod: texto, nome: texto }).partial().nullish(),
   servicos: z.array(z.object({ cod: texto, nome: texto }).partial()).nullish(),
 });

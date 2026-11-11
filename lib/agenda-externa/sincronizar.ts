@@ -239,11 +239,15 @@ async function resolverContatos(
   const telefoneDoItem = new Map<string, string>(); // externalId → e164
   const todas = new Set<string>();
   for (const item of itens) {
-    const e164 = telefoneDoBelle(item.cliente.celular, integ.default_area_code);
+    const e164 = telefoneDoBelle(item.cliente.celular, integ.default_area_code, item.cliente.ddi);
     if (!e164) continue;
     telefoneDoItem.set(item.externalId, e164);
     for (const v of variantesDoTelefone(e164)) todas.add(v);
   }
+
+  // Diagnóstico: que campos além de cod/nome/celular o Belle manda no cliente (uma vez por rodada).
+  const extras = new Set(itens.flatMap((i) => i.cliente.camposExtras));
+  if (extras.size > 0) logger.info("[agenda-externa] campos extras no cliente do Belle", { organization_id: orgId, campos: [...extras] });
 
   const contatoDaVariante = new Map<string, string>();
   for (const lote of emLotes([...todas], 200)) {

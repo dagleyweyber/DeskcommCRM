@@ -92,13 +92,32 @@ export function dddDoTelefone(telefone: string | null | undefined): string | nul
   return digitos.length === 10 || digitos.length === 11 ? digitos.slice(0, 2) : null;
 }
 
+/** O DDI que o Belle manda à parte, qualquer que seja o nome do campo ("ddi", "ddiCelular1"…). */
+export function ddiDoCliente(cliente: Record<string, unknown> | null | undefined): string | null {
+  for (const [chave, valor] of Object.entries(cliente ?? {})) {
+    if (!/ddi|pais/i.test(chave) || /2$/.test(chave)) continue; // "…2" é do Celular 2
+    const d = String(valor ?? "").replace(/\D/g, "");
+    if (d) return d;
+  }
+  return null;
+}
+
 /**
  * Celular do Belle → E.164 brasileiro. O cadastro do Belle mistura formatos:
  * "(81)98756-1002", "8198756-1002" e até "987561002" sem DDD — este último usa o
  * DDD da unidade. Devolve null quando não dá para ter certeza do número.
  */
-export function telefoneDoBelle(celular: string | null | undefined, dddPadrao: string | null): string | null {
+export function telefoneDoBelle(
+  celular: string | null | undefined,
+  dddPadrao: string | null,
+  ddi: string | null = null,
+): string | null {
   const digitos = (celular ?? "").replace(/\D/g, "");
+  // DDI estrangeiro informado à parte (ex.: 351): o número é daquele país, não do Brasil.
+  const pais = (ddi ?? "").replace(/\D/g, "");
+  if (pais && pais !== "55" && digitos.length >= 6 && digitos.length <= 12 && !digitos.startsWith(pais)) {
+    return `+${pais}${digitos}`;
+  }
   if ((digitos.length === 12 || digitos.length === 13) && digitos.startsWith("55")) return `+${digitos}`;
   if (digitos.length === 10 || digitos.length === 11) return `+55${digitos}`;
   if ((digitos.length === 8 || digitos.length === 9) && dddPadrao && /^\d{2}$/.test(dddPadrao)) {
@@ -138,7 +157,7 @@ export interface AgendamentoImportado {
   salaNome: string;
   titulo: string;
   notas: string | null;
-  cliente: { codigo: string; nome: string; celular: string };
+  cliente: { codigo: string; nome: string; celular: string; ddi: string | null; camposExtras: string[] };
   /** Tipo de serviço (ligado a um serviço da Agenda na tela do Belle). */
   tipo: TipoDeServico | null;
 }
@@ -189,6 +208,8 @@ export function juntarAgendamentos(
         codigo: (linha?.codigoCliente || lista?.cliente?.cod || "").trim(),
         nome: (lista?.cliente?.nome || linha?.nomeCliente || "").trim(),
         celular: (lista?.cliente?.celular || "").trim(),
+        ddi: ddiDoCliente(lista?.cliente),
+        camposExtras: Object.keys(lista?.cliente ?? {}).filter((k) => !["cod", "nome", "celular"].includes(k)),
       },
       tipo: tipoDoAgendamento(
         [...(lista?.servicos ?? []).map((s) => s.cod ?? ""), linha?.codigoServico ?? ""],
