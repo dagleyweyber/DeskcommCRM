@@ -283,7 +283,9 @@ export async function dispatchAutomationsTick(
   const { data: automacoes } = await admin
     .from("whatsapp_template_automations")
     .select("id, organization_id, name, trigger_kind, channel_session_id, template_name, template_language, variable_mapping")
-    .eq("status", "active");
+    .eq("status", "active")
+    // Excluída (0222) nunca envia — a rota já a deixa pausada; isto é o cinto além do suspensório.
+    .is("archived_at", null);
 
   for (const automacao of (automacoes ?? []) as AutomacaoRow[]) {
     if (Date.now() > deadline) break;

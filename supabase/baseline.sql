@@ -18556,3 +18556,9 @@ create index if not exists whatsapp_template_automation_sends_compromisso_idx
 
 -- Envios de chave antiga ganham o compromisso (idempotente: só toca appointment_id nulo).
 select public.fn_vincular_envios_antigos_ao_compromisso();
+
+-- ---- automação excluída: archived_at (migration 0222) ----
+-- Espelho idempotente. "Excluir" não apaga a linha (o histórico de envios e o elo das respostas
+-- dos pacientes dependem dela): preenche `archived_at`. Aditiva — as existentes ficam nulas.
+alter table public.whatsapp_template_automations
+  add column if not exists archived_at timestamptz;

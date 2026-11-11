@@ -74,6 +74,16 @@ function useAutomationAction(acao: "activate" | "pause") {
 export const useActivateAutomation = () => useAutomationAction("activate");
 export const usePauseAutomation = () => useAutomationAction("pause");
 
+/** Exclui: some da lista e para de enviar; o histórico de envios fica (migration 0222). */
+export function useDeleteAutomation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => apiClient.delete<{ data: { deleted: boolean } }>(`/api/v1/automations/${id}`),
+    onError: showApiError,
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
+}
+
 /** O que o formulário de edição precisa: a configuração completa, inclusive o mapeamento das variáveis. */
 export interface AutomationDetail {
   id: string;

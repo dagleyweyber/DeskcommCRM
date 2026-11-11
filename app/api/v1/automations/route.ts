@@ -60,6 +60,7 @@ export async function GET(): Promise<Response> {
       "id, name, trigger_kind, status, template_name, template_language, event_type_id, event_type:calendar_event_types(name), timing_kind, timing_value, confirm_button_text, decline_button_text, created_at, updated_at",
     )
     .eq("organization_id", authz.org.orgId)
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
 
   if (error) return fail("internal_error", error.message, 500, { requestId });

@@ -24,6 +24,7 @@ export async function POST(
     .select("id, status")
     .eq("id", id)
     .eq("organization_id", authz.org.orgId)
+    .is("archived_at", null)
     .maybeSingle();
   if (!automacao) return fail("not_found", "Automação não encontrada.", 404, { requestId });
   if (automacao.status !== "active") {

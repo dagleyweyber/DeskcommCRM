@@ -3,6 +3,9 @@
  * PATCH /api/v1/automations/[id] — edita a configuração (nome, modelo, variáveis,
  *       serviço, momento, botões). Canal e gatilho NÃO mudam: são a identidade da
  *       automação — para outro canal ou outro gatilho, cria-se outra.
+ * DELETE /api/v1/automations/[id] — exclui: a automação para de enviar e some da lista. A
+ *       linha NÃO é apagada (migration 0222): o histórico de envios e o elo das respostas dos
+ *       pacientes às confirmações já enviadas dependem dela.
  *
  * Editar vale com a automação em qualquer estado (rascunho, ativa, pausada) e as
  * regras são as da criação (`lib/automations/configuracao.ts`), mais duas que só
@@ -64,6 +67,7 @@ export async function GET(
     )
     .eq("id", id)
     .eq("organization_id", authz.org.orgId)
+    .is("archived_at", null)
     .maybeSingle();
   if (!automacao) return fail("not_found", "Automação não encontrada.", 404, { requestId });
 
@@ -126,6 +130,7 @@ export async function PATCH(
     .select(`id, status, trigger_kind, channel_session_id, ${COLUNAS_DA_CONFIGURACAO}`)
     .eq("id", id.data)
     .eq("organization_id", orgId)
+    .is("archived_at", null)
     .maybeSingle();
   if (!atual) return fail("not_found", "Automação não encontrada.", 404, { requestId });
 
@@ -227,4 +232,51 @@ export async function PATCH(
   });
 
   return ok({ status: atual.status, campos_alterados: alterados }, { requestId });
+}
+
+/**
+ * Exclui a automação. `archived_at` + `status = 'paused'`, numa escrita só: o despachante
+ * (que lê `status`) para no mesmo instante e a lista (que lê `archived_at`) a esconde.
+ *
+ * Vale em qualquer estado — inclusive ATIVA: o operador que quer a automação fora do caminho não
+ * deveria precisar pausar antes. A tela avisa que ela deixa de enviar.
+ *
+ * Idempotente do ponto de vista do usuário: excluir de novo (outra aba) é 404, igual a qualquer
+ * automação que já não está na lista.
+ */
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("manager", { requestId, resource: "whatsapp_template_automations" });
+  if (!authz.ok) return authz.response;
+
+  const id = idSchema.safeParse((await ctx.params).id);
+  if (!id.success) return fail("not_found", "Automação não encontrada.", 404, { requestId });
+
+  const admin = createAdminClient();
+  // Um UPDATE condicional é a trava: só exclui quem ainda não foi excluído e é desta organização.
+  const { data: excluida, error } = await admin
+    .from("whatsapp_template_automations")
+    .update({ status: "paused", archived_at: new Date().toISOString() })
+    .eq("id", id.data)
+    .eq("organization_id", authz.org.orgId)
+    .is("archived_at", null)
+    .select("id, name, status");
+  if (error) return fail("internal_error", error.message, 500, { requestId });
+  const linha = (excluida ?? [])[0] as { id: string; name: string } | undefined;
+  if (!linha) return fail("not_found", "Automação não encontrada.", 404, { requestId });
+
+  void audit({
+    action: "automation.deleted",
+    actorUserId: authz.user.id,
+    organizationId: authz.org.orgId,
+    resourceType: "whatsapp_template_automation",
+    resourceId: linha.id,
+    requestId,
+    metadata: { actor_type: "user", nome: linha.name, historico_mantido: true },
+  });
+
+  return ok({ deleted: true }, { requestId });
 }

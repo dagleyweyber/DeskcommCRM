@@ -36,7 +36,9 @@ export async function usosDoModelo(
       .from("whatsapp_template_automations")
       .select("id, name, status")
       .eq("organization_id", organizationId)
-      .eq("template_name", nome),
+      .eq("template_name", nome)
+      // Excluída (0222) nunca mais envia — não pode segurar o modelo.
+      .is("archived_at", null),
     admin
       .from("whatsapp_campaigns")
       .select("id, name, status")

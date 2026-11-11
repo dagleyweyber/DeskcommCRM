@@ -288,6 +288,8 @@ export type AuditAction =
   | "automation.updated"
   | "automation.activated"
   | "automation.paused"
+  /** Exclusão (0222): some da lista e para de enviar; a linha e o histórico de envios ficam. */
+  | "automation.deleted"
   // Agenda (núcleo, Fase 1 — sem Google Calendar).
   | "calendar_event_type.created"
   | "calendar_event_type.updated"

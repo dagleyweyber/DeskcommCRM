@@ -2,6 +2,16 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,6 +19,7 @@ import {
   useActivateAutomation,
   useAutomation,
   useAutomations,
+  useDeleteAutomation,
   usePauseAutomation,
   type AutomationSummary,
 } from "@/hooks/campaigns/useAutomations";
@@ -29,6 +40,63 @@ const ROTULO_DO_STATUS: Record<AutomationSummary["status"], string> = {
 const ROTULO_DO_GATILHO: Record<string, string> = {
   appointment_reminder: "Confirmação de agendamento",
 };
+
+/**
+ * "Excluir" pede confirmação e diz o que acontece de verdade: a automação para e some da lista,
+ * mas o histórico de envios fica — e os pacientes que já receberam a confirmação continuam
+ * podendo responder (a resposta confirma a agenda). Não promete "apagar tudo": não apaga.
+ */
+function ExcluirAutomacao({ automacao }: { automacao: AutomationSummary }) {
+  const [aberto, setAberto] = useState(false);
+  const excluir = useDeleteAutomation();
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setAberto(true)}
+        aria-label={`Excluir ${automacao.name}`}
+        data-testid="automacao-excluir"
+      >
+        Excluir
+      </Button>
+      <AlertDialog open={aberto} onOpenChange={setAberto}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir a automação “{automacao.name}”?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="flex flex-col gap-2 text-sm">
+                {automacao.status === "active" && (
+                  <p className="font-medium">Ela está ativa: deixa de enviar agora.</p>
+                )}
+                <p>Ela some da lista e não envia mais nada. Para voltar a usar, é preciso criar outra.</p>
+                <p>
+                  O histórico de envios é mantido, e quem já recebeu a mensagem ainda pode responder — a
+                  resposta continua atualizando a agenda.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Manter</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="automacao-excluir-confirmar"
+              disabled={excluir.isPending}
+              onClick={() =>
+                excluir.mutate(automacao.id, {
+                  onSuccess: () => toast.success("Automação excluída."),
+                })
+              }
+            >
+              Excluir automação
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
 
 function AcoesDaAutomacao({ automacao }: { automacao: AutomationSummary }) {
   const activate = useActivateAutomation();
@@ -153,6 +221,7 @@ export function AutomacoesClient() {
                     Editar
                   </Button>
                   <AcoesDaAutomacao automacao={a} />
+                  <ExcluirAutomacao automacao={a} />
                 </div>
               </div>
             </Card>

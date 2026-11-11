@@ -401,6 +401,43 @@ describe("dispatchAutomationsTick — ciclo completo contra Postgres real", () =
     await limpa();
   });
 
+  it("⭐ automação EXCLUÍDA (archived_at) não envia — nem se alguém deixá-la 'active' por engano", async () => {
+    await compromisso(HOJE_MEIO_DIA_SP);
+    await pool.query("update whatsapp_template_automations set archived_at = now() where id = $1", [AUTOMATION]);
+    const sendFn = vi.fn();
+
+    const resumo = await dispatchAutomationsTick(admin, {
+      sleep: async () => {},
+      sendMessageFn: sendFn as never,
+      now: () => new Date(HOJE_08H_SP),
+      timeBudgetMs: 5000,
+    });
+
+    expect(resumo.sent).toBe(0);
+    expect(sendFn).not.toHaveBeenCalled();
+    await pool.query("update whatsapp_template_automations set archived_at = null where id = $1", [AUTOMATION]);
+    await limpa();
+  });
+
+  it("⭐ o histórico de envios de uma automação excluída continua (a linha fica; sem cascade)", async () => {
+    const id = await compromisso(HOJE_15H_SP);
+    await pool.query(
+      `insert into whatsapp_template_automation_sends (automation_id, organization_id, contact_id, occurrence_key, appointment_id, external_id, status)
+       values ($1, $2, $3, $4::text, $4::uuid, 'wamid.HISTORICO', 'sent')`,
+      [AUTOMATION, ORG, contato, id],
+    );
+    await pool.query("update whatsapp_template_automations set archived_at = now(), status = 'paused' where id = $1", [AUTOMATION]);
+
+    const { rows } = await pool.query(
+      "select external_id from whatsapp_template_automation_sends where automation_id = $1",
+      [AUTOMATION],
+    );
+    expect(rows).toEqual([{ external_id: "wamid.HISTORICO" }]);
+
+    await pool.query("update whatsapp_template_automations set archived_at = null, status = 'active' where id = $1", [AUTOMATION]);
+    await limpa();
+  });
+
   it("⭐ consulta de devidos que FALHA abre UM aviso crítico na Central; o tick que funciona o fecha", async () => {
     await compromisso(HOJE_MEIO_DIA_SP);
     const quebrado = {
