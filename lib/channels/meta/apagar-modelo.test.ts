@@ -5,7 +5,7 @@ import { semOsApagados, type MetaTemplateRow } from "./template-sync";
 
 type Linha = Record<string, unknown>;
 
-/** Admin falso: aplica `eq` e `not in` de verdade sobre linhas em memória. */
+/** Admin falso: aplica `eq`, `is null` e `not in` de verdade sobre linhas em memória. */
 function adminCom(tabelas: Record<string, Linha[]>) {
   return {
     from(tabela: string) {
@@ -14,6 +14,10 @@ function adminCom(tabelas: Record<string, Linha[]>) {
         select: () => q,
         eq: (col: string, v: unknown) => {
           linhas = linhas.filter((l) => l[col] === v);
+          return q;
+        },
+        is: (col: string, v: null) => {
+          linhas = linhas.filter((l) => (l[col] ?? null) === v);
           return q;
         },
         not: (col: string, _op: string, lista: string) => {
@@ -42,6 +46,18 @@ describe("usosDoModelo — o que impede apagar", () => {
     });
     const usos = await usosDoModelo(admin, ORG, "confirma");
     expect(usos).toEqual([{ tipo: "automacao", id: "a1", nome: "Confirmação Laser", status: "paused" }]);
+  });
+
+  it("⭐ automação EXCLUÍDA (archived_at) não segura o modelo — ela nunca mais envia", async () => {
+    const admin = adminCom({
+      whatsapp_template_automations: [
+        { id: "a1", organization_id: ORG, template_name: "confirma", name: "Antiga", status: "paused", archived_at: "2026-11-10T00:00:00Z" },
+        { id: "a2", organization_id: ORG, template_name: "confirma", name: "Atual", status: "active", archived_at: null },
+      ],
+      whatsapp_campaigns: [],
+    });
+    const usos = await usosDoModelo(admin, ORG, "confirma");
+    expect(usos.map((u) => u.id)).toEqual(["a2"]);
   });
 
   it("campanha encerrada ou cancelada não segura; rascunho, fila e pausada seguram", async () => {
