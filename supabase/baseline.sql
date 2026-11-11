@@ -17983,7 +17983,13 @@ as $$
     select l.id, l.contact_id, l.starts_at
       from lideres l
       cross join minha m
+      cross join fuso f
      where l.posicao = 1
+       -- "N dias antes" só vale para consulta em dia FUTURO. Agendamento feito (ou remarcado)
+       -- para hoje já é conversa direta com a paciente: "confirme sua consulta" não faz sentido
+       -- e antes saía na hora, porque o horário de envio (08:00 de ontem) já tinha passado.
+       and (m.timing_kind <> 'days_before'
+            or (l.starts_at at time zone f.tz)::date > (p_now at time zone f.tz)::date)
        and l.starts_at > p_now
        and l.status in ('pending', 'confirmed')
        -- confirmação só faz sentido para quem ainda não confirmou
@@ -18562,3 +18568,6 @@ select public.fn_vincular_envios_antigos_ao_compromisso();
 -- dos pacientes dependem dela): preenche `archived_at`. Aditiva — as existentes ficam nulas.
 alter table public.whatsapp_template_automations
   add column if not exists archived_at timestamptz;
+
+-- ---- confirmação sem consulta de hoje (migration 0223) ----
+-- A definição de fn_due_appointment_reminders acima já leva o filtro (versão final); sem schema novo.

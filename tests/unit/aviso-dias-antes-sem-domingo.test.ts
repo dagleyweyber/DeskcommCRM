@@ -19,12 +19,12 @@ const migration = semComentarios(
   readFileSync(join(raiz, "supabase/migrations/20261107120000_0213_aviso_dias_antes_sem_domingo.sql"), "utf8"),
 ).replace(/\r\n/g, "\n");
 /**
- * A versão VIGENTE da função. A 0221 reescreveu a deduplicação (sem ler a timeline do
+ * A versão VIGENTE da função. A 0223 (sobre a 0221, que reescreveu a deduplicação) (sem ler a timeline do
  * CRM) e manteve a regra do domingo; quem reescrever a função de novo troca este
  * caminho — e este teste confere que a regra veio junto.
  */
 const vigente = semComentarios(
-  readFileSync(join(raiz, "supabase/migrations/20261110220000_0221_confirmacao_sem_atividades_e_reserva.sql"), "utf8"),
+  readFileSync(join(raiz, "supabase/migrations/20261111140000_0223_confirmacao_sem_consulta_de_hoje.sql"), "utf8"),
 ).replace(/\r\n/g, "\n");
 const baseline = semComentarios(readFileSync(join(raiz, "supabase/baseline.sql"), "utf8")).replace(/\r\n/g, "\n");
 
@@ -46,7 +46,7 @@ describe("fn_due_appointment_reminders (0213) — nada de aviso no domingo", () 
     expect(horas).not.toMatch(/dow/);
   });
 
-  it("⭐ a definição que vale no baseline mantém a regra, com o mesmo corpo da migration vigente (0221)", () => {
+  it("⭐ a definição que vale no baseline mantém a regra, com o mesmo corpo da migration vigente (0223)", () => {
     const def = ultimaDefinicao(baseline);
     expect(def).toMatch(REGRA_DOMINGO);
     expect(corpo(ultimaDefinicao(vigente))).toMatch(REGRA_DOMINGO);

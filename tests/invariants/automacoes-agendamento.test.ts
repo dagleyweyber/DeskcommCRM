@@ -276,6 +276,17 @@ describe("fn_due_appointment_reminders — lê a Agenda (0201)", () => {
     await limpa();
   });
 
+  it("⭐ '1 dia antes': consulta de HOJE nunca recebe — agendada ou remarcada para o próprio dia (0223)", async () => {
+    const id = await compromisso(HOJE_15H_SP);
+    await configura({ timing_kind: "days_before", timing_value: 1 });
+    expect((await devidos(HOJE_08H_SP)).map((r) => r.activity_id)).not.toContain(id);
+    expect((await devidos(HOJE_MEIO_DIA_SP)).map((r) => r.activity_id)).not.toContain(id);
+    // quem é de amanhã segue saindo
+    const amanha = await compromisso(AMANHA_10H_SP);
+    expect((await devidos(HOJE_MEIO_DIA_SP)).map((r) => r.activity_id)).toContain(amanha);
+    await limpa();
+  });
+
   it("⭐ '2 horas antes': compromisso às 15h sai a partir das 13h", async () => {
     const id = await compromisso(HOJE_15H_SP);
     await configura({ timing_kind: "hours_before", timing_value: 2 });
