@@ -11,6 +11,8 @@
  * diverge: a de ignorar evento de outra WABA, a de exigir o número da sessão e a de
  * nunca acionar a IA no eco/histórico existem uma só vez.
  */
+import { registrarEntregaFalhada } from "@/lib/automations/aviso-de-entrega";
+import { logger } from "@/lib/logger";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { sincronizarSaudeDaConexao } from "../health";
@@ -287,6 +289,16 @@ export async function processarEventosMeta(input: {
           .update({ status: "failed", updated_at: now, ...(metadataMesclado ? { metadata: metadataMesclado } : {}) })
           .eq("organization_id", session.organizationId)
           .eq("external_id", e.externalId);
+        // Confirmação/lembrete de automação que a Meta aceitou e não entregou: o envio deixa de
+        // constar como "enviado" e a Central avisa quem não recebeu. Nunca derruba o webhook.
+        try {
+          await registrarEntregaFalhada(admin, session.organizationId, e.externalId, detalheErro);
+        } catch (erro) {
+          logger.error("[meta/process-events] aviso de entrega falhada não gravado", {
+            organization_id: session.organizationId,
+            erro: erro instanceof Error ? erro.message : String(erro),
+          });
+        }
         continue;
       }
 
