@@ -201,14 +201,18 @@ export const metaTemplateOps: ChannelTemplateOps = {
    * de `create`/`remove`, que usam nome. Por isso resolve o ID via `list`
    * antes de editar; não há atalho direto por nome neste endpoint.
    */
-  async update({ sessionRef, name, patch }): Promise<ChannelTemplate> {
+  async update({ sessionRef, name, language, patch }): Promise<ChannelTemplate> {
     const creds = await resolveCreds(sessionRef);
     const encontrados = await call<{ data?: RawTemplate[] }>(
       creds,
       `/${creds.wabaId}/message_templates`,
       { method: "GET", query: { fields: FIELDS, name } },
     );
-    const alvo = (encontrados.data ?? [])[0];
+    // A busca é por nome e devolve todos os idiomas dele: escolher o idioma aqui
+    // evita editar o modelo errado quando o mesmo nome existe em dois.
+    const lista = encontrados.data ?? [];
+    // Idioma pedido que não existe NÃO cai no primeiro da lista: editaria outro modelo.
+    const alvo = language ? lista.find((t) => t.language === language) : lista[0];
     if (!alvo?.id) {
       throw new Error(`meta_template_failed: template "${name}" não encontrado para editar.`);
     }

@@ -32,6 +32,9 @@ import { logger } from "@/lib/logger";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/** Estados em que a Meta aceita editar o conteúdo (em revisão ela recusa). */
+const STATUS_EDITAVEL = ["APPROVED", "REJECTED", "PAUSED"];
+
 /** Um template pronto para a tela: o que a Meta diz + o contrato derivado. */
 export interface TemplateView {
   name: string;
@@ -248,6 +251,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         resourceId: sessao.id,
         requestId,
         metadata: { name: corpo.name, language: corpo.language },
+      });
+    }
+
+    if (corpo.acao === "editar") {
+      if (!corpo.name || !corpo.language || !Array.isArray(corpo.components)) {
+        return fail("invalid_request", "Faltam nome, idioma ou conteúdo.", 400, { requestId });
+      }
+      // A Meta só deixa editar modelo aprovado, recusado ou pausado. Em revisão
+      // não: a recusa dela seria um erro genérico, e dizer o motivo aqui é mais útil.
+      const { data: atual } = await admin
+        .from("meta_templates")
+        .select("status")
+        .eq("organization_id", r.orgId)
+        .eq("waba_id", sessao.wabaId)
+        .eq("name", corpo.name)
+        .eq("language", corpo.language)
+        .maybeSingle();
+      if (!atual) return fail("not_found", "Modelo não encontrado.", 404, { requestId });
+      if (!STATUS_EDITAVEL.includes(String(atual.status))) {
+        return fail(
+          "state_conflict",
+          "Este modelo está em revisão na Meta. Espere a decisão para editar.",
+          409,
+          { requestId },
+        );
+      }
+      const adapter = getAdapter(CHANNEL_PROVIDER_META);
+      if (!adapter.templates) {
+        return fail("not_implemented", "Este canal não gerencia definições.", 501, { requestId });
+      }
+      // Só o CONTEÚDO muda: nome e idioma identificam o modelo, e a categoria de
+      // um modelo aprovado a Meta não deixa trocar — por isso nem é enviada.
+      await adapter.templates.update({
+        sessionRef: sessao.phoneNumberId,
+        name: corpo.name,
+        language: corpo.language,
+        patch: { components: corpo.components },
+      });
+      await audit({
+        action: "template.updated",
+        organizationId: r.orgId,
+        resourceType: "channel_session",
+        resourceId: sessao.id,
+        requestId,
+        metadata: { name: corpo.name, language: corpo.language, status_antes: atual.status },
       });
     }
 

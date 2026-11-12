@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -18,12 +18,16 @@ import { PreviaDaDefinicao } from "./PreviaDaDefinicao";
 import {
   useCreateTemplate,
   useDeleteTemplate,
+  useEditTemplate,
   useSyncTemplates,
   useTemplates,
+  useUsosDoModelo,
   type TemplatePreview,
+  type TemplateView,
 } from "@/hooks/channels/useTemplates";
 import {
   contarVariaveis,
+  formularioDeComponents,
   IDIOMAS_DA_DEFINICAO,
   LIMITE_NOME_DO_MODELO,
   LIMITE_BOTOES,
@@ -90,15 +94,21 @@ function Preview({ preview }: { preview: TemplatePreview }) {
  * (`lib/channels/template-conteudo.ts`) — o formato do contrato é o mesmo,
  * porque as duas portas escrevem na mesma WABA.
  */
-function CriarModelo({ onCriado }: { onCriado: () => void }) {
+function CriarModelo({ onCriado, modelo }: { onCriado: () => void; modelo?: TemplateView }) {
   const criar = useCreateTemplate();
-  const [nome, setNome] = useState("");
-  const [idioma, setIdioma] = useState("pt_BR");
-  const [categoria, setCategoria] = useState("UTILITY");
-  const [corpo, setCorpo] = useState("");
-  const [rodape, setRodape] = useState("");
-  const [exemplos, setExemplos] = useState<string[]>([]);
-  const [cabecalho, setCabecalho] = useState("");
+  const editar = useEditTemplate();
+  // Modo editar: o MESMO formulário, preenchido com o que a Meta guarda. Nome, idioma e
+  // categoria ficam travados — identificam o modelo, e a Meta não deixa trocá-los.
+  const emEdicao = !!modelo;
+  const inicial = useMemo(() => (modelo ? formularioDeComponents(modelo.components) : null), [modelo]);
+  const usos = useUsosDoModelo(modelo?.name ?? "");
+  const [nome, setNome] = useState(modelo?.name ?? "");
+  const [idioma, setIdioma] = useState(modelo?.language ?? "pt_BR");
+  const [categoria, setCategoria] = useState(modelo?.category ?? "UTILITY");
+  const [corpo, setCorpo] = useState(inicial?.corpo ?? "");
+  const [rodape, setRodape] = useState(inicial?.rodape ?? "");
+  const [exemplos, setExemplos] = useState<string[]>(inicial?.exemplos ?? []);
+  const [cabecalho, setCabecalho] = useState(inicial?.cabecalhoTexto ?? "");
   // `midiaHandle` é o que vai pra Meta (`example.header_handle`, obtido via
   // Resumable Upload API — ver `app/api/v1/channels/templates/media`).
   // `midiaPreviewUrl` é só pra TELA: um handle é opaco, não dá pra mostrar
@@ -106,8 +116,12 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
   // navegador pra isto) resolve sem depender de round-trip nenhum.
   const [midiaHandle, setMidiaHandle] = useState("");
   const [midiaPreviewUrl, setMidiaPreviewUrl] = useState("");
-  const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>([]);
+  const [botoes, setBotoes] = useState<BotaoDaDefinicao[]>(inicial?.botoes ?? []);
   const [subindo, setSubindo] = useState(false);
+  // O cabeçalho de imagem original não volta da Meta (só um endereço temporário): para salvar,
+  // a imagem tem de ser enviada de novo — senão a edição a perderia em silêncio.
+  const faltaImagem = !!inicial?.cabecalhoDeMidia && !midiaHandle && !cabecalho;
+  const pendente = criar.isPending || editar.isPending;
 
   // Revoga o Object URL anterior sempre que troca ou desmonta — Object URL
   // vivo sem revogar vaza memória (o navegador não libera sozinho).
@@ -135,6 +149,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
             }
             placeholder="nome_do_modelo (ex.: agendamento_confirmado)"
             aria-label="Nome do modelo"
+            disabled={emEdicao}
             className="h-9 flex-1 rounded-md border border-input bg-background px-2 text-sm"
           />
           {/* LISTA, e não campo livre: `esp`, `ES`, `es-AR` são todos recusados,
@@ -143,6 +158,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
             value={idioma}
             onChange={(e) => setIdioma(e.target.value)}
             aria-label="Idioma"
+            disabled={emEdicao}
             className="h-9 w-56 rounded-md border border-input bg-background px-2 text-sm"
           >
             {IDIOMAS_DA_DEFINICAO.map((i) => (
@@ -161,6 +177,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
           value={categoria}
           onChange={(e) => setCategoria(e.target.value)}
           aria-label="Categoria"
+          disabled={emEdicao}
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
         >
           <option value="UTILITY">Utilidade — aviso de pedido, agendamento, cobrança</option>
@@ -382,27 +399,63 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
           </div>
         )}
 
-        <p className="text-[11px] text-muted-foreground">
-          A Meta revisa antes de aprovar — o modelo nasce pendente e some da lista de envio até
-          ela decidir.
-        </p>
+        {emEdicao && (
+          <div
+            className="flex flex-col gap-1 rounded-md border border-amber-300 bg-amber-50/50 p-2 text-[11px] text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200"
+            data-testid="aviso-editar-modelo"
+          >
+            <p>
+              Ao salvar, a Meta revisa o modelo de novo. Nome, idioma e categoria não mudam.
+              A Meta limita o número de edições por modelo (poucas por mês, e uma por dia).
+            </p>
+            {usos.data && usos.data.data.usos.length > 0 && (
+              <p data-testid="aviso-usos-do-modelo">
+                <strong>Em uso por:</strong>{" "}
+                {usos.data.data.usos
+                  .map((u) => `${u.tipo === "automacao" ? "automação" : "campanha"} "${u.nome}"`)
+                  .join(", ")}
+                . Enquanto a nova versão estiver em revisão, confira se esses envios continuam
+                saindo.
+              </p>
+            )}
+            {inicial?.temBotaoNaoSuportado && (
+              <p className="text-destructive">
+                Este modelo tem um botão que esta tela não sabe editar (código ou fluxo). Edite-o
+                pelo Gerenciador do WhatsApp da Meta.
+              </p>
+            )}
+            {faltaImagem && (
+              <p className="text-destructive">
+                O modelo tem imagem no cabeçalho. Suba a imagem de novo (ou troque por um texto)
+                para poder salvar.
+              </p>
+            )}
+          </div>
+        )}
+        {!emEdicao && (
+          <p className="text-[11px] text-muted-foreground">
+            A Meta revisa antes de aprovar — o modelo nasce pendente e some da lista de envio até
+            ela decidir.
+          </p>
+        )}
         <div className="flex justify-end">
           <Button
             type="button"
             size="sm"
-            disabled={!semSublinhadoNoFim(nome) || !corpo.trim() || criar.isPending}
+            disabled={
+              !semSublinhadoNoFim(nome) ||
+              !corpo.trim() ||
+              pendente ||
+              faltaImagem ||
+              !!inicial?.temBotaoNaoSuportado
+            }
             onClick={() => {
               const problemas = problemasDosBotoes(botoes);
               if (problemas.length > 0) {
                 toast.error(problemas.join(" "));
                 return;
               }
-              criar.mutate(
-                {
-                  name: semSublinhadoNoFim(nome),
-                  language: idioma.trim(),
-                  category: categoria,
-                  components: montarComponents({
+              const components = montarComponents({
                     body: corpo,
                     footer: rodape,
                     exemplos,
@@ -416,8 +469,21 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
                     // O endereço de onde o operador está usando o CRM — não uma
                     // env de build: a imagem é genérica e serve qualquer domínio.
                     origemDoLink: window.location.origin,
-                  }),
-                },
+              });
+              if (emEdicao) {
+                editar.mutate(
+                  { name: semSublinhadoNoFim(nome), language: idioma.trim(), components },
+                  {
+                    onSuccess: () => {
+                      toast.success("Alteração enviada para nova revisão da Meta.");
+                      onCriado();
+                    },
+                  },
+                );
+                return;
+              }
+              criar.mutate(
+                { name: semSublinhadoNoFim(nome), language: idioma.trim(), category: categoria, components },
                 {
                   onSuccess: () => {
                     toast.success("Modelo enviado para revisão da Meta.");
@@ -436,7 +502,7 @@ function CriarModelo({ onCriado }: { onCriado: () => void }) {
               );
             }}
           >
-            {criar.isPending ? "Enviando…" : "Enviar para revisão"}
+            {pendente ? "Enviando…" : emEdicao ? "Salvar e enviar para revisão" : "Enviar para revisão"}
           </Button>
         </div>
       </div>
@@ -503,6 +569,7 @@ export function TemplatesClient() {
   const sync = useSyncTemplates();
   const [criando, setCriando] = useState(false);
   const [apagando, setApagando] = useState<string | null>(null);
+  const [editando, setEditando] = useState<TemplateView | null>(null);
 
   const waba = data?.data.waba ?? null;
   const templates = data?.data.templates ?? null;
@@ -548,7 +615,10 @@ export function TemplatesClient() {
           <Button
             type="button"
             variant={criando ? "outline" : "default"}
-            onClick={() => setCriando((v) => !v)}
+            onClick={() => {
+              setEditando(null);
+              setCriando((v) => !v);
+            }}
           >
             {criando ? "Cancelar" : "Criar modelo"}
           </Button>
@@ -556,6 +626,15 @@ export function TemplatesClient() {
       </div>
 
       {criando && <CriarModelo onCriado={() => setCriando(false)} />}
+
+      {editando && (
+        // key: trocar de modelo remonta o formulário com os campos do novo.
+        <CriarModelo
+          key={`${editando.name}:${editando.language}`}
+          modelo={editando}
+          onCriado={() => setEditando(null)}
+        />
+      )}
 
       {apagando && (
         <ApagarModelo
@@ -594,6 +673,20 @@ export function TemplatesClient() {
                     ? "sem parâmetros"
                     : `${t.slots.length} parâmetro(s)`}
                 </span>
+                {["APPROVED", "REJECTED", "PAUSED"].includes(t.status) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCriando(false);
+                      setEditando(t);
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    aria-label={`Editar o modelo ${t.name}`}
+                    data-testid="btn-editar-modelo"
+                  >
+                    editar
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setApagando(t.name)}

@@ -190,6 +190,75 @@ export function lerConteudo(components: unknown): ConteudoDaDefinicao {
   return vazio;
 }
 
+/** O formulário de criar, preenchido a partir de uma definição que já existe (editar). */
+export interface FormularioDaDefinicao {
+  cabecalhoTexto: string;
+  /** Cabeçalho de imagem/vídeo/documento: o handle original não volta da Meta, então precisa subir de novo. */
+  cabecalhoDeMidia: boolean;
+  corpo: string;
+  rodape: string;
+  exemplos: string[];
+  botoes: BotaoDaDefinicao[];
+  /** Botão de outro tipo (código, fluxo…): a tela não sabe reescrevê-lo, então editar o perderia. */
+  temBotaoNaoSuportado: boolean;
+}
+
+/**
+ * Faz o caminho inverso de `montarComponents`: da definição como a Meta a devolve
+ * para os campos da tela. Tolerante, como `lerConteudo` — definição sem rodapé ou
+ * sem botão é normal.
+ */
+export function formularioDeComponents(components: unknown): FormularioDaDefinicao {
+  const lista = Array.isArray(components) ? components : [];
+  const f: FormularioDaDefinicao = {
+    cabecalhoTexto: "",
+    cabecalhoDeMidia: false,
+    corpo: "",
+    rodape: "",
+    exemplos: [],
+    botoes: [],
+    temBotaoNaoSuportado: false,
+  };
+  for (const bruto of lista) {
+    const c = obj(bruto);
+    if (!c) continue;
+    const tipo = (str(c.type) ?? "").toUpperCase();
+    if (tipo === "HEADER") {
+      if ((str(c.format) ?? "TEXT").toUpperCase() === "TEXT") f.cabecalhoTexto = str(c.text) ?? "";
+      else f.cabecalhoDeMidia = true;
+    } else if (tipo === "BODY") {
+      f.corpo = str(c.text) ?? "";
+      const amostras = obj(c.example)?.body_text;
+      const primeira = Array.isArray(amostras) && Array.isArray(amostras[0]) ? amostras[0] : [];
+      f.exemplos = primeira.map((e) => (typeof e === "string" ? e : ""));
+    } else if (tipo === "FOOTER") {
+      f.rodape = str(c.text) ?? "";
+    } else if (tipo === "BUTTONS") {
+      for (const b of Array.isArray(c.buttons) ? c.buttons : []) {
+        const o = obj(b);
+        if (!o) continue;
+        const t = (str(o.type) ?? "").toUpperCase();
+        const texto = str(o.text) ?? "";
+        if (t === "URL") {
+          const url = str(o.url) ?? "";
+          f.botoes.push(
+            ehLinkDaCampanha(url)
+              ? { tipo: "url", texto, linkNaCampanha: true }
+              : { tipo: "url", texto, url },
+          );
+        } else if (t === "PHONE_NUMBER") {
+          f.botoes.push({ tipo: "phone_number", texto, telefone: str(o.phone_number) ?? "" });
+        } else if (t === "QUICK_REPLY") {
+          f.botoes.push({ tipo: "quick_reply", texto });
+        } else {
+          f.temBotaoNaoSuportado = true;
+        }
+      }
+    }
+  }
+  return f;
+}
+
 /**
  * Quantos `{{n}}` distintos o texto usa.
  *

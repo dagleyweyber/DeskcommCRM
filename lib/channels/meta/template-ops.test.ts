@@ -234,6 +234,45 @@ describe("editar — resolve o ID por nome antes, porque a Meta edita por ID", (
     expect(urlEdicao).toContain("/tpl-42");
   });
 
+  it("⭐ mesmo nome em dois idiomas: edita o idioma pedido, nunca o primeiro da lista", async () => {
+    sessaoNoBanco.wabaId = "999";
+    const spy = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("name=")
+            ? {
+                data: [
+                  { id: "tpl-pt", name: "x", language: "pt_BR", status: "APPROVED" },
+                  { id: "tpl-en", name: "x", language: "en_US", status: "APPROVED" },
+                ],
+              }
+            : { success: true },
+      } as Response;
+    });
+    vi.stubGlobal("fetch", spy);
+
+    await (await ops()).update({
+      sessionRef: "x",
+      name: "x",
+      language: "en_US",
+      patch: { components: [{ type: "BODY", text: "new text" }] },
+    });
+
+    expect(String(spy.mock.calls[1]![0])).toContain("/tpl-en");
+  });
+
+  it("idioma pedido que não existe não cai no primeiro: lança, em vez de editar outro modelo", async () => {
+    sessaoNoBanco.wabaId = "999";
+    stubFetch({ data: [{ id: "tpl-pt", name: "x", language: "pt_BR", status: "APPROVED" }] });
+
+    await expect(
+      (await ops()).update({ sessionRef: "x", name: "x", language: "es", patch: {} }),
+    ).rejects.toThrow(/x/);
+  });
+
   it("template não encontrado lança com o nome, não um 404 mudo", async () => {
     sessaoNoBanco.wabaId = "999";
     stubFetch({ data: [] });

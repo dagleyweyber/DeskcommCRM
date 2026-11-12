@@ -124,3 +124,47 @@ export function useCreateTemplate() {
     },
   });
 }
+
+export interface EditTemplateInput {
+  name: string;
+  language: string;
+  components: unknown[];
+}
+
+/**
+ * Edita o CONTEÚDO de um modelo já existente na WABA e sincroniza. Nome, idioma e
+ * categoria não mudam. A edição manda o modelo de volta para revisão da Meta.
+ */
+export function useEditTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: EditTemplateInput) =>
+      apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", {
+        acao: "editar",
+        ...input,
+      }),
+    onError: showApiError,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["channel-templates"] });
+    },
+  });
+}
+
+export interface UsoDoModeloView {
+  tipo: "automacao" | "campanha";
+  id: string;
+  nome: string;
+  status: string;
+}
+
+/** Automações e campanhas abertas que usam o modelo — mostrado antes de salvar a edição. */
+export function useUsosDoModelo(name: string) {
+  return useQuery({
+    queryKey: ["channel-templates-usos", name],
+    queryFn: async () =>
+      apiClient.get<{ data: { usos: UsoDoModeloView[] } }>(
+        `/api/v1/channels/templates/usos?name=${encodeURIComponent(name)}`,
+      ),
+    staleTime: 0,
+  });
+}

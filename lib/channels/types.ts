@@ -351,6 +351,8 @@ export interface ChannelTemplateOps {
   update(input: {
     sessionRef: string;
     name: string;
+    /** O mesmo nome pode existir em mais de um idioma; sem isto a edição pega o primeiro que achar. */
+    language?: string;
     patch: Partial<Pick<ChannelTemplateDraft, "components" | "category">>;
   }): Promise<ChannelTemplate>;
   remove(input: { sessionRef: string; name: string; language?: string }): Promise<void>;
