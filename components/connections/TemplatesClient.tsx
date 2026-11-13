@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -570,6 +570,13 @@ export function TemplatesClient() {
   const [criando, setCriando] = useState(false);
   const [apagando, setApagando] = useState<string | null>(null);
   const [editando, setEditando] = useState<TemplateView | null>(null);
+  const formEdicaoRef = useRef<HTMLDivElement | null>(null);
+
+  // O formulário abre acima da lista: sem rolar até ele, o clique em um modelo lá embaixo
+  // parece não fazer nada (achado ao vivo, 2026-11-13).
+  useEffect(() => {
+    if (editando) formEdicaoRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [editando]);
 
   const waba = data?.data.waba ?? null;
   const templates = data?.data.templates ?? null;
@@ -628,12 +635,14 @@ export function TemplatesClient() {
       {criando && <CriarModelo onCriado={() => setCriando(false)} />}
 
       {editando && (
-        // key: trocar de modelo remonta o formulário com os campos do novo.
-        <CriarModelo
-          key={`${editando.name}:${editando.language}`}
-          modelo={editando}
-          onCriado={() => setEditando(null)}
-        />
+        <div ref={formEdicaoRef} className="scroll-mt-4">
+          {/* key: trocar de modelo remonta o formulário com os campos do novo. */}
+          <CriarModelo
+            key={`${editando.name}:${editando.language}`}
+            modelo={editando}
+            onCriado={() => setEditando(null)}
+          />
+        </div>
       )}
 
       {apagando && (
