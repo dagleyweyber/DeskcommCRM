@@ -21,7 +21,7 @@ import { getAdapter } from "@/lib/channels";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { descreverUsos, usosDoModelo } from "@/lib/channels/meta/apagar-modelo";
 import { resolveMetaCreds } from "@/lib/channels/meta/credentials";
-import { metaSessionForOrg } from "@/lib/channels/meta/session";
+import { metaSessionEscolhida } from "@/lib/channels/meta/session";
 import { normalizeRejectedReason } from "@/lib/channels/meta/webhook";
 import { deriveTemplateContract, describeAddress } from "@/lib/channels/meta/template-contract";
 import { syncTemplates } from "@/lib/channels/meta/template-sync";
@@ -111,23 +111,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // nome existe em cada número) e a sessão devolvida era sempre a mais antiga. Sem o parâmetro
   // o comportamento é o de sempre (primeiro número) — as telas de Conexões dependem dele.
   const pedido = req.nextUrl.searchParams.get("channel_session_id");
-  let sessao: { id: string; wabaId: string | null } | null;
-  if (pedido !== null) {
-    if (!z.string().uuid().safeParse(pedido).success) {
-      return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
-    }
-    const { data: escolhida } = await admin
-      .from("channel_sessions")
-      .select("id, meta_waba_id")
-      .eq("id", pedido)
-      .eq("organization_id", r.orgId)
-      .eq("provider", CHANNEL_PROVIDER_META)
-      .is("archived_at", null)
-      .maybeSingle();
-    if (!escolhida) return fail("not_found", "Número não encontrado nesta organização.", 404, { requestId });
-    sessao = { id: escolhida.id as string, wabaId: (escolhida.meta_waba_id as string | null) ?? null };
-  } else {
-    sessao = await metaSessionForOrg(r.orgId);
+  if (pedido !== null && !z.string().uuid().safeParse(pedido).success) {
+    return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
+  }
+  const sessao = await metaSessionEscolhida(r.orgId, pedido);
+  if (pedido !== null && !sessao) {
+    return fail("not_found", "Número não encontrado nesta organização.", 404, { requestId });
   }
 
   let consulta = admin
@@ -206,7 +195,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const r = await orgOrFail(requestId);
   if (!r.autorizado) return r.resposta;
 
-  const sessao = await metaSessionForOrg(r.orgId);
+  const corpo = (await req.json().catch(() => ({}))) as {
+    /** Qual número oficial. Sem ele, o primeiro da organização (quem tem um número só). */
+    channel_session_id?: string;
+    acao?: string;
+    name?: string;
+    language?: string;
+    category?: string;
+    components?: unknown[];
+  };
+
+  const escolha = corpo.channel_session_id ?? null;
+  if (escolha !== null && !z.string().uuid().safeParse(escolha).success) {
+    return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
+  }
+  const sessao = await metaSessionEscolhida(r.orgId, escolha);
   if (!sessao?.wabaId || !sessao.phoneNumberId) {
     return fail("invalid_request", "no_meta_channel", 400, { requestId });
   }
@@ -214,14 +217,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const admin = createAdminClient();
   const creds = await resolveMetaCreds(admin, sessao.phoneNumberId);
   if (!creds) return fail("invalid_request", "missing_meta_token", 400, { requestId });
-
-  const corpo = (await req.json().catch(() => ({}))) as {
-    acao?: string;
-    name?: string;
-    language?: string;
-    category?: string;
-    components?: unknown[];
-  };
 
   try {
     if (corpo.acao === "criar") {
@@ -362,7 +357,11 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   if (!parsed.success) return fail("invalid_request", "Falta o nome do modelo.", 400, { requestId });
   const nome = parsed.data.name;
 
-  const sessao = await metaSessionForOrg(r.orgId);
+  const escolha = req.nextUrl.searchParams.get("channel_session_id");
+  if (escolha !== null && !z.string().uuid().safeParse(escolha).success) {
+    return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
+  }
+  const sessao = await metaSessionEscolhida(r.orgId, escolha);
   if (!sessao?.wabaId || !sessao.phoneNumberId) {
     return fail("invalid_request", "no_meta_channel", 400, { requestId });
   }

@@ -94,7 +94,9 @@ function canalOficial(over: Linha = {}): Linha {
     organization_id: ORG,
     provider: CHANNEL_PROVIDER_META,
     waha_session_name: null,
-    meta_phone_number_id: "999",
+    // O MESMO número que `corpoOficial` reconecta: reconectar é sobre o mesmo número.
+    // Número diferente é OUTRO canal — ver o caso da B'Laser Parnamirim abaixo.
+    meta_phone_number_id: "1234567890",
     meta_token_encrypted: null,
     display_name: "Canal oficial",
     phone_number: null,
@@ -357,6 +359,27 @@ describe("POST /api/v1/channels/official — reconectar é ressuscitar", () => {
     expect(db.linhas[0]?.status).toBe("WORKING");
   });
 
+  /**
+   * ⭐ Achado ao vivo (B'Laser Parnamirim, 2026-11-19): com a Recepção conectada, conectar o
+   * número da Clara REGRAVOU a linha da Recepção — ela parou de receber e o histórico da
+   * Clara caiu nas conversas dela. Número diferente é canal novo; o que já existe fica intacto.
+   */
+  it("⭐ OUTRO número na mesma org: cria linha própria e não toca no número que já estava", async () => {
+    authOk();
+    const db = makeDb({
+      sessions: [canalOficial({ meta_phone_number_id: "555", status: "WORKING", meta_token_encrypted: "cifra-velha" })],
+    });
+    const { POST } = await import("@/app/api/v1/channels/official/route");
+    const res = await POST(reqOficial());
+
+    expect(res.status).toBe(200);
+    expect(db.escritas.map((e) => e.tipo)).toEqual(["insert"]);
+    expect(db.linhas).toHaveLength(2);
+    expect(db.linhas[0]).toMatchObject({ meta_phone_number_id: "555", meta_token_encrypted: "cifra-velha" });
+    expect(db.linhas[1]).toMatchObject({ meta_phone_number_id: "1234567890" });
+    expect((await res.json()).data.channelSessionId).toBe("canal-novo");
+  });
+
   it("erro de verdade do banco não vira 200 mentiroso", async () => {
     authOk();
     makeDb({
@@ -393,6 +416,24 @@ describe("GET /api/v1/channels/official — a tela não chama de conectado o que
     expect(body.data.connected).toBe(true);
     expect(body.data.hasToken).toBe(true);
     expect(body.data.webhook.callbackUrl).toContain("tok");
+  });
+
+  it("⭐ dois números oficiais: `numbers` traz os dois (antes a consulta quebrava e dizia 'não conectado')", async () => {
+    authOk();
+    makeDb({
+      sessions: [
+        canalOficial({ webhook_path_token: "tok-a", meta_token_encrypted: "x" }),
+        canalOficial({ id: "outro", meta_phone_number_id: "555", webhook_path_token: "tok-b" }),
+      ],
+    });
+    const { GET } = await import("@/app/api/v1/channels/official/route");
+    const body = await (await GET(req())).json();
+
+    expect(body.data.connected).toBe(true);
+    expect(body.data.numbers.map((n: { phoneNumberId: string }) => n.phoneNumberId)).toEqual(["1234567890", "555"]);
+    expect(body.data.numbers[1].webhook.callbackUrl).toContain("tok-b");
+    // Campos de topo seguem descrevendo o primeiro — compatibilidade de quem já consome.
+    expect(body.data.phoneNumberId).toBe("1234567890");
   });
 
   it("clone sem a migration 0106: a tela continua enxergando o canal", async () => {

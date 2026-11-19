@@ -137,7 +137,8 @@ describe("App ID do canal oficial (necessário só pra imagem de cabeçalho de t
 
   it("o GET devolve appId — a tela precisa saber se falta preencher", () => {
     const fonte = readFileSync("app/api/v1/channels/official/route.ts", "utf8");
-    expect(fonte).toMatch(/appId: data\?\.meta_app_id \?\? null/);
+    // Por número: com vários números oficiais, cada cartão da tela diz se falta o dele.
+    expect(fonte).toMatch(/appId: data\.meta_app_id,/);
   });
 
   it("a tela tem o campo e avisa quando falta, sem travar o canal pra texto/botão", () => {

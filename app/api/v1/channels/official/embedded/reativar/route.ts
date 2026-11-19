@@ -12,9 +12,14 @@
  * token vem do banco, nunca do corpo, e a organização vem da sessão autenticada.
  * Reassinar uma WABA já assinada é idempotente; um pedido de histórico repetido a Meta
  * recusa, e isso volta no resultado sem derrubar nada.
+ *
+ * Com mais de um número em coexistência, o corpo diz QUAL (`channel_session_id`) — o id só
+ * escolhe entre as sessões desta organização, nunca alcança outra. Sem o id e com um número
+ * só, reativa esse; sem o id e com vários, recusa em vez de adivinhar.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { publicBase } from "@/lib/api/public-base";
 import { fail, ok } from "@/lib/api/wrappers";
@@ -30,6 +35,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const corpoSchema = z.object({ channel_session_id: z.string().uuid().optional() });
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
   const user = await requireAuth();
@@ -41,15 +48,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
   if (!verifyToken) return fail("not_found", "embedded_signup_indisponivel", 404, { requestId });
 
+  const corpo = corpoSchema.safeParse(await req.json().catch(() => ({})));
+  if (!corpo.success) return fail("invalid_request", "channel_session_id_invalido", 422, { requestId });
+
   const admin = createAdminClient();
-  const { data: sessao } = await admin
+  let consulta = admin
     .from("channel_sessions")
     .select("id, webhook_path_token, meta_waba_id, meta_phone_number_id")
     .eq("organization_id", org.orgId)
     .eq("provider", CHANNEL_PROVIDER_META)
     .eq("meta_connection_mode", "embedded_coexistence")
-    .is(ARCHIVED_AT, null)
-    .maybeSingle();
+    .is(ARCHIVED_AT, null);
+  if (corpo.data.channel_session_id) consulta = consulta.eq("id", corpo.data.channel_session_id);
+  const { data: candidatas } = await consulta.limit(2);
+  if ((candidatas ?? []).length > 1) {
+    return fail(
+      "invalid_request",
+      "Esta organização tem mais de um número em coexistência. Diga qual reativar (channel_session_id).",
+      422,
+      { requestId },
+    );
+  }
+  const sessao = candidatas?.[0];
   if (!sessao || !sessao.meta_waba_id || !sessao.meta_phone_number_id) {
     return fail("not_found", "sem_conexao_em_coexistencia", 404, { requestId });
   }

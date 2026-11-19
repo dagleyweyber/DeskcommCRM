@@ -25,9 +25,10 @@ import { publicBase } from "@/lib/api/public-base";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
-import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { ARCHIVED_AT } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { ativarCoexistencia } from "@/lib/channels/meta/embedded-activate";
+import { gravarSessaoOficial } from "@/lib/channels/meta/gravar-sessao";
 import { embeddedSignupConfig } from "@/lib/channels/meta/embedded-config";
 import {
   exchangeEmbeddedCode,
@@ -35,7 +36,6 @@ import {
   numerosDoAppNaWaba,
   wabaIdsDoToken,
 } from "@/lib/channels/meta/embedded-signup";
-import { reactivateChannelSession } from "@/lib/channels/reactivate";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
@@ -178,21 +178,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Mesma busca do caminho manual: NÃO filtra `archived_at`, porque canal excluído é
-  // o que reconectar precisa ressuscitar (senão nasce uma segunda linha na org).
-  const buscarExistente = (colunas: string) =>
-    admin
-      .from("channel_sessions")
-      .select(colunas)
-      .eq("organization_id", g.orgId)
-      .eq("provider", CHANNEL_PROVIDER_META)
-      .maybeSingle();
-  const { data: existenteRaw } = await queryTolerantToMissingArchived(
-    () => buscarExistente(`id, ${ARCHIVED_AT}`),
-    () => buscarExistente("id"),
-  );
-  const existente = existenteRaw as { id: string; archived_at?: string | null } | null;
-
   const telefone = numero.info.displayPhoneNumber
     ? `+${numero.info.displayPhoneNumber.replace(/\D/g, "")}`
     : null;
@@ -210,33 +195,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     meta_onboarded_at: new Date().toISOString(),
   };
 
-  const { error } = existente
-    ? await reactivateChannelSession(
-        admin,
-        {
-          organizationId: g.orgId,
-          channelSessionId: existente.id,
-          archivedAt: existente.archived_at ?? null,
-        },
-        linha,
-        {
-          userId: g.userId,
-          requestId,
-          metadata: { provider: CHANNEL_PROVIDER_META, phone_number: telefone, modo: "embedded_coexistence" },
-        },
-      )
-    : await admin.from("channel_sessions").insert({ ...linha, webhook_secret_encrypted: cifrado });
-  if (error) {
-    return fail("internal_error", error.message ?? "channel_session_write_failed", 500, { requestId });
+  // Reconectar o MESMO número atualiza (ou ressuscita) a linha dele; número diferente nasce
+  // em linha própria. Ver `gravarSessaoOficial`.
+  const gravacao = await gravarSessaoOficial(admin, {
+    linha,
+    segredoCifrado: cifrado,
+    ator: {
+      userId: g.userId,
+      requestId,
+      metadata: { provider: CHANNEL_PROVIDER_META, phone_number: telefone, modo: "embedded_coexistence" },
+    },
+  });
+  if (!gravacao.ok) {
+    return fail("internal_error", gravacao.motivo, 500, { requestId });
   }
+  const sessaoId = gravacao.channelSessionId;
 
   // 4. a URL de webhook da sessão só existe depois da gravação (o token do caminho
-  // nasce no banco, e a reativação o rotaciona). Lê de volta e assina a WABA.
+  // nasce no banco, e a reativação o rotaciona). Lê de volta PELO ID e assina a WABA.
   const { data: sessao } = await admin
     .from("channel_sessions")
     .select("id, webhook_path_token")
+    .eq("id", sessaoId)
     .eq("organization_id", g.orgId)
-    .eq("provider", CHANNEL_PROVIDER_META)
     .is(ARCHIVED_AT, null)
     .maybeSingle();
   if (!sessao) {
@@ -286,6 +267,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return ok({
     connected: true,
+    channelSessionId: sessao.id,
     sync,
     displayName: linha.display_name,
     phoneNumber: telefone,

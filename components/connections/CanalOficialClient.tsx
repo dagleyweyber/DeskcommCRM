@@ -97,8 +97,8 @@ export function CanalOficialClient() {
     }
   }
 
-  async function reativarRecebimento() {
-    const r = await reativar.mutateAsync();
+  async function reativarRecebimento(channelSessionId: string) {
+    const r = await reativar.mutateAsync(channelSessionId);
     const pend = Object.entries(r.data.sync).filter(([, v]) => !v.ok);
     if (pend.length === 0) {
       toast.success("Recebimento ativado e histórico solicitado à Meta.");
@@ -114,31 +114,31 @@ export function CanalOficialClient() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="canal-oficial-root">
-      {estado?.connected ? (
-        <Card className="p-4" data-testid="canal-conectado">
+      {(estado?.numbers ?? []).map((numero) => (
+        <Card key={numero.channelSessionId} className="p-4" data-testid="canal-conectado">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{estado.displayName}</span>
-            {estado.phoneNumber ? (
+            <span className="font-medium">{numero.displayName}</span>
+            {numero.phoneNumber ? (
               <Badge variant="outline" className="font-mono text-xs">
-                {estado.phoneNumber}
+                {numero.phoneNumber}
               </Badge>
             ) : null}
-            <Badge>{estado.status ?? "—"}</Badge>
-            {estado.connectionMode === "embedded_coexistence" ? (
+            <Badge>{numero.status ?? "—"}</Badge>
+            {numero.connectionMode === "embedded_coexistence" ? (
               <Badge variant="outline">coexistência (app do celular mantido)</Badge>
             ) : null}
             {/* Mostra que o token EXISTE, nunca qual é. */}
-            <Badge variant={estado.hasToken ? "outline" : "destructive"}>
-              {estado.hasToken ? "credencial guardada" : "sem credencial"}
+            <Badge variant={numero.hasToken ? "outline" : "destructive"}>
+              {numero.hasToken ? "credencial guardada" : "sem credencial"}
             </Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            WABA <span className="font-mono">{estado.wabaId}</span> · número{" "}
-            <span className="font-mono">{estado.phoneNumberId}</span>
-            {estado.appId ? (
+            WABA <span className="font-mono">{numero.wabaId}</span> · número{" "}
+            <span className="font-mono">{numero.phoneNumberId}</span>
+            {numero.appId ? (
               <>
                 {" "}
-                · App <span className="font-mono">{estado.appId}</span>
+                · App <span className="font-mono">{numero.appId}</span>
               </>
             ) : (
               <span className="text-amber-600 dark:text-amber-500">
@@ -148,16 +148,18 @@ export function CanalOficialClient() {
               </span>
             )}
           </p>
-          {estado.connectionMode === "embedded_coexistence" ? (
+          {numero.connectionMode === "embedded_coexistence" ? (
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button
                 size="sm"
                 variant="outline"
-                onClick={reativarRecebimento}
+                onClick={() => reativarRecebimento(numero.channelSessionId)}
                 disabled={reativar.isPending}
                 data-testid="btn-reativar-coexistencia"
               >
-                {reativar.isPending ? "Reativando…" : "Reativar recebimento"}
+                {reativar.isPending && reativar.variables === numero.channelSessionId
+                  ? "Reativando…"
+                  : "Reativar recebimento"}
               </Button>
               <span className="text-xs text-muted-foreground">
                 Use se as mensagens do cliente não estiverem chegando. Reassina a conta na Meta e
@@ -165,40 +167,46 @@ export function CanalOficialClient() {
               </span>
             </div>
           ) : null}
-        </Card>
-      ) : null}
-
-      {estado?.webhook ? (
-        <Card className="flex flex-col gap-3 p-4">
-          <div>
-            <h2 className="font-medium">Cole isto no painel da Meta</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Em <strong>WhatsApp → Configuração</strong>, na seção de Webhook. Sem esse passo
-              o canal envia, mas <strong>não recebe</strong> — as respostas do cliente não
-              chegam e a janela de 24 horas nunca abre.
-            </p>
-          </div>
-          <ParaColar rotulo="URL de callback" valor={estado.webhook.callbackUrl} />
-          <ParaColar rotulo="Token de verificação" valor={estado.webhook.verifyToken} />
-          <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Campos a assinar
-            </span>
-            <div className="flex flex-wrap gap-1">
-              {estado.webhook.fields.map((f) => (
-                <Badge key={f} variant="outline" className="font-mono text-xs">
-                  {f}
-                </Badge>
-              ))}
+          {numero.webhook ? (
+            <div className="mt-4 flex flex-col gap-3 border-t pt-3">
+              <p className="text-sm text-muted-foreground">
+                <strong>Cole isto no painel da Meta</strong>, em{" "}
+                <strong>WhatsApp → Configuração</strong>, na seção de Webhook. Sem esse passo o
+                número envia, mas <strong>não recebe</strong>.
+              </p>
+              <ParaColar rotulo="URL de callback" valor={numero.webhook.callbackUrl} />
+              <ParaColar rotulo="Token de verificação" valor={numero.webhook.verifyToken} />
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Campos a assinar
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {numero.webhook.fields.map((f) => (
+                    <Badge key={f} variant="outline" className="font-mono text-xs">
+                      {f}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : null}
         </Card>
-      ) : null}
+      ))}
 
       {embeddedCfg.data?.data.enabled ? (
         <Card className="flex flex-col gap-3 p-4" data-testid="card-conectar-meta">
           <div>
-            <h2 className="font-medium">Conectar com a Meta (mantém o app do celular)</h2>
+            <h2 className="font-medium">
+              {estado?.connected
+                ? "Conectar outro número com a Meta (mantém o app do celular)"
+                : "Conectar com a Meta (mantém o app do celular)"}
+            </h2>
+            {estado?.connected ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Os números já conectados continuam como estão: um número novo entra como mais um
+                canal. Escolher de novo um número já conectado só renova a conexão dele.
+              </p>
+            ) : null}
             <p className="mt-1 text-sm text-muted-foreground">
               Use o número que você já tem no <strong>app WhatsApp Business</strong>. O app
               continua funcionando no celular e o CRM passa a atender no mesmo número, sem
@@ -219,12 +227,13 @@ export function CanalOficialClient() {
 
       <Card className="p-4">
         <h2 className="font-medium">
-          {estado?.connected ? "Trocar credencial" : "Conectar canal oficial"}
+          {estado?.connected ? "Conectar ou trocar credencial (manual)" : "Conectar canal oficial"}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Os valores vêm do seu app na Meta (<strong>WhatsApp → Configuração da API</strong>).
           A credencial é <strong>validada com a Meta antes de ser gravada</strong> — se o número
-          não responder, nada é salvo.
+          não responder, nada é salvo. O ID do número decide: um número já conectado tem a
+          credencial trocada; um número novo entra como mais um canal.
         </p>
 
         <form onSubmit={enviar} className="mt-4 flex flex-col gap-3">
@@ -254,7 +263,7 @@ export function CanalOficialClient() {
               id="appid"
               value={form.app_id}
               onChange={(e) => setForm((f) => ({ ...f, app_id: e.target.value }))}
-              placeholder={estado?.appId ? `${estado.appId} (já guardado)` : "1234567890123456"}
+              placeholder="1234567890123456"
             />
             <span className="text-xs text-muted-foreground">
               Necessário só pra criar template com imagem no cabeçalho. Fica em{" "}
@@ -268,7 +277,7 @@ export function CanalOficialClient() {
               type="password"
               value={form.token}
               onChange={(e) => setForm((f) => ({ ...f, token: e.target.value }))}
-              placeholder={estado?.hasToken ? "•••• (já guardado — preencha para trocar)" : "EAAG…"}
+              placeholder="EAAG…"
               required
             />
             <span className="text-xs text-muted-foreground">

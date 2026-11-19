@@ -25,6 +25,8 @@ import {
   type TemplatePreview,
   type TemplateView,
 } from "@/hooks/channels/useTemplates";
+import { useNumerosDaApi } from "@/hooks/campaigns/useCampaigns";
+import { rotuloDoNumero } from "@/lib/campaigns/numero-de-envio";
 import {
   contarVariaveis,
   formularioDeComponents,
@@ -94,9 +96,18 @@ function Preview({ preview }: { preview: TemplatePreview }) {
  * (`lib/channels/template-conteudo.ts`) — o formato do contrato é o mesmo,
  * porque as duas portas escrevem na mesma WABA.
  */
-function CriarModelo({ onCriado, modelo }: { onCriado: () => void; modelo?: TemplateView }) {
-  const criar = useCreateTemplate();
-  const editar = useEditTemplate();
+function CriarModelo({
+  onCriado,
+  modelo,
+  numeroId,
+}: {
+  onCriado: () => void;
+  modelo?: TemplateView;
+  /** Número oficial em que o modelo nasce (ou é editado). `null` = o único da organização. */
+  numeroId: string | null;
+}) {
+  const criar = useCreateTemplate(numeroId);
+  const editar = useEditTemplate(numeroId);
   // Modo editar: o MESMO formulário, preenchido com o que a Meta guarda. Nome, idioma e
   // categoria ficam travados — identificam o modelo, e a Meta não deixa trocá-los.
   const emEdicao = !!modelo;
@@ -225,6 +236,7 @@ function CriarModelo({ onCriado, modelo }: { onCriado: () => void; modelo?: Temp
                 try {
                   const fd = new FormData();
                   fd.append("file", f);
+                  if (numeroId) fd.append("channel_session_id", numeroId);
                   const r = await fetch("/api/v1/channels/templates/media", {
                     method: "POST",
                     body: fd,
@@ -527,8 +539,18 @@ function CriarModelo({ onCriado, modelo }: { onCriado: () => void; modelo?: Temp
  * e o nome fica indisponível por um tempo. Se o modelo estiver em uso, a rota
  * recusa (409) e o toast diz quais automações/campanhas — o diálogo fica aberto.
  */
-function ApagarModelo({ nome, idiomas, onFechar }: { nome: string; idiomas: string[]; onFechar: () => void }) {
-  const apagar = useDeleteTemplate();
+function ApagarModelo({
+  nome,
+  idiomas,
+  numeroId,
+  onFechar,
+}: {
+  nome: string;
+  idiomas: string[];
+  numeroId: string | null;
+  onFechar: () => void;
+}) {
+  const apagar = useDeleteTemplate(numeroId);
   return (
     <AlertDialog open onOpenChange={(aberto) => { if (!aberto) onFechar(); }}>
       <AlertDialogContent>
@@ -565,8 +587,13 @@ function ApagarModelo({ nome, idiomas, onFechar }: { nome: string; idiomas: stri
 }
 
 export function TemplatesClient() {
-  const { data, isPending } = useTemplates();
-  const sync = useSyncTemplates();
+  // Com dois ou mais números oficiais, a tela mostra os modelos de UM número por vez — cada
+  // número tem a própria conta na Meta, com modelos próprios. Com um número só, nada muda.
+  const numeros = useNumerosDaApi().data?.data.numeros ?? [];
+  const [numeroEscolhido, setNumeroEscolhido] = useState<string | null>(null);
+  const numeroId = numeros.length > 1 ? (numeroEscolhido ?? numeros[0]!.id) : null;
+  const { data, isPending } = useTemplates(numeroId ?? undefined);
+  const sync = useSyncTemplates(numeroId);
   const [criando, setCriando] = useState(false);
   const [apagando, setApagando] = useState<string | null>(null);
   const [editando, setEditando] = useState<TemplateView | null>(null);
@@ -611,10 +638,34 @@ export function TemplatesClient() {
   return (
     <div className="flex flex-col gap-4" data-testid="templates-root">
       <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">
-          Espelho da conta <span className="font-mono text-xs">{waba}</span> ·{" "}
-          {templates.length} template(s)
-        </p>
+        <div className="flex flex-col gap-1">
+          {numeros.length > 1 && (
+            <label className="flex items-center gap-2 text-sm" data-testid="templates-seletor-numero">
+              <span className="font-medium">Número</span>
+              <select
+                value={numeroId ?? ""}
+                onChange={(e) => {
+                  setCriando(false);
+                  setEditando(null);
+                  setApagando(null);
+                  setNumeroEscolhido(e.target.value);
+                }}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                aria-label="Número oficial"
+              >
+                {numeros.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {rotuloDoNumero(n)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="text-sm text-muted-foreground">
+            Espelho da conta <span className="font-mono text-xs">{waba}</span> ·{" "}
+            {templates.length} template(s)
+          </p>
+        </div>
         <div className="flex gap-2">
           <Button onClick={sincronizar} disabled={sync.isPending} data-testid="btn-sync">
             {sync.isPending ? "Sincronizando…" : "Sincronizar com a Meta"}
@@ -632,7 +683,7 @@ export function TemplatesClient() {
         </div>
       </div>
 
-      {criando && <CriarModelo onCriado={() => setCriando(false)} />}
+      {criando && <CriarModelo numeroId={numeroId} onCriado={() => setCriando(false)} />}
 
       {editando && (
         <div ref={formEdicaoRef} className="scroll-mt-4">
@@ -640,6 +691,7 @@ export function TemplatesClient() {
           <CriarModelo
             key={`${editando.name}:${editando.language}`}
             modelo={editando}
+            numeroId={numeroId}
             onCriado={() => setEditando(null)}
           />
         </div>
@@ -649,6 +701,7 @@ export function TemplatesClient() {
         <ApagarModelo
           nome={apagando}
           idiomas={templates.filter((t) => t.name === apagando).map((t) => t.language)}
+          numeroId={numeroId}
           onFechar={() => setApagando(null)}
         />
       )}

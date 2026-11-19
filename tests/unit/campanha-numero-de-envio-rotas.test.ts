@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as SessionModule from "@/lib/channels/meta/session";
 
 /**
  * As duas rotas por trás de "por qual número vai sair?":
@@ -22,7 +23,17 @@ vi.mock("@/lib/auth/require-role", () => ({
   requireRole: async () => ({ ok: true, org: { orgId: ORG }, user: { id: "u1" } }),
 }));
 const metaSessionForOrg = vi.fn(async () => ({ id: NUMERO_A, wabaId: "WA" }));
-vi.mock("@/lib/channels/meta/session", () => ({ metaSessionForOrg: () => metaSessionForOrg() }));
+// O número ESCOLHIDO passa pela consulta real (contra o banco fingido abaixo); sem escolha,
+// cai no espião do "primeiro número".
+vi.mock("@/lib/channels/meta/session", async (importOriginal) => {
+  const real = await importOriginal<typeof SessionModule>();
+  return {
+    ...real,
+    metaSessionForOrg: () => metaSessionForOrg(),
+    metaSessionEscolhida: (org: string, id?: string | null) =>
+      id ? real.metaSessionEscolhida(org, id) : metaSessionForOrg(),
+  };
+});
 
 /** Registra cada consulta (tabela + filtros) e devolve o que o cenário definiu para a tabela. */
 const consultas: Array<{ tabela: string; filtros: unknown[][] }> = [];

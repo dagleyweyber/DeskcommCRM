@@ -4,8 +4,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { apiClient } from "@/lib/api/client";
 
+/** Um número oficial conectado. */
+export interface OfficialNumber {
+  channelSessionId: string;
+  hasToken: boolean;
+  phoneNumberId: string | null;
+  wabaId: string | null;
+  appId: string | null;
+  connectionMode: "byo" | "embedded_coexistence" | null;
+  displayName: string | null;
+  phoneNumber: string | null;
+  status: string | null;
+  webhook: OfficialChannelState["webhook"];
+}
+
 export interface OfficialChannelState {
   connected: boolean;
+  /** TODOS os números oficiais da organização. Os campos abaixo descrevem só o primeiro. */
+  numbers: OfficialNumber[];
   /** Existe token gravado? O token em si NUNCA volta — ver a rota. */
   hasToken: boolean;
   phoneNumberId: string | null;
@@ -48,6 +64,8 @@ export function useConnectOfficialChannel() {
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
+      // Número conectado/reconectado muda a lista de números de campanhas e modelos.
+      qc.invalidateQueries({ queryKey: ["campaigns", "numeros"] });
     },
   });
 }
@@ -81,6 +99,8 @@ export function useConcluirEmbeddedSignup() {
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
+      // Número conectado/reconectado muda a lista de números de campanhas e modelos.
+      qc.invalidateQueries({ queryKey: ["campaigns", "numeros"] });
     },
   });
 }
@@ -94,11 +114,15 @@ export interface ResultadoReativacao {
 export function useReativarCoexistencia() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () =>
-      apiClient.post<{ data: ResultadoReativacao }>("/api/v1/channels/official/embedded/reativar", {}),
+    mutationFn: async (channelSessionId: string) =>
+      apiClient.post<{ data: ResultadoReativacao }>("/api/v1/channels/official/embedded/reativar", {
+        channel_session_id: channelSessionId,
+      }),
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["official-channel"] });
+      // Número conectado/reconectado muda a lista de números de campanhas e modelos.
+      qc.invalidateQueries({ queryKey: ["campaigns", "numeros"] });
     },
   });
 }

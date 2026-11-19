@@ -106,6 +106,76 @@ export async function metaSessionForOrg(
 }
 
 /**
+ * A sessão oficial que o operador ESCOLHEU (`channelSessionId`) — ou, sem escolha, a primeira
+ * da organização (`metaSessionForOrg`), que é o comportamento de quem tem um número só.
+ *
+ * Com o id, só vale sessão oficial ATIVA desta organização: o id vem do browser, e quem
+ * controla o browser controla o id. Id de outra org ou de canal excluído devolve `null`.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function metaSessionEscolhida(
+  organizationId: string,
+  channelSessionId?: string | null,
+): Promise<MetaWebhookSession | null> {
+  if (!channelSessionId) return metaSessionForOrg(organizationId);
+  if (!UUID.test(channelSessionId)) return null;
+
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("channel_sessions")
+    .select("id, organization_id, meta_waba_id, meta_phone_number_id, meta_connection_mode")
+    .eq("id", channelSessionId)
+    .eq("organization_id", organizationId)
+    .eq("provider", CHANNEL_PROVIDER_META)
+    .is(ARCHIVED_AT, null)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    id: data.id,
+    organizationId: data.organization_id,
+    wabaId: data.meta_waba_id ?? null,
+    phoneNumberId: data.meta_phone_number_id ?? null,
+    connectionMode: data.meta_connection_mode ?? null,
+  };
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * A linha oficial DESTE número nesta organização — ativa ou excluída —, ou `null`.
+ *
+ * Um canal oficial é identificado pelo número (`meta_phone_number_id`), não pela organização.
+ * Achado ao vivo (B'Laser Parnamirim, 2026-11-19): conectar e reconectar procuravam "a linha
+ * oficial da org" e, com um número já conectado, conectar OUTRO número regravava a linha do
+ * primeiro — a Recepção virou a Clara, parou de receber e o histórico da Clara caiu nas
+ * conversas dela. Reconectar o MESMO número atualiza (ou ressuscita) a linha dele; número
+ * diferente nasce em linha própria.
+ *
+ * Ativa ganha de excluída: o índice único só barra duas ATIVAS do mesmo número, então pode
+ * haver uma ativa e excluídas antigas — e a ativa é a que está em uso.
+ */
+export async function metaSessionDoNumero(
+  admin: AdminClient,
+  organizationId: string,
+  phoneNumberId: string,
+): Promise<{ id: string; archived_at: string | null } | null> {
+  const base = (colunas: string) =>
+    admin
+      .from("channel_sessions")
+      .select(colunas)
+      .eq("organization_id", organizationId)
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .eq("meta_phone_number_id", phoneNumberId);
+  const { data } = await queryTolerantToMissingArchived(
+    () => base(`id, ${ARCHIVED_AT}`).order(ARCHIVED_AT, { ascending: false, nullsFirst: true }).limit(1),
+    () => base("id").limit(1),
+  );
+  const linha = ((data ?? []) as unknown as { id: string; archived_at?: string | null }[])[0];
+  return linha ? { id: linha.id, archived_at: linha.archived_at ?? null } : null;
+}
+
+/**
  * Sessão ATIVA dona de uma conta de WhatsApp (WABA) ou, na falta dela, de um número.
  *
  * Serve ao endpoint global do app (`/api/v1/webhooks/meta`): a Meta entrega ali o que

@@ -31,9 +31,9 @@ import { ROLE_RANK } from "@/lib/auth/types";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { logger } from "@/lib/logger";
+import { gravarSessaoOficial } from "@/lib/channels/meta/gravar-sessao";
 import { registerMetaPhoneNumber } from "@/lib/channels/meta/register-number";
 import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
-import { reactivateChannelSession } from "@/lib/channels/reactivate";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
 
@@ -73,42 +73,80 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // de excluir — e oferecia "Trocar credencial" onde deveria oferecer "Conectar".
   // O POST, ao contrário, PRECISA enxergar a linha arquivada: é ela que ele
   // ressuscita.
+  //
+  // Uma organização pode ter VÁRIOS números oficiais (Recepção e Comercial, por exemplo).
+  // `numbers` traz todos; os campos de topo seguem descrevendo o primeiro, para quem
+  // já consome esta resposta não quebrar. Antes era `maybeSingle`: com dois números a
+  // consulta dava erro e a tela dizia "não conectado" para uma org com dois canais no ar.
   const consultar = () =>
     admin
       .from("channel_sessions")
       .select("id, meta_phone_number_id, meta_waba_id, meta_app_id, meta_connection_mode, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
       .eq("organization_id", g.orgId)
-      .eq("provider", CHANNEL_PROVIDER_META);
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .order("created_at", { ascending: true });
   const { data } = await queryTolerantToMissingArchived(
-    () => consultar().is(ARCHIVED_AT, null).maybeSingle(),
-    () => consultar().maybeSingle(),
+    () => consultar().is(ARCHIVED_AT, null),
+    () => consultar(),
   );
 
   const base = publicBase(req);
+  const numbers = ((data ?? []) as LinhaOficialLida[]).map((linha) => descreverNumero(linha, base));
+  const primeiro = numbers[0];
   return ok({
-    connected: Boolean(data),
+    connected: numbers.length > 0,
+    hasToken: primeiro?.hasToken ?? false,
+    phoneNumberId: primeiro?.phoneNumberId ?? null,
+    wabaId: primeiro?.wabaId ?? null,
+    appId: primeiro?.appId ?? null,
+    connectionMode: primeiro?.connectionMode ?? null,
+    displayName: primeiro?.displayName ?? null,
+    phoneNumber: primeiro?.phoneNumber ?? null,
+    status: primeiro?.status ?? null,
+    webhook: primeiro?.webhook ?? null,
+    numbers,
+  });
+}
+
+interface LinhaOficialLida {
+  id: string;
+  meta_phone_number_id: string | null;
+  meta_waba_id: string | null;
+  meta_app_id: string | null;
+  meta_connection_mode: string | null;
+  meta_token_encrypted: string | null;
+  phone_number: string | null;
+  display_name: string | null;
+  webhook_path_token: string;
+  status: string | null;
+}
+
+function descreverNumero(data: LinhaOficialLida, base: string) {
+  return {
+    channelSessionId: data.id,
     // `hasToken` em vez do token: uma vez gravado, a tela mostra que EXISTE, nunca
     // qual é. Devolver o segredo para preencher o campo seria vazá-lo a cada render.
-    hasToken: Boolean(data?.meta_token_encrypted),
-    phoneNumberId: data?.meta_phone_number_id ?? null,
-    wabaId: data?.meta_waba_id ?? null,
-    appId: data?.meta_app_id ?? null,
+    hasToken: Boolean(data.meta_token_encrypted),
+    phoneNumberId: data.meta_phone_number_id,
+    wabaId: data.meta_waba_id,
+    appId: data.meta_app_id,
     /** `byo` (token colado) ou `embedded_coexistence` (popup da Meta, app do celular mantido). */
-    connectionMode: data?.meta_connection_mode ?? null,
-    displayName: data?.display_name ?? null,
-    phoneNumber: data?.phone_number ?? null,
-    status: data?.status ?? null,
+    connectionMode: data.meta_connection_mode,
+    displayName: data.display_name,
+    phoneNumber: data.phone_number,
+    status: data.status,
     /** O que o operador precisa colar do NOSSO lado no dashboard da Meta. */
     // Coexistência assina a WABA com `override_callback_uri` no servidor: não há o que
     // o operador colar no painel da Meta.
-    webhook: data && data.meta_connection_mode !== "embedded_coexistence"
-      ? {
-          callbackUrl: `${base}/api/v1/webhooks/meta/${data.webhook_path_token}`,
-          verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? null,
-          fields: ["messages", "message_template_status_update", "template_category_update"],
-        }
-      : null,
-  });
+    webhook:
+      data.meta_connection_mode !== "embedded_coexistence"
+        ? {
+            callbackUrl: `${base}/api/v1/webhooks/meta/${data.webhook_path_token}`,
+            verifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? null,
+            fields: ["messages", "message_template_status_update", "template_category_update"],
+          }
+        : null,
+  };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -124,23 +162,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const { phone_number_id, waba_id, token, app_id } = parsed.data;
 
-  // Canal conectado por COEXISTÊNCIA não pode ser sobrescrito por credencial
+  // Número conectado por COEXISTÊNCIA não pode ser sobrescrito por credencial
   // manual: o passo de registro logo abaixo (`/register`) tira o número do app
   // WhatsApp Business do celular — exatamente o que a coexistência existe para
   // evitar. Trocar de modo é decisão consciente (excluir o canal e reconectar),
-  // não efeito colateral de colar um token.
+  // não efeito colateral de colar um token. Vale só para ESTE número: outro número
+  // da organização em coexistência não impede conectar um número novo.
   const { data: coexistente } = await createAdminClient()
     .from("channel_sessions")
     .select("id")
     .eq("organization_id", g.orgId)
     .eq("provider", CHANNEL_PROVIDER_META)
+    .eq("meta_phone_number_id", phone_number_id)
     .eq("meta_connection_mode", "embedded_coexistence")
     .is(ARCHIVED_AT, null)
     .maybeSingle();
   if (coexistente) {
     return fail(
       "state_conflict",
-      "Este canal foi conectado pelo modo Coexistência. Exclua o canal antes de conectar com credencial manual — registrar o número tiraria ele do app WhatsApp Business do celular.",
+      "Este número foi conectado pelo modo Coexistência. Exclua o canal antes de conectar com credencial manual — registrar o número tiraria ele do app WhatsApp Business do celular.",
       409,
       { requestId },
     );
@@ -181,23 +221,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // A busca NÃO filtra `archived_at`: um canal oficial excluído é exatamente o
-  // que este POST precisa achar para trazer de volta. Ignorá-lo criaria uma
-  // SEGUNDA linha oficial na org — e a linha velha continuaria segurando o par
-  // (org, número) na trava da 0106.
-  const buscarExistente = (colunas: string) =>
-    admin
-      .from("channel_sessions")
-      .select(colunas)
-      .eq("organization_id", g.orgId)
-      .eq("provider", CHANNEL_PROVIDER_META)
-      .maybeSingle();
-  const { data: existenteRaw } = await queryTolerantToMissingArchived(
-    () => buscarExistente(`id, ${ARCHIVED_AT}`),
-    () => buscarExistente("id"),
-  );
-  const existente = existenteRaw as { id: string; archived_at?: string | null } | null;
-
   const linha = {
     organization_id: g.orgId,
     provider: CHANNEL_PROVIDER_META,
@@ -213,44 +236,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     meta_connection_mode: "byo",
   };
 
-  // `update` quando já existe em vez de upsert: a trava única de (org,
-  // phone_number) não serve de árbitro de `ON CONFLICT` aqui. Era DEFERRABLE
-  // (medido ao criar a sessão de teste da Fase 3b, e o Postgres recusa
-  // constraint deferível na inferência); a migration 0107 a trocou por um índice
-  // único PARCIAL (`where archived_at is null`), que só seria inferível se a
-  // cláusula repetisse o predicado — e o cliente do PostgREST não expõe isso.
-  // Mudou a razão, não a escolha.
-  //
-  // O update passa por `reactivateChannelSession` porque reconectar é
-  // ressuscitar: o mesmo patch que devolve status, credencial e número tem que
-  // devolver a linha à vida, ou o canal fica "conectado" na tela e excluído para
-  // todo o resto do sistema. Para o canal que já estava ativo é um no-op — e a
-  // auditoria de volta sai de lá, junto da ressurreição, não daqui.
-  const { error } = existente
-    ? await reactivateChannelSession(
-        admin,
-        {
-          organizationId: g.orgId,
-          channelSessionId: existente.id,
-          archivedAt: existente.archived_at ?? null,
-        },
-        linha,
-        {
-          userId: g.userId,
-          requestId,
-          metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
-        },
-      )
-    : await admin.from("channel_sessions").insert({ ...linha, webhook_secret_encrypted: cifrado });
-
-  if (error) {
-    return fail("internal_error", error.message ?? "channel_session_write_failed", 500, {
+  // Reconectar o MESMO número troca a credencial (ou ressuscita a linha dele); número
+  // diferente nasce em linha própria e não mexe nos outros. Ver `gravarSessaoOficial`.
+  const gravacao = await gravarSessaoOficial(admin, {
+    linha,
+    segredoCifrado: cifrado,
+    ator: {
+      userId: g.userId,
       requestId,
-    });
+      metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
+    },
+  });
+  if (!gravacao.ok) {
+    return fail("internal_error", gravacao.motivo, 500, { requestId });
   }
 
   return ok({
     connected: true,
+    channelSessionId: gravacao.channelSessionId,
     displayName: linha.display_name,
     phoneNumber: linha.phone_number,
     numberRegistered: registro.ok,

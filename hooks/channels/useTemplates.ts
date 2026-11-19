@@ -69,10 +69,19 @@ export function useTemplates(channelSessionId?: string | null) {
   });
 }
 
-export function useSyncTemplates() {
+/**
+ * Qual número oficial a ação atinge. `null`/ausente = o primeiro da organização (quem tem um
+ * número só). Com dois ou mais números, a tela SEMPRE passa o escolhido.
+ */
+function doNumero(channelSessionId?: string | null) {
+  return channelSessionId ? { channel_session_id: channelSessionId } : {};
+}
+
+export function useSyncTemplates(channelSessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", {}),
+    mutationFn: async () =>
+      apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", doNumero(channelSessionId)),
     onError: showApiError,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["channel-templates"] });
@@ -85,12 +94,14 @@ export function useSyncTemplates() {
  * devolve 409 com a lista de automações/campanhas que ainda usam o nome — a
  * mensagem do erro já diz quais, e o toast padrão a mostra.
  */
-export function useDeleteTemplate() {
+export function useDeleteTemplate(channelSessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) =>
       apiClient.delete<{ data: { name: string; languages: string[] } }>(
-        `/api/v1/channels/templates?name=${encodeURIComponent(name)}`,
+        `/api/v1/channels/templates?name=${encodeURIComponent(name)}${
+          channelSessionId ? `&channel_session_id=${encodeURIComponent(channelSessionId)}` : ""
+        }`,
       ),
     onError: showApiError,
     onSuccess: () => {
@@ -110,11 +121,12 @@ export interface CreateTemplateInput {
  * Cria a definição direto na WABA e já sincroniza — a mesma rota faz as duas
  * coisas, porque separar obrigaria a tela a saber que criar também sincroniza.
  */
-export function useCreateTemplate() {
+export function useCreateTemplate(channelSessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: CreateTemplateInput) =>
       apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", {
+        ...doNumero(channelSessionId),
         acao: "criar",
         ...input,
       }),
@@ -135,11 +147,12 @@ export interface EditTemplateInput {
  * Edita o CONTEÚDO de um modelo já existente na WABA e sincroniza. Nome, idioma e
  * categoria não mudam. A edição manda o modelo de volta para revisão da Meta.
  */
-export function useEditTemplate() {
+export function useEditTemplate(channelSessionId?: string | null) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: EditTemplateInput) =>
       apiClient.post<{ data: SyncCounts }>("/api/v1/channels/templates", {
+        ...doNumero(channelSessionId),
         acao: "editar",
         ...input,
       }),

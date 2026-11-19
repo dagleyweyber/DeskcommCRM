@@ -24,7 +24,7 @@ import type { NextRequest, NextResponse } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
-import { metaSessionForOrg } from "@/lib/channels/meta/session";
+import { metaSessionEscolhida } from "@/lib/channels/meta/session";
 import { resolveCreds } from "@/lib/channels/meta/template-ops";
 import { uploadMediaHandle } from "@/lib/channels/meta/resumable-upload";
 import { logger } from "@/lib/logger";
@@ -45,12 +45,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail("forbidden", "admin_required", 403, { requestId });
   }
 
-  const sessao = await metaSessionForOrg(org.orgId);
+  const form = await req.formData().catch(() => null);
+  // Qual número oficial sobe a imagem: o handle vale para o app/WABA desse número.
+  const escolha = form?.get("channel_session_id");
+  const sessao = await metaSessionEscolhida(org.orgId, typeof escolha === "string" && escolha ? escolha : null);
   if (!sessao?.phoneNumberId) {
     return fail("invalid_request", "no_meta_channel", 400, { requestId });
   }
 
-  const form = await req.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) {
     return fail("validation_failed", "Campo 'file' (multipart) obrigatório.", 422, { requestId });
