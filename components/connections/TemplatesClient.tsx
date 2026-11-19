@@ -112,7 +112,7 @@ function CriarModelo({
   // categoria ficam travados — identificam o modelo, e a Meta não deixa trocá-los.
   const emEdicao = !!modelo;
   const inicial = useMemo(() => (modelo ? formularioDeComponents(modelo.components) : null), [modelo]);
-  const usos = useUsosDoModelo(modelo?.name ?? "");
+  const usos = useUsosDoModelo(modelo?.name ?? "", numeroId);
   const [nome, setNome] = useState(modelo?.name ?? "");
   const [idioma, setIdioma] = useState(modelo?.language ?? "pt_BR");
   const [categoria, setCategoria] = useState(modelo?.category ?? "UTILITY");

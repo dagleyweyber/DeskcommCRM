@@ -220,6 +220,15 @@ describe("ações sobre um número escolhido", () => {
     expect(corpo).toMatch(/\.is\(ARCHIVED_AT, null\)/);
   });
 
+  it("⭐ o aviso de uso (editar e apagar) conta só o que sai pelo número do modelo", () => {
+    const rota = readFileSync("app/api/v1/channels/templates/route.ts", "utf8");
+    const usos = readFileSync("app/api/v1/channels/templates/usos/route.ts", "utf8");
+    const tela = readFileSync("components/connections/TemplatesClient.tsx", "utf8");
+    expect(rota).toContain("usosDoModelo(admin, r.orgId, nome, sessao.id)");
+    expect(usos).toContain("metaSessionEscolhida(org.orgId, parsed.data.channel_session_id)");
+    expect(tela).toContain(`useUsosDoModelo(modelo?.name ?? "", numeroId)`);
+  });
+
   it("a tela de modelos mostra o seletor de número e passa o escolhido para todas as ações", () => {
     const tela = readFileSync("components/connections/TemplatesClient.tsx", "utf8");
     expect(tela).toMatch(/data-testid="templates-seletor-numero"/);

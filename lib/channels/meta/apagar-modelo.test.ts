@@ -20,6 +20,14 @@ function adminCom(tabelas: Record<string, Linha[]>) {
           linhas = linhas.filter((l) => (l[col] ?? null) === v);
           return q;
         },
+        // Só a forma que o código usa: "col.eq.X,col.is.null".
+        or: (filtro: string) => {
+          const [igual, nulo] = filtro.split(",");
+          const [col, , valor] = igual!.split(".");
+          const aceitaNulo = nulo === `${col}.is.null`;
+          linhas = linhas.filter((l) => l[col!] === valor || (aceitaNulo && (l[col!] ?? null) === null));
+          return q;
+        },
         not: (col: string, _op: string, lista: string) => {
           const fora = lista.replace(/[()]/g, "").split(",");
           linhas = linhas.filter((l) => !fora.includes(String(l[col])));
@@ -72,6 +80,35 @@ describe("usosDoModelo — o que impede apagar", () => {
     });
     const usos = await usosDoModelo(admin, ORG, "promo");
     expect(usos.map((u) => u.id).sort()).toEqual(["c3", "c4"]);
+  });
+
+  /**
+   * ⭐ Dois números oficiais na mesma org (B'Laser Parnamirim: Recepção e Clara), cada um com a
+   * própria conta na Meta. O mesmo nome de modelo pode existir nos dois; quem usa o da
+   * Recepção não pode impedir editar/apagar o homônimo da Clara.
+   */
+  it("⭐ com o número dono do modelo, só conta o que sai por ESTE número", async () => {
+    const admin = adminCom({
+      whatsapp_template_automations: [
+        { id: "a-rec", organization_id: ORG, template_name: "confirma", name: "Recepção", status: "active", channel_session_id: "recepcao" },
+        { id: "a-cla", organization_id: ORG, template_name: "confirma", name: "Clara", status: "active", channel_session_id: "clara" },
+      ],
+      whatsapp_campaigns: [
+        { id: "c-rec", organization_id: ORG, template_name: "confirma", name: "Camp Recepção", status: "draft", channel_session_id: "recepcao" },
+      ],
+    });
+    expect((await usosDoModelo(admin, ORG, "confirma", "clara")).map((u) => u.id)).toEqual(["a-cla"]);
+    expect((await usosDoModelo(admin, ORG, "confirma", "recepcao")).map((u) => u.id).sort()).toEqual(["a-rec", "c-rec"]);
+  });
+
+  it("linha SEM número gravado (clone antigo) segura o modelo de qualquer número — na dúvida, bloqueia", async () => {
+    const admin = adminCom({
+      whatsapp_template_automations: [
+        { id: "a-velha", organization_id: ORG, template_name: "confirma", name: "Antiga", status: "active", channel_session_id: null },
+      ],
+      whatsapp_campaigns: [],
+    });
+    expect((await usosDoModelo(admin, ORG, "confirma", "clara")).map((u) => u.id)).toEqual(["a-velha"]);
   });
 
   it("sem uso, lista vazia — o apagar segue", async () => {

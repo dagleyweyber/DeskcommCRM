@@ -171,12 +171,14 @@ export interface UsoDoModeloView {
 }
 
 /** Automações e campanhas abertas que usam o modelo — mostrado antes de salvar a edição. */
-export function useUsosDoModelo(name: string) {
+export function useUsosDoModelo(name: string, channelSessionId?: string | null) {
   return useQuery({
-    queryKey: ["channel-templates-usos", name],
+    queryKey: ["channel-templates-usos", name, channelSessionId ?? "padrao"],
     queryFn: async () =>
       apiClient.get<{ data: { usos: UsoDoModeloView[] } }>(
-        `/api/v1/channels/templates/usos?name=${encodeURIComponent(name)}`,
+        `/api/v1/channels/templates/usos?name=${encodeURIComponent(name)}${
+          channelSessionId ? `&channel_session_id=${encodeURIComponent(channelSessionId)}` : ""
+        }`,
       ),
     staleTime: 0,
   });

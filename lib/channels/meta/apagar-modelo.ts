@@ -30,21 +30,37 @@ export async function usosDoModelo(
   admin: SupabaseClient,
   organizationId: string,
   nome: string,
+  /**
+   * O número oficial dono do modelo. Cada número tem a própria conta na Meta, e o mesmo nome
+   * pode existir nos dois (Recepção e Comercial com "confirmacao_avaliacao", por exemplo):
+   * automação da Recepção não segura o modelo homônimo da Clara. Linha SEM número gravado
+   * (clone antigo) conta como "pode ser deste" — na dúvida, o aviso segura, nunca libera.
+   * Sem o parâmetro, conta em todos os números.
+   */
+  channelSessionId?: string | null,
 ): Promise<UsoDoModelo[]> {
+  const doNumero = <Q extends { or: (filtro: string) => Q }>(q: Q): Q =>
+    channelSessionId
+      ? q.or(`channel_session_id.eq.${channelSessionId},channel_session_id.is.null`)
+      : q;
   const [automacoes, campanhas] = await Promise.all([
-    admin
-      .from("whatsapp_template_automations")
-      .select("id, name, status")
-      .eq("organization_id", organizationId)
-      .eq("template_name", nome)
-      // Excluída (0222) nunca mais envia — não pode segurar o modelo.
-      .is("archived_at", null),
-    admin
-      .from("whatsapp_campaigns")
-      .select("id, name, status")
-      .eq("organization_id", organizationId)
-      .eq("template_name", nome)
-      .not("status", "in", `(${CAMPANHA_ENCERRADA.join(",")})`),
+    doNumero(
+      admin
+        .from("whatsapp_template_automations")
+        .select("id, name, status")
+        .eq("organization_id", organizationId)
+        .eq("template_name", nome)
+        // Excluída (0222) nunca mais envia — não pode segurar o modelo.
+        .is("archived_at", null),
+    ),
+    doNumero(
+      admin
+        .from("whatsapp_campaigns")
+        .select("id, name, status")
+        .eq("organization_id", organizationId)
+        .eq("template_name", nome)
+        .not("status", "in", `(${CAMPANHA_ENCERRADA.join(",")})`),
+    ),
   ]);
   if (automacoes.error) throw new Error(`usos_do_modelo: ${automacoes.error.message}`);
   if (campanhas.error) throw new Error(`usos_do_modelo: ${campanhas.error.message}`);

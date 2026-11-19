@@ -376,7 +376,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   const idiomas = ((existe ?? []) as { language: string }[]).map((l) => l.language);
   if (idiomas.length === 0) return fail("not_found", "Modelo não encontrado.", 404, { requestId });
 
-  const usos = await usosDoModelo(admin, r.orgId, nome);
+  // Só o que sai por ESTE número segura o modelo dele (o mesmo nome pode existir no outro).
+  const usos = await usosDoModelo(admin, r.orgId, nome, sessao.id);
   if (usos.length > 0) {
     return fail("state_conflict", descreverUsos(usos), 409, { requestId, details: { usos } });
   }
