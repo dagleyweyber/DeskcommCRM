@@ -69,8 +69,11 @@ function bancoFingido(linhas: Linha[]) {
       for (const l of this.casam()) Object.assign(l, this.patch);
       return { data: null, error: null };
     }
-    then<A, B>(ok?: ((v: unknown) => A) | null, err?: ((e: unknown) => B) | null) {
-      return Promise.resolve(this.executar()).then(ok, err);
+    then<R1 = unknown, R2 = never>(
+      ok?: ((v: unknown) => R1 | PromiseLike<R1>) | null,
+      err?: ((e: unknown) => R2 | PromiseLike<R2>) | null,
+    ): PromiseLike<R1 | R2> {
+      return Promise.resolve(this.executar() as unknown).then(ok, err);
     }
   }
   const admin = {
