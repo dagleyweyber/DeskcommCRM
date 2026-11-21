@@ -12,6 +12,7 @@ import {
   type Faixa,
 } from "@/lib/agenda/grade";
 import { RÓTULO_DO_STATUS, type HorarioDeFuncionamento, type Sala } from "@/lib/agenda/tipos";
+import { nomeDoProvedor } from "@/lib/agenda-externa/provedor";
 import { cn } from "@/lib/utils";
 
 import { CLASSE_DO_CARD, CLASSE_DO_SELO } from "./status";
@@ -238,7 +239,7 @@ export function GradeDaAgenda({
                         </span>
                         {c.external_provider && (
                           <span className="ml-1 mt-0.5 inline-block rounded border border-current/30 px-1.5 py-px text-[10px] font-medium opacity-80">
-                            Belle
+                            {nomeDoProvedor(c.external_provider)}
                           </span>
                         )}
                         <span className="block truncate opacity-90">

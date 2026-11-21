@@ -23,7 +23,7 @@ import { apiClient } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
 import { CalendarCheck } from "@/lib/ui/icons";
 
-import { LigacaoDeServicos } from "./_components/LigacaoDeServicos";
+import { LigacaoDeServicos } from "../_components/LigacaoDeServicos";
 
 export interface ConexaoBelle {
   id: string;

@@ -38,6 +38,10 @@ const NAV_ALLOWLIST: Record<string, string> = {
   "/app/contacts/importar":
     "sub-fluxo de Contatos, alcançado pelo botão Importar no topo da lista (só manager+, o mesmo papel da rota de import)",
   "/app/settings/tenant/whatsapp": "redirect legado para /app/connections; mantido por links salvos",
+  "/app/integrations/belle":
+    "um sistema de agenda dentro de Integrações: a porta é o cartão do Belle em /app/integrations (era item próprio do menu até virar Integrações)",
+  "/app/integrations/uno": "um sistema de agenda dentro de Integrações: a porta é o cartão do Uno em /app/integrations",
+  "/app/integrations/zandu": "um sistema de agenda dentro de Integrações: a porta é o cartão do Zandu em /app/integrations",
   "/app/settings/canal-oficial":
     "redirect para /app/connections?aba=oficial desde o PR #105 — conectar canal passou a ter um lugar só. Conexões é a porta; a aba é navegação interna dela",
   "/app/settings/templates":

@@ -48,7 +48,9 @@
     { "id": "inbox", "lane": "fora", "col": 4, "type": "frontend", "label": "agent_inbox_items", "sublabel": "demanda sem dono não mora no Kanban" },
     { "id": "belle", "lane": "fora", "col": 5, "type": "api", "label": "Belle Software (externo)", "sublabel": "fonte da verdade da agenda da clínica" },
     { "id": "syncagenda", "lane": "fila", "col": 3, "type": "service", "label": "Sincronização da agenda externa", "sublabel": "cron agenda-externa · 10 min" },
-    { "id": "agenda", "lane": "humano", "col": 5, "type": "frontend", "label": "Agenda por sala", "sublabel": "selo Belle · importado é só leitura" }
+    { "id": "agenda", "lane": "humano", "col": 5, "type": "frontend", "label": "Agenda por sala", "sublabel": "selo Belle/Uno/Zandu · importado é só leitura" },
+    { "id": "unozandu", "lane": "fora", "col": 4, "type": "api", "label": "Uno · Zandu (externos)", "sublabel": "avisam por webhook a cada agendamento" },
+    { "id": "avisosagenda", "lane": "fila", "col": 3, "type": "database", "label": "calendar_integration_events", "sublabel": "aviso gravado antes de processar · cron reprocessa" }
   ],
   "edges": [
     { "id": "e1", "from": "ritual", "to": "leadstate", "label": "escreve estágio e next_action" },
@@ -99,7 +101,9 @@
     { "id": "e46", "from": "syncagenda", "to": "agenda", "label": "calendar_appointments com external_id — idempotente" },
     { "id": "e47", "from": "syncagenda", "to": "atividades", "label": "agendou/compareceu/faltou na timeline, após a 1ª importação" },
     { "id": "e48", "from": "syncagenda", "to": "leads", "label": "negócio aberto anda para a etapa de agendamento" },
-    { "id": "e49", "from": "syncagenda", "to": "belle", "label": "confirmação do cliente (botão do WhatsApp) volta como \"Confirmado\" — na hora e a cada rodada" }
+    { "id": "e49", "from": "syncagenda", "to": "belle", "label": "confirmação do cliente (botão do WhatsApp) volta como \"Confirmado\" — na hora e a cada rodada" },
+    { "id": "e50", "from": "unozandu", "to": "avisosagenda", "label": "POST /webhooks/agenda/<token> — grava e responde" },
+    { "id": "e51", "from": "avisosagenda", "to": "syncagenda", "label": "mesmo motor do Belle (aplicarItens); falhou ⇒ cron tenta de novo" }
   ],
   "cards": [
     {

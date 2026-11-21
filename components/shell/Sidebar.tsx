@@ -34,6 +34,13 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const rodape = NAV_GROUPS.find((g) => g.id === GRUPO_NO_RODAPE)?.hub;
 
   const brand = branding();
+  // Um item ativo só: o de caminho mais longo que casa. Sem isto, em
+  // /app/integrations/nuvemshop acendiam "Integrações" E "Nuvemshop".
+  const casa = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const ativo = todos
+    .flatMap((g) => g.items.map((i) => i.href))
+    .filter(casa)
+    .sort((a, b) => b.length - a.length)[0];
 
   return (
     <aside
@@ -85,7 +92,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
               )}
               <ul aria-labelledby={collapsed ? undefined : tituloId} aria-label={collapsed ? t(group.label) : undefined} className="space-y-1">
                 {items.map((item) => {
-                  const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                  const isActive = item.href === ativo;
                   const Icon = item.icon;
                   return (
                     <li key={item.href}>

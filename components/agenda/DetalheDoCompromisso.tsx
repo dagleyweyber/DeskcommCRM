@@ -10,6 +10,7 @@ import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { useAlterarAgendamento, useCancelarAgendamento, type CompromissoDaLista } from "@/hooks/agenda/useAgendamentos";
 import { minutosNoDia, minutosParaHhmm } from "@/lib/agenda/grade";
 import { RÓTULO_DO_STATUS, type StatusDoCompromisso } from "@/lib/agenda/tipos";
+import { nomeDoProvedor, PROVEDOR } from "@/lib/agenda-externa/provedor";
 import { cn } from "@/lib/utils";
 
 import { CLASSE_DO_SELO } from "./status";
@@ -52,8 +53,9 @@ export function DetalheDoCompromisso({
 
   if (!compromisso) return null;
   const c = compromisso;
-  // Importado do Belle: lá é a fonte da verdade, aqui só se vê (a API também recusa).
+  // Importado (Belle, Uno, Zandu): lá é a fonte da verdade, aqui só se vê (a API também recusa).
   const importado = Boolean(c.external_provider);
+  const sistema = nomeDoProvedor(c.external_provider);
   const encerrado = c.status === "cancelled" || importado;
 
   async function mudarStatus(status: StatusDoCompromisso) {
@@ -122,8 +124,9 @@ export function DetalheDoCompromisso({
             <>
               <dt className="text-muted-foreground">Origem</dt>
               <dd>
-                Belle{c.external_status ? ` · “${c.external_status}” lá` : ""}
-                {c.status === "confirmed" && c.client_responded_at && c.external_status === "Marcado" && (
+                {sistema}
+                {c.external_status ? ` · “${c.external_status}” lá` : ""}
+                {c.external_provider === PROVEDOR && c.status === "confirmed" && c.client_responded_at && c.external_status === "Marcado" && (
                   <span className="block text-xs text-muted-foreground">
                     A confirmação do cliente ainda não chegou ao Belle — o CRM tenta de novo a cada 10 minutos.
                   </span>
@@ -153,8 +156,8 @@ export function DetalheDoCompromisso({
 
         {importado && (
           <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
-            Este agendamento vem do Belle. Para remarcar, cancelar ou mudar o status, faça no Belle — a Agenda atualiza
-            sozinha em até 10 minutos.
+            Este agendamento vem do {sistema}. Para remarcar, cancelar ou mudar o status, faça no {sistema} — a Agenda
+            atualiza sozinha{c.external_provider === PROVEDOR ? " em até 10 minutos" : " em poucos segundos"}.
           </p>
         )}
 

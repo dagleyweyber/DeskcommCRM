@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiClient } from "@/lib/api/client";
 import { chaveDoNome } from "@/lib/agenda-externa/belle/traduzir";
+import { nomeDoProvedor, type ProvedorDeAgenda } from "@/lib/agenda-externa/provedor";
 
 interface Tipo {
   external_key: string;
@@ -25,8 +26,6 @@ interface Servico {
   is_active: boolean;
 }
 
-const CHAVE = ["integrations", "belle", "servicos"] as const;
-const ROTA = "/api/v1/integrations/belle/servicos";
 const SEM_LIGACAO = "__sem__";
 const CRIAR = "__criar__";
 
@@ -36,11 +35,20 @@ function slugDe(nome: string): string {
 }
 
 /**
- * Tipo de serviço do Belle → serviço da Agenda. É o serviço que decide qual
- * automação (e qual modelo de WhatsApp) a paciente recebe. Tipo novo que surge
- * no Belle aparece aqui sozinho, destacado até ser ligado.
+ * Tipo de serviço do sistema da clínica (Belle, Uno, Zandu) → serviço da Agenda. É o
+ * serviço que decide qual automação (e qual modelo de WhatsApp) a paciente recebe.
+ * Tipo novo que surge lá aparece aqui sozinho, destacado até ser ligado.
  */
-export function LigacaoDeServicos({ canWrite }: { canWrite: boolean }) {
+export function LigacaoDeServicos({
+  canWrite,
+  provedor = "belle",
+}: {
+  canWrite: boolean;
+  provedor?: ProvedorDeAgenda;
+}) {
+  const sistema = nomeDoProvedor(provedor);
+  const CHAVE = ["integrations", provedor, "servicos"] as const;
+  const ROTA = provedor === "belle" ? "/api/v1/integrations/belle/servicos" : `/api/v1/integrations/agenda/${provedor}/servicos`;
   const qc = useQueryClient();
   const { data } = useQuery({
     queryKey: CHAVE,
@@ -57,7 +65,7 @@ export function LigacaoDeServicos({ canWrite }: { canWrite: boolean }) {
     onSuccess: (r, args) => {
       toast.success(
         args.event_type_id
-          ? `Ligado. ${r.agendamentos_corrigidos} agendamento(s) do Belle já usam este serviço.`
+          ? `Ligado. ${r.agendamentos_corrigidos} agendamento(s) do ${sistema} já usam este serviço.`
           : "Ligação removida.",
       );
       void qc.invalidateQueries({ queryKey: CHAVE });
@@ -88,19 +96,19 @@ export function LigacaoDeServicos({ canWrite }: { canWrite: boolean }) {
   return (
     <Card className="flex flex-col gap-4 p-6">
       <div>
-        <h2 className="font-medium">Serviços do Belle → serviços da Agenda</h2>
+        <h2 className="font-medium">Serviços do {sistema} → serviços da Agenda</h2>
         <p className="text-sm text-muted-foreground">
-          Ligue cada tipo de serviço do Belle a um serviço da Agenda. É o serviço que decide qual{" "}
+          Ligue cada tipo de serviço do {sistema} a um serviço da Agenda. É o serviço que decide qual{" "}
           <Link href="/app/agenda" className="underline">
             automação de confirmação
           </Link>{" "}
           (e qual modelo de WhatsApp) a paciente recebe — depilação com um, estética com outro. Tipo novo que aparecer
-          no Belle entra nesta lista sozinho.
+          no {sistema} entra nesta lista sozinho.
         </p>
       </div>
 
       {tipos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Os tipos aparecem aqui depois da primeira sincronização.</p>
+        <p className="text-sm text-muted-foreground">Os tipos aparecem aqui depois do primeiro agendamento recebido.</p>
       ) : (
         <>
           {faltam > 0 && (
@@ -190,7 +198,7 @@ export function LigacaoDeServicos({ canWrite }: { canWrite: boolean }) {
             })}
           </ul>
           <p className="text-xs text-muted-foreground">
-            Ao ligar, os agendamentos do Belle já importados desse tipo também passam a usar o serviço. Agendamento com
+            Ao ligar, os agendamentos do {sistema} já importados desse tipo também passam a usar o serviço. Agendamento com
             serviços de tipos diferentes segue o primeiro serviço — a paciente recebe uma mensagem só.
           </p>
         </>

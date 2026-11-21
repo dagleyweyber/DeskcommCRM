@@ -390,10 +390,13 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   },
   {
     // Pedido do dono do produto: a integração de agenda mora junto das outras
-    // conexões externas, em Canais. GET é manager+; conectar/sincronizar, admin.
-    href: "/app/integrations/belle",
-    label: "Belle",
-    description: "Traga os agendamentos do Belle Software para a Agenda: horário, sala, serviço e paciente.",
+    // conexões externas, em Canais. Era "Belle"; em 2026-11-21 virou "Integrações"
+    // (Belle, Uno, Zandu — cada um é um cartão desta tela). GET é manager+;
+    // conectar/sincronizar, admin.
+    href: "/app/integrations",
+    label: "Integrações",
+    description:
+      "Traga para a Agenda os agendamentos do sistema da clínica (Belle, Uno, Zandu): horário, sala, serviço e paciente.",
     icon: CalendarCheck,
     group: "canais",
     minRole: "manager",

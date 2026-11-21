@@ -24,7 +24,7 @@ export async function POST(): Promise<Response> {
   const admin = createAdminClient();
   const { data: integ } = await admin
     .from("calendar_integrations")
-    .select("id, organization_id, credential_encrypted, external_account_id, default_area_code, initial_sync_done_at, far_window_index")
+    .select("id, organization_id, provider, credential_encrypted, external_account_id, default_area_code, initial_sync_done_at, far_window_index")
     .eq("organization_id", authz.org.orgId)
     .eq("provider", PROVEDOR)
     .maybeSingle();

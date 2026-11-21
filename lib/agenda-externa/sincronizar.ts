@@ -34,7 +34,7 @@ import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 import { criarClienteBelle, FalhaNoBelle, TokenBelleInvalido, type ClienteBelle } from "./belle/api";
 import { devolverConfirmacoes } from "./devolver-confirmacao";
 import { nomesParaPreencher, type ContatoParaNome } from "./nomes";
-import { PROVEDOR } from "./provedor";
+import { nomeDoProvedor, PROVEDOR, type ProvedorDeAgenda } from "./provedor";
 import {
   chaveDoNome,
   catalogoPorCodigo,
@@ -58,8 +58,10 @@ export const FATIAS_LONGE: readonly [number, number][] = [
 export interface Integracao {
   id: string;
   organization_id: string;
-  credential_encrypted: string;
-  external_account_id: string;
+  /** De qual sistema: decide o `external_provider` gravado e o nome nas mensagens. */
+  provider: ProvedorDeAgenda;
+  credential_encrypted: string | null;
+  external_account_id: string | null;
   default_area_code: string | null;
   initial_sync_done_at: string | null;
   far_window_index: number;
@@ -145,7 +147,7 @@ export function statusFinal(
   return doBelle;
 }
 
-async function fusoDaClinica(admin: SupabaseClient, orgId: string): Promise<string> {
+export async function fusoDaClinica(admin: SupabaseClient, orgId: string): Promise<string> {
   const { data } = await admin
     .from("calendar_settings")
     .select("default_schedule")
@@ -155,13 +157,15 @@ async function fusoDaClinica(admin: SupabaseClient, orgId: string): Promise<stri
   return tz || "America/Sao_Paulo";
 }
 
-/** Sala do Belle → sala da Agenda: pelo código; senão pelo nome; senão cria. */
+/** Sala do sistema externo → sala da Agenda: pelo código; senão pelo nome; senão cria. */
 async function resolverSalas(
   admin: SupabaseClient,
-  orgId: string,
+  integ: Integracao,
   itens: AgendamentoImportado[],
   contagem: Contagem,
 ): Promise<Map<string, string>> {
+  const orgId = integ.organization_id;
+  const provedor = integ.provider;
   const { data } = await admin
     .from("calendar_rooms")
     .select("id, name, external_provider, external_id, position")
@@ -171,7 +175,7 @@ async function resolverSalas(
   const porCodigo = new Map<string, string>();
   const porNome = new Map<string, string>();
   for (const s of salas) {
-    if (s.external_provider === PROVEDOR && s.external_id) porCodigo.set(s.external_id, s.id);
+    if (s.external_provider === provedor && s.external_id) porCodigo.set(s.external_id, s.id);
     porNome.set(chaveDoNome(s.name), s.id);
   }
   let ultimaPosicao = Math.max(0, ...salas.map((s) => Number(s.position) || 0));
@@ -190,7 +194,7 @@ async function resolverSalas(
         if (item.salaCodigo && !salas.find((s) => s.id === pelaChave)?.external_id) {
           await admin
             .from("calendar_rooms")
-            .update({ external_provider: PROVEDOR, external_id: item.salaCodigo })
+            .update({ external_provider: provedor, external_id: item.salaCodigo })
             .eq("organization_id", orgId)
             .eq("id", pelaChave)
             .is("external_id", null);
@@ -206,7 +210,7 @@ async function resolverSalas(
           organization_id: orgId,
           name: item.salaNome.replace(/\s+/g, " ").trim().slice(0, 60),
           position: ultimaPosicao,
-          external_provider: PROVEDOR,
+          external_provider: provedor,
           external_id: item.salaCodigo,
         })
         .select("id")
@@ -275,8 +279,8 @@ async function resolverContatos(
       name: c.nome || e164,
       display_name: c.nome || null,
       phone_number: e164,
-      source: PROVEDOR,
-      source_metadata: { belle_cliente: c.codigo || null },
+      source: integ.provider,
+      source_metadata: { [`${integ.provider}_cliente`]: c.codigo || null },
     }));
     const { data, error } = await admin.from("contacts").insert(linhas).select("id, phone_number");
     if (!error) {
@@ -406,41 +410,34 @@ function ctxDoSistema(integ: Integracao) {
   };
 }
 
-/** Aplica uma janela relida: cria, atualiza e cancela o que sumiu. */
-export async function aplicarJanela(
+/**
+ * Cria e atualiza os agendamentos recebidos. Não cancela o que NÃO veio — isso é
+ * da janela relida (`aplicarJanela`, Belle). Quem avisa por webhook (Uno, Zandu)
+ * manda a remoção como um item `cancelled`.
+ */
+export async function aplicarItens(
   admin: SupabaseClient,
   integ: Integracao,
   itens: AgendamentoImportado[],
-  janela: { de: string; ate: string; timezone: string },
+  timezone: string,
   opcoes: { silencioso: boolean; agora: Date; contagem: Contagem },
 ): Promise<void> {
   const { contagem } = opcoes;
   const orgId = integ.organization_id;
 
-  // O que o CRM já tem: pelos códigos vistos agora (mesmo que tenham mudado de
-  // dia) e pela janela (para achar o que sumiu do Belle).
+  // O que o CRM já tem, pelos códigos vistos agora (mesmo que tenham mudado de dia).
   const existentes = new Map<string, Existente>();
   for (const lote of emLotes(itens.map((i) => i.externalId), 200)) {
     const { data } = await admin
       .from("calendar_appointments")
       .select(COLUNAS_EXISTENTE)
       .eq("organization_id", orgId)
-      .eq("external_provider", PROVEDOR)
+      .eq("external_provider", integ.provider)
       .in("external_id", lote);
     for (const e of (data ?? []) as Existente[]) existentes.set(e.external_id, e);
   }
-  const inicioJanela = instanteDoMomentoLocal(janela.de, "00:00", janela.timezone).toISOString();
-  const fimJanela = instanteDoMomentoLocal(somaDias(janela.ate, 1), "00:00", janela.timezone).toISOString();
-  const { data: naJanela } = await admin
-    .from("calendar_appointments")
-    .select(COLUNAS_EXISTENTE)
-    .eq("organization_id", orgId)
-    .eq("external_provider", PROVEDOR)
-    .neq("status", "cancelled")
-    .gte("starts_at", inicioJanela)
-    .lt("starts_at", fimJanela);
 
-  const salas = await resolverSalas(admin, orgId, itens, contagem);
+  const salas = await resolverSalas(admin, integ, itens, contagem);
   const servicoDoTipo = await registrarTipos(admin, integ, itens, opcoes.agora);
   // Contato só para quem ainda não está no CRM — o resto já tem `contact_id`.
   const contatos = await resolverContatos(
@@ -481,12 +478,12 @@ export async function aplicarJanela(
         title: item.titulo,
         starts_at: item.startsAt,
         ends_at: item.endsAt,
-        time_zone: janela.timezone,
+        time_zone: timezone,
         status,
         contact_id: contactId,
         notes: item.notas,
-        source: PROVEDOR,
-        external_provider: PROVEDOR,
+        source: integ.provider,
+        external_provider: integ.provider,
         external_id: item.externalId,
         external_status: item.statusExterno,
         external_service_key: chaveDoTipo,
@@ -508,7 +505,7 @@ export async function aplicarJanela(
       patch.status = status;
       if (status === "cancelled") {
         patch.cancelled_at = opcoes.agora.toISOString();
-        patch.cancellation_reason = `${item.statusExterno || "Cancelado"} no Belle`;
+        patch.cancellation_reason = `${item.statusExterno || "Cancelado"} no ${nomeDoProvedor(integ.provider)}`;
       } else if (atual.status === "cancelled") {
         patch.cancelled_at = null;
         patch.cancellation_reason = null;
@@ -556,6 +553,30 @@ export async function aplicarJanela(
       }
     }
   }
+}
+
+/** Aplica uma janela relida (Belle): cria, atualiza e cancela o que sumiu. */
+export async function aplicarJanela(
+  admin: SupabaseClient,
+  integ: Integracao,
+  itens: AgendamentoImportado[],
+  janela: { de: string; ate: string; timezone: string },
+  opcoes: { silencioso: boolean; agora: Date; contagem: Contagem },
+): Promise<void> {
+  const orgId = integ.organization_id;
+  // O que estava na janela ANTES de aplicar: é daqui que sai o que sumiu do Belle.
+  const inicioJanela = instanteDoMomentoLocal(janela.de, "00:00", janela.timezone).toISOString();
+  const fimJanela = instanteDoMomentoLocal(somaDias(janela.ate, 1), "00:00", janela.timezone).toISOString();
+  const { data: naJanela } = await admin
+    .from("calendar_appointments")
+    .select(COLUNAS_EXISTENTE)
+    .eq("organization_id", orgId)
+    .eq("external_provider", integ.provider)
+    .neq("status", "cancelled")
+    .gte("starts_at", inicioJanela)
+    .lt("starts_at", fimJanela);
+
+  await aplicarItens(admin, integ, itens, janela.timezone, opcoes);
 
   // Regra 3: sumiu do Belle. Relatório vazio com agendamentos no CRM é mais
   // provável ser resposta ruim do Belle do que a agenda inteira apagada — não cancela.
@@ -574,7 +595,7 @@ export async function aplicarJanela(
       .eq("organization_id", orgId)
       .eq("id", e.id)
       .eq("revision", e.revision);
-    if (!error) contagem.cancelados_por_remocao += 1;
+    if (!error) opcoes.contagem.cancelados_por_remocao += 1;
   }
 }
 
@@ -597,8 +618,12 @@ export async function sincronizarIntegracao(
 
   try {
     let cliente = opcoes.cliente;
+    if (integ.provider !== PROVEDOR || !integ.external_account_id) {
+      throw new FalhaNoBelle("Esta conexão não é relida pelo CRM (recebe os agendamentos por aviso).");
+    }
+    const unidade = integ.external_account_id;
     if (!cliente) {
-      const token = await decryptWebhookSecret(admin, integ.credential_encrypted);
+      const token = integ.credential_encrypted ? await decryptWebhookSecret(admin, integ.credential_encrypted) : null;
       if (!token) throw new FalhaNoBelle("Não foi possível decifrar o token guardado (chave de criptografia do servidor).");
       cliente = criarClienteBelle({ token });
     }
@@ -621,7 +646,7 @@ export async function sincronizarIntegracao(
       { de: somaDias(hoje, ini), ate: somaDias(hoje, fim), comFinalizados: false },
     ];
     for (const j of janelas) {
-      const { relatorio, listas } = await lerJanela(cliente, integ.external_account_id, j.de, j.ate, j.comFinalizados);
+      const { relatorio, listas } = await lerJanela(cliente, unidade, j.de, j.ate, j.comFinalizados);
       const itens = juntarAgendamentos(relatorio, listas, timezone, catalogo);
       await aplicarJanela(admin, integ, itens, { de: j.de, ate: j.ate, timezone }, { silencioso, agora, contagem });
     }

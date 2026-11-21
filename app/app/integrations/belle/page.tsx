@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
@@ -28,6 +29,9 @@ export default async function BellePage() {
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header>
+        <Link href="/app/integrations" className="text-sm text-muted-foreground hover:underline">
+          ← Integrações
+        </Link>
         <h1 className="text-2xl font-semibold tracking-tight">Belle Software</h1>
         <p className="text-sm text-muted-foreground">
           Traga para a Agenda, sozinho, todo agendamento feito no Belle — data, horário, sala, serviço e
