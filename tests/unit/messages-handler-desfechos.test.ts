@@ -131,6 +131,17 @@ function makeSupabase(
         };
         return { select: () => cadeia };
       }
+      if (table === 'channel_sessions') {
+        // O envio de template pergunta a WABA do número que envia, para procurar o
+        // modelo só na conta dele (2026-11-21). Aqui não há linha gravada — o caso
+        // "instalação de um número só", em que a busca por organização continua valendo.
+        const cadeia: Record<string, unknown> = {
+          eq: () => cadeia,
+          is: () => cadeia,
+          maybeSingle: async () => ({ data: null, error: null }),
+        };
+        return { select: () => cadeia };
+      }
       if (table === 'messages') {
         return {
           insert: (row: Row) => {
