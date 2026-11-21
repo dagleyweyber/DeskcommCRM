@@ -61,13 +61,29 @@ export async function sendTemplateForSession(
     throw new Error("template_incompleto: nome e idioma são obrigatórios em type=template");
   }
 
-  const { data: linha, error } = await db
+  // O modelo pertence à CONTA (WABA) do número que envia, não à organização. Com dois
+  // números oficiais na mesma org (Recepção e Comercial, cada um com a sua conta), o
+  // mesmo nome existe nos dois espelhos e a busca só por org achava duas linhas —
+  // `maybeSingle` falhava e a campanha inteira caía com `template_lookup_failed`
+  // (B'Laser Parnamirim, 2026-11-21). Sem sessão gravada (instalação só com env, um
+  // número só), não há WABA para filtrar e a busca por org continua valendo.
+  const { data: dona } = await db
+    .from("channel_sessions")
+    .select("meta_waba_id")
+    .eq("organization_id", input.organizationId)
+    .eq("meta_phone_number_id", input.phoneNumberId)
+    .is("archived_at", null)
+    .maybeSingle();
+  const wabaId = (dona as { meta_waba_id?: string | null } | null)?.meta_waba_id ?? null;
+
+  let consulta = db
     .from("meta_templates")
     .select("name, language, status, contract_hash, components")
     .eq("organization_id", input.organizationId)
     .eq("name", input.name)
-    .eq("language", input.language)
-    .maybeSingle();
+    .eq("language", input.language);
+  if (wabaId) consulta = consulta.eq("waba_id", wabaId);
+  const { data: linha, error } = await consulta.maybeSingle();
 
   if (error) throw new Error(`template_lookup_failed: ${error.message}`);
 

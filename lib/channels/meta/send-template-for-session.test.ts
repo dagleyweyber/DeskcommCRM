@@ -9,60 +9,60 @@ import { afterEach, describe, expect, it, vi } from "vitest";
  * Este teste trava que a credencial vem de `resolveMetaCreds` — sessão
  * primeiro, env como fallback —, nunca do ambiente cru.
  */
-const sessaoNoBanco: { phoneNumberId: string | null } = { phoneNumberId: null };
-
 vi.mock("@/lib/webhooks/secrets", () => ({
   decryptWebhookSecret: async () => "token-da-sessao",
 }));
 
-function dbFake() {
+type Linha = Record<string, unknown>;
+
+/** Banco fingido que aplica de verdade os filtros `eq`/`is` e falha como o PostgREST em >1 linha. */
+function dbFake(opts: { sessoes?: Linha[]; modelos?: Linha[] } = {}) {
+  const sessoes = opts.sessoes ?? [];
+  const modelos = opts.modelos ?? [
+    {
+      organization_id: "org-1",
+      waba_id: "WABA-1",
+      name: "t",
+      language: "pt_BR",
+      status: "APPROVED",
+      contract_hash: "hash-x",
+      components: [{ type: "BODY", text: "Oi" }],
+    },
+  ];
   return {
     from: (tabela: string) => {
-      if (tabela === "channel_sessions") {
-        return {
-          select: () => ({
-            eq: () => {
-              // `.is("archived_at", null)` entrou na busca de credencial (migration
-              // 0194): o falso aceita o filtro e segue a cadeia.
-              const consulta = {
-                is: () => consulta,
-                maybeSingle: async () => ({
-                  data: sessaoNoBanco.phoneNumberId
-                    ? { meta_phone_number_id: sessaoNoBanco.phoneNumberId, meta_token_encrypted: "\\xdeadbeef" }
-                    : null,
-                  error: null,
-                }),
-              };
-              return consulta;
-            },
-          }),
-        };
-      }
-      // meta_templates — devolve um template aprovado sem parâmetro, pra
-      // não precisar montar `components`/`contract_hash` neste teste.
-      return {
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({
-                  data: {
-                    name: "t",
-                    language: "pt_BR",
-                    status: "APPROVED",
-                    contract_hash: "hash-x",
-                    components: [{ type: "BODY", text: "Oi" }],
-                  },
-                  error: null,
-                }),
-              }),
-            }),
-          }),
-        }),
+      const filtros: Array<[string, unknown]> = [];
+      const q = {
+        select: () => q,
+        eq: (c: string, v: unknown) => {
+          filtros.push([c, v]);
+          return q;
+        },
+        is: (c: string, v: unknown) => {
+          filtros.push([c, v]);
+          return q;
+        },
+        maybeSingle: async () => {
+          const linhas = tabela === "channel_sessions" ? sessoes : modelos;
+          const achadas = linhas.filter((l) => filtros.every(([c, v]) => (l[c] ?? null) === v));
+          if (achadas.length > 1) {
+            return { data: null, error: { message: "JSON object requested, multiple (or no) rows returned" } };
+          }
+          return { data: achadas[0] ?? null, error: null };
+        },
       };
+      return q;
     },
   } as never;
 }
+
+const sessao = (pnid: string, waba: string): Linha => ({
+  organization_id: "org-1",
+  meta_phone_number_id: pnid,
+  meta_waba_id: waba,
+  meta_token_encrypted: "\\xdeadbeef",
+  archived_at: null,
+});
 
 function stubFetch(resposta: unknown) {
   const spy = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => resposta });
@@ -73,16 +73,14 @@ function stubFetch(resposta: unknown) {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
-  sessaoNoBanco.phoneNumberId = null;
 });
 
 describe("credencial vem da SESSÃO, não do process.env cru", () => {
   it("com credencial na sessão, a URL leva o phone_number_id DELA", async () => {
-    sessaoNoBanco.phoneNumberId = "1103328999528818";
     const spy = stubFetch({ messages: [{ id: "wamid.OK" }] });
 
     const { sendTemplateForSession } = await import("./send-template-for-session");
-    const resultado = await sendTemplateForSession(dbFake(), {
+    const resultado = await sendTemplateForSession(dbFake({ sessoes: [sessao("1103328999528818", "WABA-1")] }), {
       organizationId: "org-1",
       phoneNumberId: "1103328999528818",
       to: "5511999999999",
@@ -105,48 +103,21 @@ describe("credencial vem da SESSÃO, não do process.env cru", () => {
    * o que fecha essa lacuna: quem persiste a mensagem sabe o que guardar.
    */
   it("⭐ template com cabeçalho de imagem devolve headerMedia — é o que falta pro inbox mostrar de volta", async () => {
-    sessaoNoBanco.phoneNumberId = "1103328999528818";
-    const spy = stubFetch({ messages: [{ id: "wamid.IMG" }] });
-    const db = {
-      from: (tabela: string) => {
-        if (tabela === "channel_sessions") {
-          return {
-            select: () => ({
-              eq: () => {
-                const consulta = {
-                  is: () => consulta,
-                  maybeSingle: async () => ({
-                    data: { meta_phone_number_id: "1103328999528818", meta_token_encrypted: "\\xdeadbeef" },
-                    error: null,
-                  }),
-                };
-                return consulta;
-              },
-            }),
-          };
-        }
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: async () => ({
-                    data: {
-                      name: "t",
-                      language: "pt_BR",
-                      status: "APPROVED",
-                      contract_hash: "hash-x",
-                      components: [{ type: "HEADER", format: "IMAGE" }, { type: "BODY", text: "Oi" }],
-                    },
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-          }),
-        };
-      },
-    } as never;
+    stubFetch({ messages: [{ id: "wamid.IMG" }] });
+    const db = dbFake({
+      sessoes: [sessao("1103328999528818", "WABA-1")],
+      modelos: [
+        {
+          organization_id: "org-1",
+          waba_id: "WABA-1",
+          name: "t",
+          language: "pt_BR",
+          status: "APPROVED",
+          contract_hash: "hash-x",
+          components: [{ type: "HEADER", format: "IMAGE" }, { type: "BODY", text: "Oi" }],
+        },
+      ],
+    });
 
     const { sendTemplateForSession } = await import("./send-template-for-session");
     const resultado = await sendTemplateForSession(db, {
@@ -160,11 +131,9 @@ describe("credencial vem da SESSÃO, não do process.env cru", () => {
 
     expect(resultado.externalId).toBe("wamid.IMG");
     expect(resultado.headerMedia).toEqual({ kind: "image", url: "https://exemplo.com/imagem.jpg" });
-    void spy;
   });
 
   it("⭐ sem credencial nem sessão nem env, LANÇA — nunca manda URL sem número", async () => {
-    sessaoNoBanco.phoneNumberId = null; // sem sessão
     const spy = stubFetch({});
 
     const { sendTemplateForSession } = await import("./send-template-for-session");
@@ -180,5 +149,61 @@ describe("credencial vem da SESSÃO, não do process.env cru", () => {
     ).rejects.toThrow(/meta_not_configured/);
 
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Achado ao vivo (B'Laser Parnamirim, 2026-11-21): a campanha da Clara falhou inteira com
+ * `template_lookup_failed: ... multiple rows returned`. O modelo tinha o mesmo nome na
+ * conta da Recepção e na da Clara, e a busca era só por organização.
+ */
+describe("o modelo é procurado na conta do NÚMERO que envia", () => {
+  const corpo = (texto: string) => [{ type: "BODY", text: texto }];
+  const doisNumeros = () =>
+    dbFake({
+      sessoes: [sessao("PN-RECEPCAO", "WABA-RECEPCAO"), sessao("PN-CLARA", "WABA-CLARA")],
+      modelos: [
+        { organization_id: "org-1", waba_id: "WABA-RECEPCAO", name: "black", language: "pt_BR", status: "APPROVED", contract_hash: "h1", components: corpo("Recepção") },
+        { organization_id: "org-1", waba_id: "WABA-CLARA", name: "black", language: "pt_BR", status: "APPROVED", contract_hash: "h2", components: corpo("Clara") },
+      ],
+    });
+
+  it("⭐ mesmo nome nos dois números: envia pela Clara com o modelo DA CLARA, sem erro", async () => {
+    const spy = stubFetch({ messages: [{ id: "wamid.CLARA" }] });
+    const { sendTemplateForSession } = await import("./send-template-for-session");
+
+    const r = await sendTemplateForSession(doisNumeros(), {
+      organizationId: "org-1",
+      phoneNumberId: "PN-CLARA",
+      to: "5584999999999",
+      name: "black",
+      language: "pt_BR",
+      values: {},
+    });
+
+    expect(r.externalId).toBe("wamid.CLARA");
+    expect(spy.mock.calls[0]![0]).toContain("/PN-CLARA/messages");
+  });
+
+  it("modelo que só existe no OUTRO número não é usado — falha como 'não está no espelho'", async () => {
+    stubFetch({ messages: [{ id: "nunca" }] });
+    const db = dbFake({
+      sessoes: [sessao("PN-RECEPCAO", "WABA-RECEPCAO"), sessao("PN-CLARA", "WABA-CLARA")],
+      modelos: [
+        { organization_id: "org-1", waba_id: "WABA-RECEPCAO", name: "so_recepcao", language: "pt_BR", status: "APPROVED", contract_hash: "h1", components: corpo("x") },
+      ],
+    });
+    const { sendTemplateForSession } = await import("./send-template-for-session");
+
+    await expect(
+      sendTemplateForSession(db, {
+        organizationId: "org-1",
+        phoneNumberId: "PN-CLARA",
+        to: "5584999999999",
+        name: "so_recepcao",
+        language: "pt_BR",
+        values: {},
+      }),
+    ).rejects.toThrow(/template_missing/);
   });
 });
