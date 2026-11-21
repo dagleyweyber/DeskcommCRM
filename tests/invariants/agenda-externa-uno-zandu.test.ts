@@ -34,8 +34,8 @@ async function codigoDoErro(p: Promise<unknown>): Promise<string | null> {
 beforeAll(async () => {
   for (const [id, slug] of [[ORG_A, "org-0224-a"], [ORG_B, "org-0224-b"]] as const) {
     await pool.query(
-      `insert into organizations (id, slug, legal_name, display_name) values ($1, $2, $2, $2) on conflict (id) do nothing`,
-      [id, slug],
+      `insert into organizations (id, slug, legal_name, display_name) values ($1, $2, $3, $4) on conflict (id) do nothing`,
+      [id, slug, slug, slug],
     );
   }
   const { rows } = await pool.query<{ id: string }>(
@@ -93,8 +93,8 @@ describe("agenda externa — Uno e Zandu (0224)", () => {
     const marca = (provedor: string, codigo: string) =>
       pool.query(
         `insert into calendar_appointments (organization_id, title, starts_at, ends_at, status, contact_id, source, external_provider, external_id)
-         values ($1, 'Sessão', now(), now() + interval '30 min', 'pending', $2, $3, $3, $4)`,
-        [ORG_A, contato, provedor, codigo],
+         values ($1, 'Sessão', now(), now() + interval '30 min', 'pending', $2, $3, $4, $5)`,
+        [ORG_A, contato, provedor, provedor, codigo],
       );
     expect(await codigoDoErro(marca("uno", "123"))).toBeNull();
     expect(await codigoDoErro(marca("zandu", "123"))).toBeNull();

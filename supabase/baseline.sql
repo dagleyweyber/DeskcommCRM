@@ -16876,18 +16876,13 @@ alter table public.calendar_appointments add column if not exists external_provi
 alter table public.calendar_appointments add column if not exists external_id text;
 alter table public.calendar_appointments add column if not exists external_status text;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-     where conrelid = 'public.calendar_appointments'::regclass
-       and conname = 'calendar_appointments_external_provider_check'
-  ) then
-    alter table public.calendar_appointments
-      add constraint calendar_appointments_external_provider_check
-      check (external_provider is null or external_provider in ('belle'));
-  end if;
-end $$;
+-- Bloco ÚNICO desta constraint (ver tests/unit/baseline-constraint-reconstruida.test.ts),
+-- com o vocabulário final: 'belle' (0205) + 'uno', 'zandu' (0224). Drop + add sempre:
+-- o banco que já tem a versão só-'belle' precisa da nova, e a lista nova contém a velha.
+alter table public.calendar_appointments drop constraint if exists calendar_appointments_external_provider_check;
+alter table public.calendar_appointments
+  add constraint calendar_appointments_external_provider_check
+  check (external_provider is null or external_provider in ('belle', 'uno', 'zandu'));
 
 create unique index if not exists uniq_calendar_appointments_external
   on public.calendar_appointments (organization_id, external_provider, external_id)
@@ -18594,11 +18589,8 @@ comment on column public.calendar_integrations.inbound_path_token is
 comment on column public.calendar_integrations.inbound_secret_hash is
   'Uno: SHA-256 (hex) do token que o Uno manda em X-UNO-Webhook-Token. O texto puro é mostrado uma vez só. Migration 0224.';
 
--- 3. De onde veio o compromisso
-alter table public.calendar_appointments drop constraint if exists calendar_appointments_external_provider_check;
-alter table public.calendar_appointments
-  add constraint calendar_appointments_external_provider_check
-  check (external_provider is null or external_provider in ('belle', 'uno', 'zandu'));
+-- 3. De onde veio o compromisso: 'uno'/'zandu' já estão no bloco único de
+--    calendar_appointments_external_provider_check (seção da migration 0205, acima).
 
 -- 4. Avisos recebidos
 create table if not exists public.calendar_integration_events (

@@ -25,6 +25,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api/client";
+import { copyToClipboard } from "@/lib/clipboard";
 import { nomeDoProvedor } from "@/lib/agenda-externa/provedor";
 import { CalendarCheck } from "@/lib/ui/icons";
 
@@ -65,9 +66,8 @@ function Copiavel({ rotulo, valor, id }: { rotulo: string; valor: string; id: st
           type="button"
           variant="outline"
           onClick={() => {
-            void navigator.clipboard.writeText(valor).then(
-              () => toast.success("Copiado."),
-              () => toast.error("Não deu para copiar — selecione e copie à mão."),
+            void copyToClipboard(valor).then((copiou) =>
+              copiou ? toast.success("Copiado.") : toast.error("Não deu para copiar — selecione e copie à mão."),
             );
           }}
         >
