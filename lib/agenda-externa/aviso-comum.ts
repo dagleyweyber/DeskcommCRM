@@ -9,20 +9,29 @@ import type { StatusDoCompromisso } from "@/lib/agenda/tipos";
 
 import { chaveDoNome, DURACAO_PADRAO_MIN, type AgendamentoImportado, type TipoDeServico } from "./belle/traduzir";
 
-/** Um aviso lido: o que é, de qual agendamento, e o agendamento pronto para a Agenda. */
-export interface AvisoTraduzido {
-  /** Nome do evento como veio ("APPOINTMENT_UPDATED"). */
-  evento: string;
-  /** Código do agendamento lá (null = não é aviso de agendamento). */
-  externalId: string | null;
-  /** Conta/empresa de origem (Uno: `schema`), quando o aviso diz. */
-  conta: string | null;
-  /** O agendamento pronto para a Agenda, ou null se não há o que aplicar. */
-  item: AgendamentoImportado | null;
-  /** Por que não há item (fica registrado no aviso). */
-  motivo: string | null;
-  /** Zandu: código da pessoa, para buscar o celular quando o aviso não traz. */
+export type { AgendamentoImportado };
+
+/** Um agendamento lido do aviso, com os códigos que o processamento usa para completá-lo. */
+export interface ItemDoAviso {
+  item: AgendamentoImportado;
+  /** Zandu: código da pessoa — o aviso não traz nome nem celular. */
   pessoaId?: string | null;
+  /** Zandu: códigos dos serviços cujo NOME o aviso não trouxe (vem do catálogo). */
+  servicoIds?: string[];
+}
+
+/** Um aviso lido: o que é, de qual agendamento, e os agendamentos prontos para a Agenda. */
+export interface AvisoTraduzido {
+  /** Nome do evento como veio ("APPOINTMENT_UPDATED", "agendamento_criado"). */
+  evento: string;
+  /** Código do (1º) agendamento lá (null = não é aviso de agendamento). */
+  externalId: string | null;
+  /** Conta/empresa de origem (Uno: `schema`; Zandu: `companyId`), quando o aviso diz. */
+  conta: string | null;
+  /** Os agendamentos do aviso (o Zandu manda uma lista); vazio = nada a aplicar. */
+  itens: ItemDoAviso[];
+  /** Por que não há itens (fica registrado no aviso). */
+  motivo: string | null;
 }
 
 /** Objeto JSON qualquer (o aviso não tem schema garantido). */

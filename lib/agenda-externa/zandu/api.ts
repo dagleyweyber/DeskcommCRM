@@ -28,7 +28,16 @@ export interface ClienteZandu {
   /** Confere o token com uma leitura leve (catálogo de serviços). */
   conferirToken(): Promise<void>;
   pessoa(personId: string): Promise<PessoaZandu | null>;
+  /** Catálogo: código do serviço → nome ("1 - Avaliação"). */
+  servicos(): Promise<Map<string, string>>;
+  /** Agendas ativas na API: código → nome ("Sala 1"). */
+  agendas(): Promise<Map<string, string>>;
 }
+
+const itemDoCatalogoSchema = z.object({ id: texto, serviceId: texto, name: texto }).partial();
+const agendasSchema = z.object({
+  schedulers: z.array(z.object({ scheduleId: texto, label: texto }).partial()).nullish(),
+});
 
 export function criarClienteZandu(opts: { token: string; timeoutMs?: number; fetchImpl?: typeof fetch }): ClienteZandu {
   const f = opts.fetchImpl ?? fetch;
@@ -62,6 +71,24 @@ export function criarClienteZandu(opts: { token: string; timeoutMs?: number; fet
       if (!corpo) return null;
       const r = pessoaSchema.safeParse(corpo);
       return r.success ? r.data : null;
+    },
+    async servicos() {
+      const corpo = await get("/services");
+      const mapa = new Map<string, string>();
+      for (const s of Array.isArray(corpo) ? corpo : []) {
+        const r = itemDoCatalogoSchema.safeParse(s);
+        const id = r.success ? r.data.id || r.data.serviceId : "";
+        if (r.success && id && r.data.name) mapa.set(id, r.data.name);
+      }
+      return mapa;
+    },
+    async agendas() {
+      // Só para ler os nomes: o período não importa, um dia basta.
+      const hoje = new Date().toISOString().slice(0, 10);
+      const r = agendasSchema.safeParse(await get(`/schedulers/schedules?from=${hoje}&to=${hoje}`));
+      const mapa = new Map<string, string>();
+      for (const a of (r.success ? r.data.schedulers : null) ?? []) if (a.scheduleId && a.label) mapa.set(a.scheduleId, a.label);
+      return mapa;
     },
   };
 }

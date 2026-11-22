@@ -21,11 +21,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "@/lib/logger";
 import { decryptWebhookSecret } from "@/lib/webhooks/secrets";
 
-import type { AvisoTraduzido } from "./aviso-comum";
+import { tipoDoServico, type AvisoTraduzido } from "./aviso-comum";
 import { aplicarItens, fusoDaClinica, type Contagem, type Integracao } from "./sincronizar";
 import { traduzirAvisoDoUno } from "./uno/traduzir";
 import { criarClienteZandu, type ClienteZandu } from "./zandu/api";
-import { traduzirAvisoDoZandu } from "./zandu/traduzir";
+import { nomeDoServico, traduzirAvisoDoZandu } from "./zandu/traduzir";
 
 export const MAX_TENTATIVAS = 5;
 
@@ -46,7 +46,7 @@ export const COLUNAS_INTEGRACAO =
 export function traduzirAviso(provedor: Integracao["provider"], payload: unknown): AvisoTraduzido {
   if (provedor === "uno") return traduzirAvisoDoUno(payload);
   if (provedor === "zandu") return traduzirAvisoDoZandu(payload);
-  return { evento: "", externalId: null, conta: null, item: null, motivo: "este sistema não recebe aviso" };
+  return { evento: "", externalId: null, conta: null, itens: [], motivo: "este sistema não recebe aviso" };
 }
 
 export interface AvisoGravado {
@@ -63,24 +63,62 @@ export interface ResultadoDoAviso {
   contagem: Contagem;
 }
 
-/** Zandu sem celular no aviso: busca a pessoa (uma consulta, só quando falta). */
-async function completarCelularNoZandu(
+/**
+ * Catálogo de serviços e nomes de agenda do Zandu, por conexão, guardados 1 h na
+ * memória do processo: mudam pouco, e a API do Zandu tem limite por token.
+ */
+const CACHE_MS = 60 * 60_000;
+const cacheDoZandu = new Map<string, { ate: number; servicos: Map<string, string>; agendas: Map<string, string> }>();
+
+async function catalogoDoZandu(integracaoId: string, cliente: ClienteZandu, agora: Date) {
+  const guardado = cacheDoZandu.get(integracaoId);
+  if (guardado && guardado.ate > agora.getTime()) return guardado;
+  const [servicos, agendas] = await Promise.all([cliente.servicos(), cliente.agendas()]);
+  const novo = { ate: agora.getTime() + CACHE_MS, servicos, agendas };
+  cacheDoZandu.set(integracaoId, novo);
+  return novo;
+}
+
+/**
+ * O aviso do Zandu traz só códigos: completa pela API o nome e o celular da pessoa, o
+ * nome do serviço (catálogo) e o nome da agenda (vira a sala). Uma consulta de pessoa
+ * por agendamento; catálogo e agendas do cache.
+ */
+export async function completarPeloZandu(
   admin: SupabaseClient,
   integ: Integracao,
   aviso: AvisoTraduzido,
+  agora: Date,
   clienteZandu?: ClienteZandu,
 ): Promise<void> {
-  if (!aviso.item || aviso.item.cliente.celular || !aviso.pessoaId) return;
   let cliente = clienteZandu;
   if (!cliente) {
     const token = integ.credential_encrypted ? await decryptWebhookSecret(admin, integ.credential_encrypted) : null;
-    if (!token) return;
+    if (!token) throw new Error("Token do Zandu indisponível (não foi possível decifrar).");
     cliente = criarClienteZandu({ token });
   }
-  const pessoa = await cliente.pessoa(aviso.pessoaId);
-  if (!pessoa) return;
-  aviso.item.cliente.celular = pessoa.phone || pessoa.phone2 || "";
-  if (!aviso.item.cliente.nome && pessoa.name) aviso.item.cliente.nome = pessoa.name;
+  const precisaCatalogo = aviso.itens.some((i) => (i.servicoIds?.length ?? 0) > 0 || (i.item.salaCodigo && !i.item.salaNome));
+  const catalogo = precisaCatalogo ? await catalogoDoZandu(integ.id, cliente, agora) : null;
+  const pessoas = new Map<string, Awaited<ReturnType<ClienteZandu["pessoa"]>>>();
+
+  for (const { item, pessoaId, servicoIds } of aviso.itens) {
+    if (catalogo && servicoIds?.length) {
+      const nomes = servicoIds.map((id) => catalogo.servicos.get(id)).filter((n): n is string => Boolean(n)).map(nomeDoServico);
+      if (nomes.length) {
+        item.titulo = nomes.join(", ").slice(0, 300);
+        item.tipo = tipoDoServico(nomes[0]!);
+      }
+    }
+    if (catalogo && item.salaCodigo && !item.salaNome) item.salaNome = catalogo.agendas.get(item.salaCodigo)?.trim() ?? "";
+    if (pessoaId && (!item.cliente.celular || !item.cliente.nome)) {
+      if (!pessoas.has(pessoaId)) pessoas.set(pessoaId, await cliente.pessoa(pessoaId));
+      const pessoa = pessoas.get(pessoaId);
+      if (pessoa) {
+        if (!item.cliente.celular) item.cliente.celular = pessoa.phone || pessoa.phone2 || "";
+        if (!item.cliente.nome && pessoa.name) item.cliente.nome = pessoa.name;
+      }
+    }
+  }
 }
 
 /** Processa um aviso já gravado. Nunca lança: o resultado (e a linha do aviso) dizem o que houve. */
@@ -102,18 +140,19 @@ export async function processarAviso(
 
   try {
     const aviso = traduzirAviso(integ.provider, gravado.payload);
-    if (!aviso.item) {
+    if (aviso.itens.length === 0) {
       await fechar({ processed_at: agora.toISOString(), last_error: aviso.motivo });
       return { ok: true, aplicado: false, motivo: aviso.motivo, contagem };
     }
 
-    // Aviso velho não desfaz aviso novo do mesmo agendamento.
+    // Aviso velho não desfaz aviso novo do mesmo agendamento (o aviso é gravado com o
+    // código do 1º agendamento; é por ele que se compara).
     const { data: maisNovo } = await admin
       .from("calendar_integration_events")
       .select("id")
       .eq("organization_id", integ.organization_id)
       .eq("integration_id", integ.id)
-      .eq("external_id", aviso.item.externalId)
+      .eq("external_id", aviso.itens[0]!.item.externalId)
       .not("processed_at", "is", null)
       .is("last_error", null)
       .gt("received_at", gravado.received_at)
@@ -124,11 +163,12 @@ export async function processarAviso(
       return { ok: true, aplicado: false, motivo, contagem };
     }
 
-    if (integ.provider === "zandu") await completarCelularNoZandu(admin, integ, aviso, opcoes.clienteZandu);
+    if (integ.provider === "zandu") await completarPeloZandu(admin, integ, aviso, agora, opcoes.clienteZandu);
 
     const timezone = await fusoDaClinica(admin, integ.organization_id);
-    await aplicarItens(admin, integ, [aviso.item], timezone, { silencioso: false, agora, contagem });
-    if (aviso.item.status === "cancelled" && aviso.item.statusExterno === "Removido") {
+    const itens = aviso.itens.map((i) => i.item);
+    await aplicarItens(admin, integ, itens, timezone, { silencioso: false, agora, contagem });
+    if (itens.every((i) => i.status === "cancelled" && i.statusExterno === "Removido")) {
       contagem.cancelados_por_remocao = contagem.atualizados;
     }
 
@@ -140,7 +180,8 @@ export async function processarAviso(
       last_sync_stats: contagem,
     };
     // A conta (Uno: `schema`) só é conhecida no 1º aviso: vira o nome da unidade na tela.
-    if (aviso.conta && !integ.external_account_id) {
+    // A do Zandu é um UUID (`companyId`) — não serve de nome, fica de fora.
+    if (integ.provider === "uno" && aviso.conta && !integ.external_account_id) {
       patch.external_account_id = aviso.conta;
       integ.external_account_id = aviso.conta;
     }

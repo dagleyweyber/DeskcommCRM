@@ -1,16 +1,22 @@
 /**
- * Aviso (webhook) do Zandu → agendamento da Agenda. Função pura.
+ * Aviso (webhook) do Zandu → agendamentos da Agenda. Função pura.
  *
- * ⚠ O Zandu NÃO documenta o corpo do webhook (https://api.zandu.com.br/docs só diz
- * que é um JSON por evento, assinado em Conta > Dispositivos e API). Este tradutor
- * lê os nomes que a própria API usa no agendamento (`appointmentId`, `start`,
- * `durationMinutes`, `personId`/`personPhone`/`personName`, `scheduleId`, `items`
- * com `serviceId`) e as variações comuns, e aceita o agendamento no topo do corpo
- * ou dentro de `appointment`/`data`. Todo aviso fica guardado cru em
- * `calendar_integration_events`: o 1º aviso real confirma (ou corrige) este mapa.
+ * O Zandu não documenta o corpo do webhook. Este é o formato MEDIDO no 1º aviso real
+ * (RevitaFio Mossoró, 2026-11-22):
  *
- * Datas: a API do Zandu trabalha em UTC; data sem fuso é lida como UTC.
+ *   { data: [ { appointmentId, start, end, status: "agendamento_criado", notes,
+ *               personId, scheduleId, companyId, items: [{ serviceId, … }], … } ],
+ *     event: { lastEvent: "agendamento_criado", content: "Avaliação ", personId,
+ *              externalId: <appointmentId>, companyId, … },
+ *     param: "" }
+ *
+ * O que o aviso NÃO traz: nome e celular da pessoa, nome do serviço, nome da agenda —
+ * só os códigos. Quem processa completa pela API (ver `avisos.ts`): `/persons/{id}`,
+ * `/services`, `/schedulers/schedules`. Aqui só se lê o que veio e se guardam os códigos.
+ *
+ * Datas em UTC com "Z". `data` é lista: um aviso pode trazer mais de um agendamento.
  */
+import type { AgendamentoImportado } from "../belle/traduzir";
 import {
   fimOuPadrao,
   instante,
@@ -21,72 +27,111 @@ import {
   texto,
   tipoDoServico,
   type AvisoTraduzido,
+  type ItemDoAviso,
   type Objeto,
 } from "../aviso-comum";
 
-/** O agendamento dentro do corpo: no topo ou embrulhado. */
-function agendamentoDo(corpo: Objeto | null): Objeto | null {
-  for (const chave of ["appointment", "data", "payload", "object"]) {
-    const dentro = objeto(corpo?.[chave]);
-    if (dentro) return objeto(dentro.appointment) ?? dentro;
-  }
-  return corpo;
+/** "agendamento_criado" → "Agendamento criado" (como aparece no detalhe da Agenda). */
+export function statusLegivel(status: string): string {
+  const s = status.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return s ? s[0]!.toUpperCase() + s.slice(1) : "";
 }
 
-function servicoDe(ag: Objeto): string {
+/** "1 - Avaliação" → "Avaliação" (o catálogo do Zandu numera os serviços). */
+export function nomeDoServico(nome: string): string {
+  return nome.replace(/^\s*\d+\s*-\s*/, "").trim();
+}
+
+/** Os agendamentos do corpo: `data` (lista ou objeto), ou o próprio corpo. */
+function agendamentosDo(corpo: Objeto | null): Objeto[] {
+  const data = corpo?.data;
+  if (Array.isArray(data)) return data.map(objeto).filter((o): o is Objeto => o !== null);
+  const um = objeto(data) ?? objeto(corpo?.appointment);
+  if (um) return [objeto(um.appointment) ?? um];
+  return corpo && texto(corpo, "appointmentId") ? [corpo] : [];
+}
+
+function itensDeServico(ag: Objeto): Objeto[] {
   const itens = Array.isArray(ag.items) ? ag.items : Array.isArray(ag.services) ? ag.services : [];
-  const nomes = itens
-    .map((i) => {
-      const o = objeto(i);
-      return nomeDe(o?.service) || texto(o, "serviceName", "name", "nome");
-    })
-    .filter(Boolean);
-  return nomes.length ? nomes.join(", ") : nomeDe(ag.service) || texto(ag, "serviceName");
+  return itens.map(objeto).filter((o): o is Objeto => o !== null);
+}
+
+function traduzirUm(ag: Objeto, evento: string, conteudo: string): ItemDoAviso | null {
+  const externalId = texto(ag, "appointmentId", "id");
+  const inicio = instante(texto(ag, "start", "startDate", "startAt"), "utc");
+  if (!externalId || !inicio) return null;
+
+  const pessoa = objeto(ag.person) ?? objeto(ag.customer);
+  const servicos = itensDeServico(ag);
+  const servicoIds = servicos.map((s) => texto(s, "serviceId")).filter(Boolean);
+  // Nome do serviço só se o aviso trouxer; senão o processamento busca no catálogo.
+  const nomes = servicos
+    .map((s) => nomeDe(s.service) || texto(s, "serviceName", "name"))
+    .filter(Boolean)
+    .map(nomeDoServico);
+  // `event.content` ("Avaliação ") é ambíguo — no aviso medido era o nome do serviço E da
+  // agenda. Só vale enquanto o catálogo não diz o nome pelo `serviceId`.
+  const servico = nomes.join(", ") || nomeDoServico(conteudo);
+  const removido = /delet|remov|exclu/i.test(evento) || ag.deleted === true;
+  const statusExterno = removido ? "Removido" : statusLegivel(nomeDe(ag.status) || evento);
+  const notas = texto(ag, "notes", "observation");
+  const duracao = Number(ag.durationMinutes ?? ag.duration);
+  const agenda = objeto(ag.schedule);
+
+  const item: AgendamentoImportado = {
+    externalId,
+    startsAt: inicio,
+    endsAt: fimOuPadrao(
+      inicio,
+      instante(texto(ag, "end", "endDate", "endAt"), "utc"),
+      Number.isFinite(duracao) ? duracao : null,
+    ),
+    status: removido ? "cancelled" : statusPorTexto(statusExterno),
+    statusExterno,
+    // A "agenda" do Zandu (Sala 1, Avaliação…) é o que ocupa o horário: vira a sala da Agenda.
+    salaCodigo: texto(ag, "scheduleId") || texto(agenda, "scheduleId", "id") || null,
+    salaNome: nomeDe(agenda) || texto(ag, "scheduleName", "scheduleLabel"),
+    titulo: (servico || "Agendamento").slice(0, 300),
+    notas: notas ? notas.slice(0, 2000) : null,
+    cliente: {
+      codigo: texto(ag, "personId") || texto(pessoa, "personId", "id"),
+      nome: texto(ag, "personName") || nomeDe(pessoa),
+      celular: texto(ag, "personPhone") || telefoneNoObjeto(pessoa),
+      ddi: null,
+      camposExtras: [],
+    },
+    tipo: tipoDoServico(servico.split(",")[0] ?? ""),
+  };
+  return {
+    item,
+    pessoaId: item.cliente.codigo || null,
+    servicoIds: nomes.length ? [] : servicoIds,
+  };
 }
 
 export function traduzirAvisoDoZandu(payload: unknown): AvisoTraduzido {
   const corpo = objeto(payload);
-  const evento = texto(corpo, "event", "type", "action", "eventType", "topic");
-  const ag = agendamentoDo(corpo);
-  const externalId = texto(ag, "appointmentId", "id", "_id");
-  const inicio = instante(texto(ag, "start", "startDate", "startAt", "start_at", "date", "datetime"), "utc");
-  if (!ag || !externalId || !inicio) {
-    return { evento, externalId: externalId || null, conta: null, item: null, motivo: "aviso sem código ou sem data de agendamento" };
+  const meta = objeto(corpo?.event);
+  const evento = texto(meta, "lastEvent", "status") || texto(corpo, "event", "type", "action");
+  const conteudo = texto(meta, "content");
+  const conta = texto(meta, "companyId") || null;
+  const itens = agendamentosDo(corpo)
+    .map((ag) => traduzirUm(ag, evento, conteudo))
+    .filter((i): i is ItemDoAviso => i !== null);
+  if (itens.length === 0) {
+    return {
+      evento,
+      externalId: texto(meta, "externalId") || null,
+      conta,
+      itens: [],
+      motivo: "aviso sem código ou sem data de agendamento",
+    };
   }
-
-  const pessoa = objeto(ag.person) ?? objeto(ag.customer) ?? objeto(ag.client);
-  const removido = /delet|remov|exclu/i.test(evento) || ag.deleted === true || ag.removed === true;
-  const statusExterno = removido ? "Removido" : nomeDe(ag.status) || nomeDe(ag.situation) || (/cancel/i.test(evento) ? "Cancelado" : /confirm/i.test(evento) ? "Confirmado" : "");
-  const agenda = objeto(ag.schedule) ?? objeto(ag.scheduler);
-  const servico = servicoDe(ag);
-  const notas = texto(ag, "notes", "observation", "comments");
-  const duracao = Number(ag.durationMinutes ?? ag.duration);
-
   return {
     evento,
-    externalId,
-    conta: texto(corpo, "companyId", "accountId", "company") || null,
-    pessoaId: texto(ag, "personId") || texto(pessoa, "personId", "id") || null,
+    externalId: itens[0]!.item.externalId,
+    conta: conta || texto(agendamentosDo(corpo)[0], "companyId") || null,
+    itens,
     motivo: null,
-    item: {
-      externalId,
-      startsAt: inicio,
-      endsAt: fimOuPadrao(inicio, instante(texto(ag, "end", "endDate", "endAt", "end_at"), "utc"), Number.isFinite(duracao) ? duracao : null),
-      status: removido ? "cancelled" : statusPorTexto(statusExterno),
-      statusExterno,
-      // A "agenda" do Zandu (profissional/sala) é o que ocupa o horário: vira a sala da Agenda.
-      salaCodigo: texto(agenda, "scheduleId", "id") || texto(ag, "scheduleId") || null,
-      salaNome: nomeDe(agenda) || texto(ag, "scheduleName", "scheduleLabel"),
-      titulo: (servico || "Agendamento").slice(0, 300),
-      notas: notas ? notas.slice(0, 2000) : null,
-      cliente: {
-        codigo: texto(ag, "personId") || texto(pessoa, "personId", "id"),
-        nome: texto(ag, "personName") || nomeDe(pessoa),
-        celular: texto(ag, "personPhone") || telefoneNoObjeto(pessoa),
-        ddi: null,
-        camposExtras: [],
-      },
-      tipo: tipoDoServico(servico.split(",")[0] ?? ""),
-    },
   };
 }

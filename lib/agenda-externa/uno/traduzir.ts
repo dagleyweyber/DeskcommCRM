@@ -29,12 +29,18 @@ export function traduzirAvisoDoUno(payload: unknown): AvisoTraduzido {
   const conta = texto(corpo, "schema") || null;
   const ag = objeto(corpo?.appointment);
   if (!evento.startsWith("APPOINTMENT_") || !ag) {
-    return { evento, externalId: null, conta, item: null, motivo: "não é aviso de agendamento" };
+    return { evento, externalId: null, conta, itens: [], motivo: "não é aviso de agendamento" };
   }
   const externalId = texto(ag, "id");
   const inicio = instante(texto(ag, "startDate"));
   if (!externalId || !inicio) {
-    return { evento, externalId: externalId || null, conta, item: null, motivo: "aviso sem código ou sem data" };
+    return {
+      evento,
+      externalId: externalId || null,
+      conta,
+      itens: [],
+      motivo: "aviso sem código ou sem data",
+    };
   }
 
   const removido = evento === "APPOINTMENT_REMOVED";
@@ -49,24 +55,28 @@ export function traduzirAvisoDoUno(payload: unknown): AvisoTraduzido {
     externalId,
     conta,
     motivo: null,
-    item: {
-      externalId,
-      startsAt: inicio,
-      endsAt: fimOuPadrao(inicio, instante(texto(ag, "endDate"))),
-      status: removido ? "cancelled" : statusPorTexto(statusExterno),
-      statusExterno,
-      salaCodigo: texto(sala, "id") || null,
-      salaNome: nomeDe(sala),
-      titulo: (servico || "Agendamento").slice(0, 300),
-      notas: observacao ? observacao.slice(0, 2000) : null,
-      cliente: {
-        codigo: texto(cliente, "id"),
-        nome: nomeDe(cliente),
-        celular: telefoneNoObjeto(cliente),
-        ddi: null,
-        camposExtras: Object.keys(cliente ?? {}).filter((k) => !["id", "name"].includes(k)),
+    itens: [
+      {
+        item: {
+          externalId,
+          startsAt: inicio,
+          endsAt: fimOuPadrao(inicio, instante(texto(ag, "endDate"))),
+          status: removido ? "cancelled" : statusPorTexto(statusExterno),
+          statusExterno,
+          salaCodigo: texto(sala, "id") || null,
+          salaNome: nomeDe(sala),
+          titulo: (servico || "Agendamento").slice(0, 300),
+          notas: observacao ? observacao.slice(0, 2000) : null,
+          cliente: {
+            codigo: texto(cliente, "id"),
+            nome: nomeDe(cliente),
+            celular: telefoneNoObjeto(cliente),
+            ddi: null,
+            camposExtras: Object.keys(cliente ?? {}).filter((k) => !["id", "name"].includes(k)),
+          },
+          tipo: tipoDoServico(servico),
+        },
       },
-      tipo: tipoDoServico(servico),
-    },
+    ],
   };
 }

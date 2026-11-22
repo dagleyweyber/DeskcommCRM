@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { instante, statusPorTexto, telefoneNoObjeto } from "@/lib/agenda-externa/aviso-comum";
 import { telefoneDoBelle } from "@/lib/agenda-externa/belle/traduzir";
 import { traduzirAvisoDoUno } from "@/lib/agenda-externa/uno/traduzir";
-import { traduzirAvisoDoZandu } from "@/lib/agenda-externa/zandu/traduzir";
+import { nomeDoServico, statusLegivel, traduzirAvisoDoZandu } from "@/lib/agenda-externa/zandu/traduzir";
 
 /** O exemplo da documentação do Uno (readme.unobject.com.br/reference/webhook), literal. */
 const AVISO_UNO = {
@@ -28,7 +28,8 @@ describe("Uno → Agenda", () => {
     const r = traduzirAvisoDoUno(AVISO_UNO);
     expect(r.conta).toBe("empresa_x");
     expect(r.externalId).toBe("123");
-    expect(r.item).toMatchObject({
+    expect(r.itens).toHaveLength(1);
+    expect(r.itens[0]!.item).toMatchObject({
       externalId: "123",
       startsAt: "2026-08-19T17:30:00.000Z",
       endsAt: "2026-08-19T18:30:00.000Z",
@@ -39,11 +40,11 @@ describe("Uno → Agenda", () => {
       titulo: "Limpeza de pele",
       tipo: { chave: "servico:limpeza de pele", rotulo: "Limpeza de pele" },
     });
-    expect(r.item?.cliente).toMatchObject({ codigo: "10", nome: "Maria Silva" });
+    expect(r.itens[0]!.item.cliente).toMatchObject({ codigo: "10", nome: "Maria Silva" });
   });
 
   it("⭐ o Uno documenta o cliente SEM celular: o item sai com celular vazio (vira 'sem celular', não um contato inventado)", () => {
-    expect(traduzirAvisoDoUno(AVISO_UNO).item?.cliente.celular).toBe("");
+    expect(traduzirAvisoDoUno(AVISO_UNO).itens[0]!.item.cliente.celular).toBe("");
   });
 
   it("se o Uno mandar o celular a mais no cliente, ele é aproveitado", () => {
@@ -51,86 +52,116 @@ describe("Uno → Agenda", () => {
       ...AVISO_UNO,
       appointment: { ...AVISO_UNO.appointment, customer: { id: 10, name: "Maria", cellPhone: "(81) 98756-1002" } },
     });
-    expect(telefoneDoBelle(r.item!.cliente.celular, null)).toBe("+5581987561002");
+    expect(telefoneDoBelle(r.itens[0]!.item.cliente.celular, null)).toBe("+5581987561002");
   });
 
   it("⭐ remoção vira cancelado 'Removido' — o horário volta a ficar livre", () => {
     const r = traduzirAvisoDoUno({ ...AVISO_UNO, event: "APPOINTMENT_REMOVED" });
-    expect(r.item).toMatchObject({ status: "cancelled", statusExterno: "Removido" });
+    expect(r.itens[0]!.item).toMatchObject({ status: "cancelled", statusExterno: "Removido" });
   });
 
   it("venda (ORDER_*) não é agendamento: nada a aplicar", () => {
     const r = traduzirAvisoDoUno({ event: "ORDER_CREATED", schema: "x", order: { id: 1 } });
-    expect(r.item).toBeNull();
+    expect(r.itens).toEqual([]);
     expect(r.motivo).toMatch(/não é aviso de agendamento/);
   });
 
   it("sem data não aplica (não chuta horário)", () => {
     const r = traduzirAvisoDoUno({ event: "APPOINTMENT_CREATED", appointment: { id: 9 } });
-    expect(r.item).toBeNull();
+    expect(r.itens).toEqual([]);
     expect(r.externalId).toBe("9");
   });
 
   it("sem fim, usa a duração padrão", () => {
     const { endDate: _sem, ...semFim } = AVISO_UNO.appointment;
     const r = traduzirAvisoDoUno({ ...AVISO_UNO, appointment: semFim });
-    expect(r.item?.endsAt).toBe("2026-08-19T18:00:00.000Z");
+    expect(r.itens[0]!.item.endsAt).toBe("2026-08-19T18:00:00.000Z");
   });
 });
 
-describe("Zandu → Agenda (formato da própria API; o webhook não é documentado)", () => {
-  const AG = {
-    appointmentId: "7a56c83c-2031-411a-aa5e-ea9000000000",
-    personId: "e2af0a11-f9dc-44f5-b453-021400000000",
-    personPhone: "5584987654321",
-    personName: "João da Silva",
-    scheduleId: "d2804165-456e-4ea2-ab0f-554c00000000",
-    start: "2026-11-25T17:45:00.000Z",
-    durationMinutes: 45,
-    notes: "Anotações",
-    items: [{ serviceId: "4033ef40", service: { name: "Depilação a Laser" } }],
-    status: "Confirmado",
-  };
+/**
+ * O 1º aviso REAL do Zandu (RevitaFio Mossoró, 2026-11-22), com os campos que importam.
+ * Códigos trocados; a forma é a medida. O aviso não traz nome, celular, nome do serviço
+ * nem nome da agenda — só os códigos.
+ */
+const AG_REAL = {
+  end: "2026-11-23T13:10:00.000Z",
+  items: [{ pos: 0, price: 0, serviceId: "serv-avaliacao", appointmentId: "ag-1", appointmentItemId: "it-1" }],
+  notes: "",
+  start: "2026-11-23T13:00:00.000Z",
+  source: "erp",
+  status: "agendamento_criado",
+  personId: "pessoa-1",
+  companyId: "empresa-1",
+  scheduleId: "agenda-avaliacao",
+  appointmentId: "ag-1",
+};
+const EVENTO_REAL = {
+  status: 100,
+  source: "agenda",
+  content: "Avaliação ",
+  personId: "pessoa-1",
+  companyId: "empresa-1",
+  lastEvent: "agendamento_criado",
+  externalId: "ag-1",
+  externalDate: "2026-11-23T13:00:00.000Z",
+};
+const AVISO_ZANDU_REAL = { data: [AG_REAL], event: EVENTO_REAL, param: "" };
 
-  it("⭐ agendamento no topo do corpo", () => {
-    const r = traduzirAvisoDoZandu({ event: "appointment.created", ...AG });
-    expect(r.item).toMatchObject({
-      externalId: AG.appointmentId,
-      startsAt: "2026-11-25T17:45:00.000Z",
-      endsAt: "2026-11-25T18:30:00.000Z",
-      status: "confirmed",
-      titulo: "Depilação a Laser",
-      salaCodigo: AG.scheduleId,
+describe("Zandu → Agenda (formato medido no 1º aviso real)", () => {
+  it("⭐ o aviso real vira o agendamento, com os códigos para completar pela API", () => {
+    const r = traduzirAvisoDoZandu(AVISO_ZANDU_REAL);
+    expect(r.evento).toBe("agendamento_criado");
+    expect(r.externalId).toBe("ag-1");
+    expect(r.itens).toHaveLength(1);
+    expect(r.itens[0]).toMatchObject({ pessoaId: "pessoa-1", servicoIds: ["serv-avaliacao"] });
+    expect(r.itens[0]!.item).toMatchObject({
+      externalId: "ag-1",
+      startsAt: "2026-11-23T13:00:00.000Z",
+      endsAt: "2026-11-23T13:10:00.000Z",
+      status: "pending",
+      statusExterno: "Agendamento criado",
+      salaCodigo: "agenda-avaliacao",
+      salaNome: "",
+      // Até o catálogo responder, vale o `event.content`.
+      titulo: "Avaliação",
+      notas: null,
     });
-    expect(r.item?.cliente).toMatchObject({ nome: "João da Silva", celular: "5584987654321" });
-    expect(r.pessoaId).toBe(AG.personId);
+    // Nome e celular vêm de /persons/{id} no processamento.
+    expect(r.itens[0]!.item.cliente).toMatchObject({ codigo: "pessoa-1", nome: "", celular: "" });
   });
 
-  it("⭐ agendamento embrulhado em `data` e data SEM fuso lida como UTC (como a API do Zandu)", () => {
-    const r = traduzirAvisoDoZandu({ event: "appointment.updated", data: { ...AG, start: "2026-11-25T17:45:00.000" } });
-    expect(r.item?.startsAt).toBe("2026-11-25T17:45:00.000Z");
+  it("⭐ `data` com dois agendamentos → dois itens", () => {
+    const outro = { ...AG_REAL, appointmentId: "ag-2", start: "2026-11-23T14:00:00.000Z", end: "2026-11-23T14:30:00.000Z" };
+    const r = traduzirAvisoDoZandu({ ...AVISO_ZANDU_REAL, data: [AG_REAL, outro] });
+    expect(r.itens.map((i) => i.item.externalId)).toEqual(["ag-1", "ag-2"]);
+  });
+
+  it.each([
+    ["agendamento_confirmado", "confirmed"],
+    ["agendamento_cancelado", "cancelled"],
+    ["agendamento_finalizado", "completed"],
+    ["agendamento_falta", "no_show"],
+  ])("status %s → %s", (status, esperado) => {
+    const r = traduzirAvisoDoZandu({ data: [{ ...AG_REAL, status }], event: { ...EVENTO_REAL, lastEvent: status } });
+    expect(r.itens[0]!.item.status).toBe(esperado);
   });
 
   it("evento de remoção vira cancelado 'Removido'", () => {
-    const r = traduzirAvisoDoZandu({ event: "appointment.deleted", data: AG });
-    expect(r.item).toMatchObject({ status: "cancelled", statusExterno: "Removido" });
+    const r = traduzirAvisoDoZandu({ data: [AG_REAL], event: { ...EVENTO_REAL, lastEvent: "agendamento_removido" } });
+    expect(r.itens[0]!.item).toMatchObject({ status: "cancelled", statusExterno: "Removido" });
   });
 
-  it("evento de cancelamento sem status no corpo vira cancelado", () => {
-    const { status: _s, ...semStatus } = AG;
-    const r = traduzirAvisoDoZandu({ event: "appointment.canceled", data: semStatus });
-    expect(r.item?.status).toBe("cancelled");
+  it("aviso sem agendamento reconhecível não aplica (e não quebra)", () => {
+    const r = traduzirAvisoDoZandu({ data: [], event: { lastEvent: "pessoa_criada" } });
+    expect(r.itens).toEqual([]);
+    expect(r.motivo).toMatch(/sem código ou sem data/);
   });
 
-  it("sem celular no aviso, guarda o personId para buscar a pessoa", () => {
-    const { personPhone: _p, ...semFone } = AG;
-    const r = traduzirAvisoDoZandu({ data: semFone });
-    expect(r.item?.cliente.celular).toBe("");
-    expect(r.pessoaId).toBe(AG.personId);
-  });
-
-  it("corpo sem agendamento reconhecível não aplica", () => {
-    expect(traduzirAvisoDoZandu({ hello: "world" }).item).toBeNull();
+  it("nomes do Zandu: status legível e número do catálogo fora", () => {
+    expect(statusLegivel("agendamento_criado")).toBe("Agendamento criado");
+    expect(nomeDoServico("1 - Avaliação")).toBe("Avaliação");
+    expect(nomeDoServico("Reprogramação Capilar ")).toBe("Reprogramação Capilar");
   });
 });
 
