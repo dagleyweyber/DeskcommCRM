@@ -117,12 +117,15 @@ export function criarClienteZandu(opts: { token: string; timeoutMs?: number; fet
     async telefonesComAgendamento(de, ate) {
       const q = new URLSearchParams({ from: de, to: ate });
       const r = relatorioSchema.safeParse(await get(`/reports/customers/schedule?${q.toString()}`));
-      const telefones = new Set<string>();
+      // O telefone volta COMO ESTÁ no Zandu: a busca por telefone casa o texto gravado
+      // (medido 2026-11-23: "+558496522084" acha a pessoa; "558496522084" dá 404).
+      const telefones = new Map<string, string>();
       for (const l of (r.success ? r.data.rows : null) ?? []) {
-        const fone = (l.phone ?? "").replace(/\D/g, "");
-        if (fone.length >= 10) telefones.add(fone);
+        const bruto = (l.phone ?? "").trim();
+        const digitos = bruto.replace(/\D/g, "");
+        if (digitos.length >= 10 && !telefones.has(digitos)) telefones.set(digitos, bruto);
       }
-      return [...telefones];
+      return [...telefones.values()];
     },
   };
 }
