@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { instante, statusPorTexto, telefoneNoObjeto } from "@/lib/agenda-externa/aviso-comum";
 import { telefoneDoBelle } from "@/lib/agenda-externa/belle/traduzir";
 import { traduzirAvisoDoUno } from "@/lib/agenda-externa/uno/traduzir";
-import { nomeDoServico, statusLegivel, traduzirAvisoDoZandu } from "@/lib/agenda-externa/zandu/traduzir";
+import { codigoSemDetalhe, nomeDoServico, statusLegivel, traduzirAvisoDoZandu } from "@/lib/agenda-externa/zandu/traduzir";
 
 /** O exemplo da documentação do Uno (readme.unobject.com.br/reference/webhook), literal. */
 const AVISO_UNO = {
@@ -156,6 +156,20 @@ describe("Zandu → Agenda (formato medido no 1º aviso real)", () => {
     const r = traduzirAvisoDoZandu({ data: [], event: { lastEvent: "pessoa_criada" } });
     expect(r.itens).toEqual([]);
     expect(r.motivo).toMatch(/sem código ou sem data/);
+  });
+
+  it("⭐ aviso de CONFIRMAÇÃO (medido 2026-11-23) vem sem `data`: diz o código a buscar", () => {
+    const confirmacao = { event: { ...EVENTO_REAL, lastEvent: "agendamento_confirmado" }, param: "" };
+    expect(traduzirAvisoDoZandu(confirmacao).itens).toEqual([]);
+    expect(codigoSemDetalhe(confirmacao)).toBe("ag-1");
+    expect(codigoSemDetalhe(AVISO_ZANDU_REAL)).toBeNull();
+  });
+
+  it("compareceu → atendido; horário bloqueado não vira agendamento", () => {
+    const veio = traduzirAvisoDoZandu({ data: [{ ...AG_REAL, status: "agendamento_compareceu" }], event: {} });
+    expect(veio.itens[0]!.item.status).toBe("completed");
+    const bloqueio = traduzirAvisoDoZandu({ data: [{ ...AG_REAL, status: "agendamento_bloqueado" }], event: {} });
+    expect(bloqueio.itens).toEqual([]);
   });
 
   it("nomes do Zandu: status legível e número do catálogo fora", () => {

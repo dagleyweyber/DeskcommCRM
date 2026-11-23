@@ -312,6 +312,8 @@ export type AuditAction =
   | "calendar_integration.connected"
   | "calendar_integration.disconnected"
   | "calendar_integration.sync_requested"
+  // 0224: importação inicial do Zandu (o que já estava marcado antes da conexão).
+  | "calendar_integration.imported"
   // 0206: tipo de serviço do Belle ligado a um serviço da Agenda (decide o modelo da confirmação).
   | "calendar_integration.service_linked"
   // Fase 2 do Belle: a confirmação do cliente pelo WhatsApp foi gravada de volta no Belle.

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { completarPeloZandu, traduzirAviso } from "@/lib/agenda-externa/avisos";
+import { completarCorpoDoZandu, completarPeloZandu, traduzirAviso } from "@/lib/agenda-externa/avisos";
 import type { Integracao } from "@/lib/agenda-externa/sincronizar";
 import type { ClienteZandu } from "@/lib/agenda-externa/zandu/api";
 
@@ -31,6 +31,9 @@ function clienteFalso(): ClienteZandu & { pessoa: ReturnType<typeof vi.fn> } {
     pessoa: vi.fn().mockResolvedValue({ personId: "pessoa-1", name: "Ana Paciente", phone: "5584987650000", phone2: "" }),
     servicos: vi.fn().mockResolvedValue(new Map([["serv-1", "2 - Reprogramação Capilar "]])),
     agendas: vi.fn().mockResolvedValue(new Map([["agenda-1", "Sala 1"]])),
+    agendamento: vi.fn().mockResolvedValue(null),
+    agendamentosDoTelefone: vi.fn().mockResolvedValue([]),
+    telefonesComAgendamento: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -65,5 +68,37 @@ describe("completar o aviso do Zandu pela API", () => {
     const a = aviso();
     await completarPeloZandu({} as never, integ("integ-c"), a, new Date(), cliente);
     expect(a.itens[0]!.item.cliente.celular).toBe("");
+  });
+});
+
+describe("aviso de confirmação do Zandu (sem `data`)", () => {
+  const confirmacao = {
+    event: { lastEvent: "agendamento_confirmado", externalId: "ag-9", externalDate: "2026-11-23T17:00:00.000Z", personId: "pessoa-1", content: "Avaliação " },
+    param: "",
+  };
+
+  it("⭐ busca o agendamento completo pelo código e aplica como o aviso de criação", async () => {
+    const cliente = clienteFalso();
+    cliente.agendamento = vi.fn().mockResolvedValue({
+      appointmentId: "ag-9", start: "2026-11-23T17:00:00.000Z", end: "2026-11-23T17:30:00.000Z",
+      status: "agendamento_confirmado", personId: "pessoa-1", scheduleId: "agenda-1", items: [{ serviceId: "serv-1" }],
+    });
+    const corpo = await completarCorpoDoZandu(confirmacao, cliente);
+    expect(cliente.agendamento).toHaveBeenCalledWith("ag-9");
+    const a = traduzirAviso("zandu", corpo);
+    expect(a.itens[0]!.item).toMatchObject({ externalId: "ag-9", status: "confirmed", endsAt: "2026-11-23T17:30:00.000Z", salaCodigo: "agenda-1" });
+  });
+
+  it("agendamento apagado no Zandu: monta o mínimo com o que o aviso traz", async () => {
+    const corpo = await completarCorpoDoZandu({ ...confirmacao, event: { ...confirmacao.event, lastEvent: "agendamento_removido" } }, clienteFalso());
+    const a = traduzirAviso("zandu", corpo);
+    expect(a.itens[0]!.item).toMatchObject({ externalId: "ag-9", status: "cancelled", statusExterno: "Removido" });
+  });
+
+  it("aviso que já tem `data` não consulta a API", async () => {
+    const cliente = clienteFalso();
+    const payload = { data: [{ appointmentId: "x", start: "2026-11-23T17:00:00.000Z" }], event: {} };
+    expect(await completarCorpoDoZandu(payload, cliente)).toBe(payload);
+    expect(cliente.agendamento).not.toHaveBeenCalled();
   });
 });

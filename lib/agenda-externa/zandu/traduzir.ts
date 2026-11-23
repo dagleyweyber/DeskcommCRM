@@ -42,6 +42,18 @@ export function nomeDoServico(nome: string): string {
   return nome.replace(/^\s*\d+\s*-\s*/, "").trim();
 }
 
+/**
+ * O aviso de CONFIRMAÇÃO (medido 2026-11-23) vem sem `data`: só `event`, com o código
+ * (`externalId`), o início (`externalDate`), a pessoa e o nome do serviço. Faltam fim e
+ * agenda — quem processa busca o agendamento completo pela API. Esta função diz o código
+ * a buscar quando o aviso veio assim.
+ */
+export function codigoSemDetalhe(payload: unknown): string | null {
+  const corpo = objeto(payload);
+  if (agendamentosDo(corpo).length > 0) return null;
+  return texto(objeto(corpo?.event), "externalId") || null;
+}
+
 /** Os agendamentos do corpo: `data` (lista ou objeto), ou o próprio corpo. */
 function agendamentosDo(corpo: Objeto | null): Objeto[] {
   const data = corpo?.data;
@@ -60,6 +72,8 @@ function traduzirUm(ag: Objeto, evento: string, conteudo: string): ItemDoAviso |
   const externalId = texto(ag, "appointmentId", "id");
   const inicio = instante(texto(ag, "start", "startDate", "startAt"), "utc");
   if (!externalId || !inicio) return null;
+  // Horário bloqueado (indisponibilidade) não é paciente agendada.
+  if (/bloque/i.test(nomeDe(ag.status) || evento)) return null;
 
   const pessoa = objeto(ag.person) ?? objeto(ag.customer);
   const servicos = itensDeServico(ag);

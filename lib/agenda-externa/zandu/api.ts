@@ -4,7 +4,8 @@
  * Documentação: https://api.zandu.com.br/docs. Token gerado em Conta > Dispositivos
  * e API, enviado como `Authorization: Bearer`. A API tem limite por token e cota
  * diária em endpoints de agendamento — por isso o CRM NÃO relê a agenda: recebe os
- * avisos (webhook) e só consulta a pessoa quando o aviso vem sem o celular.
+ * avisos (webhook) e completa pela API só o que o aviso não traz. A única leitura em
+ * lote é a importação inicial (`importar.ts`), uma vez por conexão, pedida pela tela.
  */
 import { z } from "zod";
 
@@ -32,7 +33,18 @@ export interface ClienteZandu {
   servicos(): Promise<Map<string, string>>;
   /** Agendas ativas na API: código → nome ("Sala 1"). */
   agendas(): Promise<Map<string, string>>;
+  /** Um agendamento completo (mesma forma do item de `data` no aviso); null se não existe mais. */
+  agendamento(appointmentId: string): Promise<Record<string, unknown> | null>;
+  /** Agendamentos de UMA pessoa pelo telefone (o endpoint exige telefone; cota diária). */
+  agendamentosDoTelefone(phone: string, de: string, ate: string): Promise<Record<string, unknown>[]>;
+  /** Relatório "Pessoas com agendamento": uma linha por agendamento, com telefone — sem código. */
+  telefonesComAgendamento(de: string, ate: string): Promise<string[]>;
 }
+
+const objetoSchema = z.record(z.string(), z.unknown());
+const relatorioSchema = z.object({
+  rows: z.array(z.object({ phone: texto, status: texto }).partial().passthrough()).nullish(),
+});
 
 const itemDoCatalogoSchema = z.object({ id: texto, serviceId: texto, name: texto }).partial();
 const agendasSchema = z.object({
@@ -89,6 +101,28 @@ export function criarClienteZandu(opts: { token: string; timeoutMs?: number; fet
       const mapa = new Map<string, string>();
       for (const a of (r.success ? r.data.schedulers : null) ?? []) if (a.scheduleId && a.label) mapa.set(a.scheduleId, a.label);
       return mapa;
+    },
+    async agendamento(appointmentId) {
+      const r = objetoSchema.safeParse(await get(`/schedulers/appointments/${encodeURIComponent(appointmentId)}`));
+      return r.success && r.data.appointmentId ? r.data : null;
+    },
+    async agendamentosDoTelefone(phone, de, ate) {
+      const q = new URLSearchParams({ phone, from: de, to: ate });
+      const corpo = await get(`/schedulers/appointments?${q.toString()}`);
+      return (Array.isArray(corpo) ? corpo : [])
+        .map((a) => objetoSchema.safeParse(a))
+        .filter((r) => r.success)
+        .map((r) => r.data!);
+    },
+    async telefonesComAgendamento(de, ate) {
+      const q = new URLSearchParams({ from: de, to: ate });
+      const r = relatorioSchema.safeParse(await get(`/reports/customers/schedule?${q.toString()}`));
+      const telefones = new Set<string>();
+      for (const l of (r.success ? r.data.rows : null) ?? []) {
+        const fone = (l.phone ?? "").replace(/\D/g, "");
+        if (fone.length >= 10) telefones.add(fone);
+      }
+      return [...telefones];
     },
   };
 }

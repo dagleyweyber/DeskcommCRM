@@ -149,6 +149,24 @@ export function ConexaoPorAviso({
     },
   });
 
+  const importar = useMutation({
+    mutationFn: async () =>
+      (
+        await apiClient.post<{ data: { agendamentos: number; contagem: { criados: number; atualizados: number }; incompleto: boolean } }>(
+          `${ROTA}/importar`,
+          {},
+        )
+      ).data,
+    onError: showApiError,
+    onSuccess: (r) => {
+      toast.success(
+        `${r.agendamentos} agendamentos lidos no ${nome}: ${r.contagem.criados} novos na Agenda, ${r.contagem.atualizados} já existiam.` +
+          (r.incompleto ? ` O ${nome} limitou as consultas de hoje; importe de novo amanhã para completar.` : ""),
+      );
+      void qc.invalidateQueries({ queryKey: CHAVE });
+    },
+  });
+
   const desconectar = useMutation({
     mutationFn: async () => apiClient.delete(ROTA),
     onError: showApiError,
@@ -203,7 +221,10 @@ export function ConexaoPorAviso({
           <p className="text-sm text-muted-foreground">
             Ao conectar, o CRM gera um endereço para colar no {nome}. Daí em diante, cada agendamento criado, alterado
             ou removido lá aparece na Agenda na hora. Cada paciente vira um contato pelo celular, sem duplicar quem já
-            conversa pelo WhatsApp. Agendamentos feitos antes de conectar não vêm.
+            conversa pelo WhatsApp.
+            {provedor === "zandu"
+              ? " Os agendamentos já marcados antes de conectar entram pelo botão “Importar agendamentos já marcados”."
+              : " Agendamentos feitos antes de conectar não vêm."}
           </p>
         </div>
         {!canWrite ? (
@@ -239,9 +260,14 @@ export function ConexaoPorAviso({
           {canWrite && (
             <div className="flex flex-wrap gap-2">
               {provedor === "zandu" && (
-                <Button variant="outline" onClick={() => setTrocandoToken(true)}>
-                  Trocar token
-                </Button>
+                <>
+                  <Button onClick={() => importar.mutate()} disabled={importar.isPending}>
+                    {importar.isPending ? "Importando… (pode levar 1 minuto)" : "Importar agendamentos já marcados"}
+                  </Button>
+                  <Button variant="outline" onClick={() => setTrocandoToken(true)}>
+                    Trocar token
+                  </Button>
+                </>
               )}
               <Button variant="outline" onClick={() => setConfirmarNovoEndereco(true)}>
                 {provedor === "uno" ? "Gerar novo endereço e token" : "Gerar novo endereço"}

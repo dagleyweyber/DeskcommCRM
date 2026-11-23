@@ -68,7 +68,7 @@ export function statusPorTexto(statusExterno: string): StatusDoCompromisso {
   if (!s || /nao confirm|a confirmar|aguardando confirm/.test(s)) return "pending";
   if (/cancel|desmarc|remov|exclu|apagad/.test(s)) return "cancelled";
   if (/falt|faltou|nao compareceu|no.?show|ausen/.test(s)) return "no_show";
-  if (/atendid|finaliz|conclu|realizad/.test(s)) return "completed";
+  if (/atendid|finaliz|conclu|realizad|compareceu/.test(s)) return "completed";
   if (/confirm|check|chegou|em atendimento|em andamento|presen/.test(s)) return "confirmed";
   return "pending";
 }

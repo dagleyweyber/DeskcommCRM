@@ -25,7 +25,7 @@ import { tipoDoServico, type AvisoTraduzido } from "./aviso-comum";
 import { aplicarItens, fusoDaClinica, type Contagem, type Integracao } from "./sincronizar";
 import { traduzirAvisoDoUno } from "./uno/traduzir";
 import { criarClienteZandu, type ClienteZandu } from "./zandu/api";
-import { nomeDoServico, traduzirAvisoDoZandu } from "./zandu/traduzir";
+import { codigoSemDetalhe, nomeDoServico, traduzirAvisoDoZandu } from "./zandu/traduzir";
 
 export const MAX_TENTATIVAS = 5;
 
@@ -84,6 +84,32 @@ async function catalogoDoZandu(integracaoId: string, cliente: ClienteZandu, agor
  * nome do serviço (catálogo) e o nome da agenda (vira a sala). Uma consulta de pessoa
  * por agendamento; catálogo e agendas do cache.
  */
+export async function clienteDoZandu(admin: SupabaseClient, integ: Integracao): Promise<ClienteZandu> {
+  const token = integ.credential_encrypted ? await decryptWebhookSecret(admin, integ.credential_encrypted) : null;
+  if (!token) throw new Error("Token do Zandu indisponível (não foi possível decifrar).");
+  return criarClienteZandu({ token });
+}
+
+/**
+ * Aviso do Zandu sem `data` (o de confirmação): busca o agendamento completo pelo código
+ * e devolve o corpo no formato do aviso de criação. Se o Zandu não acha mais o agendamento
+ * (apagado), monta o mínimo com o que o `event` traz — basta para cancelar o que já existe.
+ */
+export async function completarCorpoDoZandu(payload: unknown, cliente: ClienteZandu): Promise<unknown> {
+  const codigo = codigoSemDetalhe(payload);
+  if (!codigo) return payload;
+  const corpo = (payload ?? {}) as Record<string, unknown>;
+  const evento = (corpo.event ?? {}) as Record<string, unknown>;
+  const completo = await cliente.agendamento(codigo);
+  const ag = completo ?? {
+    appointmentId: codigo,
+    start: evento.externalDate,
+    personId: evento.personId,
+    status: evento.lastEvent,
+  };
+  return { ...corpo, data: [ag] };
+}
+
 export async function completarPeloZandu(
   admin: SupabaseClient,
   integ: Integracao,
@@ -91,12 +117,7 @@ export async function completarPeloZandu(
   agora: Date,
   clienteZandu?: ClienteZandu,
 ): Promise<void> {
-  let cliente = clienteZandu;
-  if (!cliente) {
-    const token = integ.credential_encrypted ? await decryptWebhookSecret(admin, integ.credential_encrypted) : null;
-    if (!token) throw new Error("Token do Zandu indisponível (não foi possível decifrar).");
-    cliente = criarClienteZandu({ token });
-  }
+  const cliente = clienteZandu ?? (await clienteDoZandu(admin, integ));
   const precisaCatalogo = aviso.itens.some((i) => (i.servicoIds?.length ?? 0) > 0 || (i.item.salaCodigo && !i.item.salaNome));
   const catalogo = precisaCatalogo ? await catalogoDoZandu(integ.id, cliente, agora) : null;
   const pessoas = new Map<string, Awaited<ReturnType<ClienteZandu["pessoa"]>>>();
@@ -139,7 +160,13 @@ export async function processarAviso(
   };
 
   try {
-    const aviso = traduzirAviso(integ.provider, gravado.payload);
+    let payload = gravado.payload;
+    let clienteZandu = opcoes.clienteZandu;
+    if (integ.provider === "zandu" && codigoSemDetalhe(payload)) {
+      clienteZandu ??= await clienteDoZandu(admin, integ);
+      payload = await completarCorpoDoZandu(payload, clienteZandu);
+    }
+    const aviso = traduzirAviso(integ.provider, payload);
     if (aviso.itens.length === 0) {
       await fechar({ processed_at: agora.toISOString(), last_error: aviso.motivo });
       return { ok: true, aplicado: false, motivo: aviso.motivo, contagem };
@@ -163,7 +190,7 @@ export async function processarAviso(
       return { ok: true, aplicado: false, motivo, contagem };
     }
 
-    if (integ.provider === "zandu") await completarPeloZandu(admin, integ, aviso, agora, opcoes.clienteZandu);
+    if (integ.provider === "zandu") await completarPeloZandu(admin, integ, aviso, agora, clienteZandu);
 
     const timezone = await fusoDaClinica(admin, integ.organization_id);
     const itens = aviso.itens.map((i) => i.item);
