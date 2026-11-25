@@ -45,14 +45,15 @@ function ativas(): string[] {
 beforeAll(() => {
   seedGov();
 
-  // `auth.users` numa chamada própria: `platform_admins.granted_by` tem FK
-  // pra lá, e uma corrida foi observada ao vivo misturando os dois no MESMO
-  // script — separar garante que o INSERT de baixo só roda depois do de
-  // cima ter comprometido.
+  // `platform_admins.granted_by` tem FK para `auth.users`. O e-mail é ÚNICO
+  // deste arquivo de propósito: `impersonate-bypass-completo.test.ts` cria
+  // 'impersonate-admin@invariant.test' com OUTRO id, e quando ele rodava antes
+  // o `on conflict do nothing` engolia este insert (conflito no e-mail) — o
+  // usuário não existia e o FK de baixo quebrava. Parecia corrida; era colisão.
   sql(`
     insert into auth.users (id, email) values
-      ('${IMPERSONATE_ADMIN}', 'impersonate-admin@invariant.test'),
-      ('${OUTSIDER}', 'outsider@invariant.test')
+      ('${IMPERSONATE_ADMIN}', 'ia-ativa-impersonate-admin@invariant.test'),
+      ('${OUTSIDER}', 'ia-ativa-outsider@invariant.test')
       on conflict do nothing;
   `);
 
