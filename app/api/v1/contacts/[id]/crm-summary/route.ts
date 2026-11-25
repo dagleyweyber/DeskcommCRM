@@ -70,22 +70,43 @@ export async function GET(
     return fail("unauthenticated", "Auth required.", 401, { requestId });
   }
 
+  // A organização vem do próprio contato (lido sob RLS: se o usuário não o
+  // enxerga, não há resumo). Filtrar por ela não é enfeite: os índices destas
+  // tabelas começam por `organization_id`, e sem o filtro explícito o Postgres
+  // não os usa — `crm_lead_activities` (285 MB) chegou a 3 s por abertura de
+  // conversa e entrou na conta do Disk IO que derrubou o CRM em 2026-11-25.
+  const contato = await supabase
+    .from("contacts")
+    .select("organization_id")
+    .eq("id", contactId)
+    .maybeSingle();
+  if (contato.error) {
+    return fail("internal_error", contato.error.message, 500, { requestId });
+  }
+  if (!contato.data) {
+    return fail("not_found", "Contact not found.", 404, { requestId });
+  }
+  const orgId = contato.data.organization_id;
+
   const [leads, orders, activities, demandas] = await Promise.all([
     supabase
       .from("crm_leads")
       .select(LEAD_COLS)
+      .eq("organization_id", orgId)
       .eq("contact_id", contactId)
       .order("updated_at", { ascending: false })
       .limit(3),
     supabase
       .from("orders")
       .select(ORDER_COLS)
+      .eq("organization_id", orgId)
       .eq("contact_id", contactId)
       .order("created_at", { ascending: false })
       .limit(3),
     supabase
       .from("crm_lead_activities")
       .select(ACTIVITY_COLS)
+      .eq("organization_id", orgId)
       .eq("contact_id", contactId)
       .order("performed_at", { ascending: false })
       .limit(5),
@@ -96,6 +117,7 @@ export async function GET(
     supabase
       .from("demandas")
       .select(DEMANDA_COLS)
+      .eq("organization_id", orgId)
       .eq("contact_id", contactId)
       .is("fechada_em", null)
       .order("aberta_em", { ascending: true })

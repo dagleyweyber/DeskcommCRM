@@ -18633,4 +18633,20 @@ create policy calendar_integration_events_select
 revoke all on public.calendar_integration_events from anon;
 revoke insert, update, delete on public.calendar_integration_events from authenticated;
 
+-- ---- índices das consultas de fundo (migration 0225) ----
+-- Reaper do drain, redriveQueued e fn_ia_organizacoes_silenciosas liam event_log e
+-- messages inteiras a cada execução; em 2026-11-25 isso esgotou o Disk IO do banco
+-- e o CRM parou de abrir. Parciais: só a fatia que essas consultas pedem.
+create index if not exists idx_event_log_reaper_processing
+  on public.event_log (event_type, updated_at)
+  where status = 'processing';
+
+create index if not exists idx_messages_ai_queued
+  on public.messages (created_at)
+  where sent_via = 'ai' and status = 'queued';
+
+create index if not exists idx_messages_inbound_created
+  on public.messages (created_at)
+  where direction = 'inbound';
+
 notify pgrst, 'reload schema';
